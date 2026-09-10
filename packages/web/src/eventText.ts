@@ -164,7 +164,7 @@ export function formatEvent(event: SimEvent, world?: World): string {
     case "longSleepBonus":
       return `${idLabel(world, event.agentId, event.species)} got a long-sleep exp bonus (+${event.exp})`;
     case "statusInflicted":
-      return `${idLabel(world, event.agentId, event.species)} was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind} by ${shortId(event.inflictedBy)}`;
+      return `${idLabel(world, event.agentId, event.species)} was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind === "confusion" ? "confused" : event.statusKind} by ${shortId(event.inflictedBy)}`;
     case "statusCleared":
       return `${idLabel(world, event.agentId, event.species)} ${event.reason} (${event.statusKind})`;
     case "supported":

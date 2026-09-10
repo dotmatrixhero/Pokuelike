@@ -1,6 +1,6 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
 import { otherLayers, setTile, tileAt } from "./world.js";
-import { stepToward } from "./movement.js";
+import { canStepTo, stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
 import {
@@ -42,7 +42,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -50,7 +50,7 @@ import { findWalkableNear } from "./worldgen.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyRivalryRetaliation, applyTerritorialGuard } from "./herdConflict.js";
 import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
-import { PARALYSIS_SKIP_CHANCE, isAsleep, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
+import { CONFUSION_STUMBLE_CHANCE, PARALYSIS_SKIP_CHANCE, isAsleep, isConfused, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
 const DECAY_PER_TICK = {
   energy: 0.005,
@@ -1426,6 +1426,33 @@ export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rn
 export const FOLLOW_KEEP_DISTANCE = 2;
 
 /**
+ * A confused agent's action, spent going somewhere it did not choose.
+ *
+ * Picks uniformly among the four orthogonal neighbours and takes the step if
+ * it is legal — `canStepTo` still applies, so a stumble never walks into a
+ * wall, off the layer, or into water the agent cannot enter. If no neighbour
+ * is legal the agent is boxed in and the stumble is a no-op: this returns
+ * false and the ordinary action proceeds, rather than silently eating the
+ * turn (a cornered agent that could not act at all would be a second, hidden
+ * paralysis).
+ *
+ * Deliberately does NOT clear `behavior` or any target. The agent still
+ * wants what it wanted; it just failed to walk the right way this time, and
+ * the next action tries again from wherever it now stands.
+ */
+export function applyConfusedStumble(world: World, agent: Agent, rng: () => number): boolean {
+  const candidates: Vec2[] = [
+    { x: agent.pos.x + 1, y: agent.pos.y },
+    { x: agent.pos.x - 1, y: agent.pos.y },
+    { x: agent.pos.x, y: agent.pos.y + 1 },
+    { x: agent.pos.x, y: agent.pos.y - 1 },
+  ].filter((pos) => canStepTo(world, agent, agent.layer, pos));
+  if (candidates.length === 0) return false;
+  agent.pos = candidates[Math.floor(rng() * candidates.length) % candidates.length];
+  return true;
+}
+
+/**
  * ROADMAP.md M6's follower door, the movement half (trust.ts decides who
  * follows). Steps toward `followingId` when farther than
  * `FOLLOW_KEEP_DISTANCE`; otherwise stands with them. Yields to the needs
@@ -1472,9 +1499,18 @@ export function tickAgentAction(
   if (agent.beingCarriedBy) return;
   if (isAsleep(agent) || isFrozen(agent)) return;
   if (isParalyzed(agent) && rng() < PARALYSIS_SKIP_CHANCE) return;
+  // Confusion: half the time the agent goes somewhere instead of doing what
+  // it meant to. Sits AFTER paralysis (an agent that skipped its action has
+  // no action left to misuse) and BEFORE the action lock, so a stumble
+  // cannot yank an agent out of a committed charge or lock.
+  if (isConfused(agent) && rng() < CONFUSION_STUMBLE_CHANCE && applyConfusedStumble(world, agent, rng)) return;
   if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
+  // Same tier as the rescue carry directly above, and directly after it:
+  // both are "I am already holding a herd-mate and mid-errand", and
+  // `applyCarrying` hands ferries straight through (see its own guard).
+  if (applyFerrying(world, agent, log)) return;
   // `thirstIsUrgent` gates only predation.ts's "give up hunting and wander
   // off" relocate mechanic — flee/fight/hunt-a-visible-target all still take
   // priority as before, and a hungry predator can still start/continue
@@ -1533,6 +1569,9 @@ export function tickAgentAction(
   // carrying/looting/support/dispersal.
   if (rules && applyTerritorialGuard(world, agent, rules, log, rng, ctx)) return;
   if (maybeStartCarrying(world, agent, log)) return;
+  // After the rescue carry gets first refusal: a fainted herd-mate needs
+  // picking up more urgently than a conscious one needs a lift.
+  if (maybeStartFerrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
   // the skill tree — e.g. Tackle respecced into `steadfast_guard`) plus an

@@ -7104,6 +7104,223 @@ was reaching for, and it is still not buildable.
 - The needs-recovery hook for *Sickened*, above.
 - `thorns`/`damageReduction` still have no engine-side cap.
 
+### Round seven SHIPPED — Rain Dance and Grassy Terrain, the world-changing pair
+
+`rain_dance` and `grassy_terrain` are live in `packages/data/src/moves.ts` at
+45 nodes each, template v4, 9 `anyOf`, 3 three-node bridges, 6 fork nodes.
+Both print `45 nodes  ok` under `check-proposed-trees.ts --shipped`.
+
+These two are not "two more status trees." Every other move in the roster
+targets a body. These target the sky and the ground, and this engine has
+unusually deep systems for both — `WeatherCell`s with a centre, a radius, a
+drift and a lifespan; soil with a ground type, a ceiling and a germination
+path. The design rule the whole round runs on is the standing one: **the
+mechanic should be visible on the map, not hidden in a meter.**
+
+#### The fantasies
+
+**Rain Dance — the front arrives with you.** The dancer does not get
+stronger; a real weather cell lands on the map and keeps working after the
+dancer has gone. Aggression is THE FRONT (how much sky it covers, ending in
+weather that is no longer rain at all — a storm halves accuracy, costs four
+tiles of sight and drives unsheltered herds into migration) against THE TAKE
+(the downpour falls on everything and only the dancer drinks it). Boldness is
+THE LONG FRONT (lifespan — the half of a cell that actually converts
+shoreline into water) against SOAKED THROUGH (the dancer's own body).
+Sociability is UNDER ONE SKY (`statusImmunityAura`) against SWIFT SWIM
+(`aquaticHaste`, a Speed aura that only pays out on water — the water this
+move's own rain forms).
+
+**Grassy Terrain — the field, and what the ground can hold.** Aggression is
+BUILT SOIL (rock and sand permanently made into soil) against WHAT THE FIELD
+EATS (`drainNeeds` — standing in the sward costs you). Boldness is RICH FIELD
+(fertility and tempo, i.e. how fast a GRAZED field comes back) against SOFT
+GROUND (mainline Grassy Terrain's own heal-every-turn). Sociability is THE
+PASTURE (the herd fed and un-poisonable in it) against THE COMMONS (ground
+open enough that other herds settle beside yours).
+
+#### The measurement that decided a whole branch: `fertilityBoost` moves nothing on a fresh map
+
+This document already recorded that `raiseFertility` caps at the tile's own
+`fertilityCeiling`, so `fertilityBoost` "buys speed to the ceiling, not a
+level above it." Re-measured directly on three freshly generated worlds, the
+truth is stronger than that:
+
+| seed | land tiles | tiles a fully-specced 0.6 `fertilityBoost` moved |
+|---|---|---|
+| 42 | 9,246 | **0 (0.0%)** |
+| 7 | 10,439 | **0 (0.0%)** |
+| 20260903 | 9,733 | **0 (0.0%)** |
+
+Every ground type, every tile. Loam/clay/peat leave `fertility` undefined,
+which reads as their own 1.0 ceiling; `assignGroundTypes` (worldgen.ts)
+writes sandy at 0.6 and rocky at 0.25 — each AT its ceiling. So until a patch
+has been harvested down, there is nothing for the lever to raise. A lane
+whose payoff was "richer soil" would have been dead content on exactly the
+ground the move is about.
+
+**What shipped instead: `fertilityCeilingBoost`.** A new `MoveSpec` field, a
+new `Tile.fertilityCeilingBonus`, and `flora.ts`'s `raiseFertilityCeiling`,
+clamped at loam's own 1.0 so built ground can become as good as the best
+natural ground in the world and no better. Same three seeds, +0.25 of
+ceiling: rocky 0.25 → 0.50, sandy 0.60 → 0.85, loam/clay/peat unchanged (they
+were already at the cap). This is the lever the round-six drafts asked for
+and TODO.md logged as missing.
+
+#### The other new levers: `spawnsRain` was a boolean
+
+The entire live surface of a weather move was "yes, weather." Forty-five
+nodes and no way for any of them to make it bigger, longer or worse. Three
+fields were added and read at `spawnWeatherCellAt`'s own call site:
+
+| field | merge | what it does |
+|---|---|---|
+| `weatherRadiusBonus` | additive | added to the rolled 8-18 radius |
+| `weatherLifespanBonus` | additive | added to the rolled 200-500 lifespan |
+| `weatherType` | overwrite (one chain) | rain -> storm/coldSnap |
+
+The two size levers are additive on purpose — the roster's own fix for "if
+you got both, would it just do nothing?" Only `weatherType` is an overwrite,
+and only one node in the tree sets it.
+
+Radius and lifespan are different in KIND, not degree, and that is the
+Aggression/Boldness split: water forms under rain on a per-tile, per-tick
+roll (`RAIN_WATER_FORM_CHANCE_PER_TICK`, 1/1800), so **duration is the
+multiplier on new water and radius decides how much shoreline is under the
+cloud at all.**
+
+#### Verified by running it: does the world actually change?
+
+`packages/runner/src/validateWeatherAndGroundTrees.ts`, 3 seeds x 1,500
+ticks, 8 dancers each, three arms on the same generated world: **none**
+(nobody knows the move — the control), **base** (the shipped move, no tree),
+**specced** (a real tree build). Rain build: radius +5, lifespan +380.
+Ground build: `fertilityBoost` 0.7/r4 plus `fertilityCeilingBoost` 0.15/r3.
+
+The cells each arm actually called down (natural weather excluded by
+matching the cell's centre to a living dancer):
+
+| seed | arm | cells called | mean radius | mean lifespan | water tiles |
+|---|---|---|---|---|---|
+| 42 | none | 0 | — | — | 3,142 |
+| 42 | base | 57 | 8.8 | 233 | 3,296 |
+| 42 | **specced** | 62 | **13.4** | **571** | **3,353** |
+| 7 | none | 0 | — | — | 3,031 |
+| 7 | base | 55 | 9.1 | 232 | 3,125 |
+| 7 | **specced** | 71 | **14.7** | **593** | **3,263** |
+| 20260903 | none | 0 | — | — | 3,028 |
+| 20260903 | base | 54 | 8.0 | 207 | 3,153 |
+| 20260903 | **specced** | 56 | **12.8** | **566** | **3,209** |
+
+Rain Dance's own tree is worth **+57 / +138 / +56 water tiles** over the same
+agents holding the base move, and +211 / +232 / +181 over a world with no
+dancer in it. The map is a different shape at the end of the run.
+
+Grassy Terrain, same three arms:
+
+| seed | arm | tiles whose ceiling was raised | mean ceiling, whole map |
+|---|---|---|---|
+| 42 | none | 0 | 0.6459 |
+| 42 | base | 71 | 0.6397 |
+| 42 | **specced** | **986** | **0.6883** |
+| 7 | none | 0 | 0.7025 |
+| 7 | base | 18 | 0.7050 |
+| 7 | **specced** | **633** | **0.7348** |
+| 20260903 | none | 0 | 0.6995 |
+| 20260903 | base | 0 | 0.6924 |
+| 20260903 | **specced** | **520** | **0.7155** |
+
+Eight Oddish permanently rebuild 520-986 tiles of ground and move the mean
+fertility ceiling of the ENTIRE map by +0.02 to +0.04. The base arm is not a
+flat zero because wild agents auto-respec: over 1,500 ticks some of them buy
+the tree's own opener for themselves, which is the mechanism working, not
+noise.
+
+**Two honest caveats on that table, both worth more than the table.**
+
+1. **The dancers are level 50.** Both moves sit at the very end of their
+   learners' real dex learnsets: Dratini 45, Gyarados 51, Oddish 44, Gloom 51,
+   Vileplume 51, Dragonair/Dragonite 53. Measured level distribution in a
+   live run (3 seeds x 4,000 ticks, 63 living agents): **min 6, p50 27, p90
+   37, p99 52, max 52.** So an Oddish or Dratini reaches its own move only in
+   the top few percent of the population, and Gloom/Gyarados/Vileplume sit at
+   or above p99. Ninety nodes of tree content hang behind that. Flagged, not
+   fixed — the fix is a curated unlock level, which is a balance decision.
+2. **The table's numbers are from the FORCED pass**, which drives the real
+   `maybeUseUtilityMove` on a fixed 120-tick cadence. The free pass (agents
+   deciding for themselves) fired 3-23 times per 1,500 ticks instead of
+   ~55-110, for a reason that has nothing to do with these trees:
+   `chooseBehavior` only returns `"idle"` when every need is satisfied, and
+   `mateDrive` climbs to 1 and stays there until an agent actually mates. At
+   `mateDrive` 1 its urgency term is 0.5, over the 0.3 idle threshold — so a
+   healthy, well-fed adult is permanently ineligible to use ANY utility move
+   out of combat. The free pass still shows the same direction (specced cells
+   mean radius 15.9-18.2 against base 10.1-12.4), on fewer samples.
+
+#### Four defects in existing code, found by measuring these two trees
+
+1. **A species that knows two utility moves only ever uses the first one.**
+   `maybeUseUtilityMove` walks the movepool in order and returns the moment
+   the first eligible move fires. Oddish knows Growth before Grassy Terrain,
+   so with both in hand **Grassy Terrain fired 0 times in 1,500 ticks** and
+   Growth fired every time. The in-combat half already solved this — that is
+   exactly what `combatUtilityValue`'s "best, not first" rewrite was for —
+   and the out-of-combat half still picks by movepool order. The measurement
+   above had to strip the other utility move from every arm to see anything
+   at all.
+2. **`mateDrive` locks an adult out of every utility move.** See caveat 2
+   above. It applies to Growth, Agility, Harden, Roost, Safeguard and every
+   other status move equally, not just to these two.
+3. **A skill-point build almost never reaches a species' third move.**
+   40 rolled builds per move, seed 7: Growth got at least one node in 37/40
+   builds and Tackle in 35/40, while **Grassy Terrain got 3/40 and Rain Dance
+   2/40 — and the shipped control, Hydro Pump on Gyarados, got 2/40.** The
+   focus bonus in `maybeAutoRespec` is rich-get-richer: whichever tree the
+   agent invests in first keeps winning the weighted pick. Not caused by
+   these trees, and it caps how much of any third move's tree is ever seen.
+4. **Purchase ORDER can silently DOWNGRADE an overwrite ladder** — observed
+   live, not theorised. In a real rolled build (Dratini, 29 points), the
+   agent took *One Sky* (`statusImmunityAura` 120 ticks / radius 5) through
+   the bridge route and later bought *Shared Shelter* (60/3), which sits
+   EARLIER on the same chain. Final spec: **60 ticks, radius 3.** The tree's
+   own rule ("every overwrite field on one ancestry chain") assumes purchase
+   order follows ancestry, and a bridge route breaks that assumption. This
+   document's own "purchase ORDER, not depth" section already records the
+   general problem; this is a concrete instance with a number attached. Every
+   shipped ladder has the same shape — Growth's `fertilityBoost` chain can be
+   downgraded the same way. The real fix is a strongest-wins resolver for
+   `selfHeal`/`statusImmunityAura`/`fertilityBoost`/`drainNeeds`/
+   `matingRadiusBoost`, the same shape as `statChangesOnHit`.
+
+#### Balance, with the roster as control
+
+| move | nodes | levers | flavours | tempo (cap) | cheapest capstone |
+|---|---|---|---|---|---|
+| rain_dance | 45 | 20 | 7 * | 2.80x (2.96) | 7 pts |
+| grassy_terrain | 45 | 20 | 7 * | 1.85x (2.90) | 7 pts |
+| *growth* | *45* | *21* | *8* | *2.82x* | *8 pts* |
+| *harden / agility* | *45* | *20/19* | *7/7* | *2.93x/3.00x* | *8 pts* |
+| **roster median** | 45 | 28 | 11 | 2.00x | 9 pts |
+
+Seven flavours is the `utilityMove` ceiling this document already recorded
+for Harden and Agility, not padding: most of the palette is downstream of
+`resolveHit`, which a utility move never reaches.
+
+Passive exposure (`passive-exposure.ts`), and two trims made because of it:
+
+- **Gyarados hit 30% `damageReduction`** — seventh worst in the roster — once
+  Rain Dance's capstone added a second percentage node on top of Hydro Pump's.
+  The capstone was changed to `damageReductionFlat` 2, which scales down late
+  the way this document prefers. Rain Dance's own percentage total is 8%.
+- **Grassy Terrain shipped with almost no `calmingPresence`, on purpose.**
+  `calmingMultiplier` (herdConflict.ts) floors at `MIN_CALMING_MULTIPLIER`,
+  so calm past 0.5 buys nothing, and Growth's tree alone already totals 0.66
+  for the only two species that learn either move. The Commons lane carries
+  `nonTerritorial` + `fireproof` instead — a field green enough that fire
+  does not take it, which is live in `applyFireDamage` and new to this pair.
+- **No `thorns` anywhere in Grassy Terrain.** Oddish and Gloom already read
+  49% from Growth, second only to Venusaur.
+
 ---
 
 # Design pass: what accuracy and evasion should actually be
@@ -7455,3 +7672,325 @@ weather. `rallyMarked` had no entry at all and printed the raw key. Both are
 now `conditionClause`, which returns the whole clause. `forcedMovement`'s
 `"toward the other side"` named neither party and now says who is dragged
 toward whom.
+
+---
+
+## Surf v2 — the wave, the ferry, the free crossing
+
+Direct ask, verbatim:
+
+> "Surf should be.. A large wave. Like a moving rectangle of water that does
+> aoe on impact.. It can be aimed. It also allows the unit to carry allies
+> over water and if it's a non water Pokemon it can freely travel around
+> water easily."
+
+Three separable pieces, all shipped together.
+
+### 1. The shape was broken, and that is why the rework was asked for
+
+Surf was `shape: { kind: "ring", radius: 2 }`, `range: { min: 0, max: 2 }`.
+`resolveShape` builds a ring as a **hollow shell at exactly its radius**,
+resolved around the **attacker**. Measured directly through the real
+function from (5,5):
+
+| | old ring r=2 | new wave 3x1 |
+|---|---|---|
+| tiles hit | 16 | **9** |
+| hits the tile directly ahead (1,0) | **no** | yes |
+| hits (1,-1) / (1,1) | **no** | yes |
+| footprint changes with facing | **no** | yes |
+
+A 90-power spread move washed straight over anything standing next to you
+and hit whatever was two tiles behind it instead.
+
+New shape kind `{ kind: "wave", length, width }` (engine/moves.ts): a
+facing-oriented rectangle starting one tile ahead, `2*width+1` across at
+every depth. Not a `cone` — a cone is narrowest where it arrives, which is
+backwards for a wave front. Not a `line` — a line has no width. Surf's base
+is `wave 3 long x 3 across` = 9 tiles, `range.max` 3. `areaBonus` grows a
+wave's LENGTH, matching "make it scalar with range of area".
+
+Handled at every `shape.kind` site: `resolveShape`, `growShape`,
+`deriveRangeFromShape` (combat.ts), `shapeLabel` (web/moveTreeSvg.ts), and
+the atlas template's `shapeLabel`/`shapeTiles`/`shapeReach`.
+
+### 2 and 3. `MoveSpec.watercraft` — knowing Surf makes you a boat
+
+One base-spec flag, not a tree delta and not a `PassiveKind`. The ask states
+both properties as things Surf *is*, alongside its shape — not as something
+a build earns — and a passive would have to be bought before a Surf user
+could swim, which reads backwards. `applyMoveTree` copies the base spec
+wholesale, so it survives every respec with no apply site of its own, and
+`forgetMove` removes it for free.
+
+- **Free crossing:** `canEnterWater` returns true for anyone whose
+  `agent.moves` carries a `watercraft` move (`ridesWater`), alongside the
+  existing Flying and Water exemptions.
+- **Ferry:** `maybeStartFerrying`/`applyFerrying` (support.ts) reuse
+  `carryingId`/`beingCarriedBy`, marked as a ferry by `Agent.ferryLanding`,
+  so every existing "this agent is luggage" consumer is already correct.
+
+### Two real defects found while building the ferry
+
+**(a) Herds are single-species, so a herd-only ferry could never fire.**
+`isSameHerd` checks `a.species === b.species`. Every herd-mate of a
+Water-typed Surf user is itself a Water type and can already swim — every
+candidate would have failed the "does it need a lift?" test, forever. Fixed
+by widening the scan to the engine's existing cross-species ally relation,
+`Agent.followingId` (ROADMAP.md M6's follower door). The herd path stays for
+a land species that knows Surf carrying its own kind.
+
+**(b) The first destination rule caused an infinite shuttle.** Aiming at
+"the nearest tile the passenger could not reach on its own" is a true
+statement about the far bank and a useless goal. Measured in a real ticked
+world: the carrier landed its passenger on the far shore and on the next
+tick found the NEAR shore was now the unreachable one and rowed it straight
+back — two agents crossing a lake forever. Fixed by steering at the
+passenger's own `homePos` (the same anchor the rescue carry uses) and
+requiring each landing to be **strictly closer to home** than the pickup, so
+a chain of ferries converges instead of oscillating. Re-measured: **1 pickup
+in 400 ticks**, where the broken version pinged every ~9.
+
+A third, smaller one: the search happily "landed" a ferry on the far bank's
+wading tile, leaving the passenger standing in the lake. Landings are now
+required to be dry.
+
+### Measured (`packages/runner/src/validateSurf.ts`, 5 seeds)
+
+| | with Surf | CONTROL (same agent, `watercraft` off) |
+|---|---|---|
+| water tiles a Rock-type may enter | **13,696 / 13,696 (100%)** | 1,991 / 13,696 (14.5%) |
+| ferry pickups in 400 ticks | 1 | **0** |
+| passenger moved | (2,5) -> (12,3), 24 ticks carried | never picked up |
+
+The control is not vacuously blocked: it still wades the shore ring to
+drink, exactly as before this feature existed.
+
+### Open, needs a decision — not taken unilaterally
+
+- **No shipped species is a non-Water Surf learner.** Every one of the five
+  (Wartortle, Blastoise, Psyduck, Golduck, Seaking) is a Water type, which
+  already swims. The "non water Pokemon travels around water easily" half of
+  the ask is therefore **real but currently unreachable in a normal run** —
+  it needs Surf on a land species, or a teach path. Flagged, not fixed:
+  adding a learner is a balance call.
+- **A completed ferry grants no rapport**, where a completed rescue carry
+  grants `RAPPORT_RESCUE_DELTA`. A ferry is a favour, not a rescue, so a
+  smaller delta or none both defensible.
+- `FERRY_SEARCH_RADIUS` (10) / `FERRY_SEARCH_LIMIT` (400) are first guesses
+  bounding how far a carrier will look for a landing.
+
+## Roost and Defense Curl — v4 trees for the last two treeless status moves (Shipped)
+
+Both are `utilityMove`-flagged, both were treeless, both now carry 45 nodes
+in the two-lane v4 shape (3 branches x 12, plus 3 three-node bridges).
+`npx tsx packages/data/scripts/check-proposed-trees.ts --shipped` prints
+`45 nodes  ok` for each.
+
+### Roost — the bird comes down, and being down is the price
+
+Roost is the only healing in this roster that has to happen on the ground.
+Every learner — Pidgey, Spearow, Fearow — has `homeLayer: "canopy"`, so
+landing is a real change of place for exactly the species that know it.
+
+- **Boldness — the landing.** Lane D comes down properly (a big `selfHeal`
+  bought in `lockTicks`); lane B is a touch-and-go (no lock at all, a much
+  shorter cooldown, a Speed stage). Magnitude-for-time against
+  frequency-with-no-commitment.
+- **Aggression — a landed bird is not a helpless bird.** Lane T is the feet
+  (`thorns`); lane G refuses to give up the perch (`immovable`, a Defense
+  ladder, flat mitigation).
+- **Sociability — a roost is a place, not a moment.** Lane C is the colony
+  (`targetsAlly`/`allyEffects`, `healAura`); lane U is *under* the roost —
+  a tree a flock sleeps in every night has the richest ground in the zone,
+  which is a real `fertilityBoost` and visible on the map.
+
+**The mainline cost is not representable, and this is what was done
+instead.** Mainline Roost's price is that the bird stops being Flying while
+it is down. Checked at the call site: `canFlyOverObstacle` (movement.ts)
+reads exactly `layer === "canopy"` and `agent.types.includes("flying")`, and
+NOTHING in `MoveSpec` or `MoveTreeNode.delta` writes either — `agent.layer`
+moves only via `burrow` (a flee-only field, not a delta field) and needs.ts's
+own idle return to `homeLayer`; `agent.types` is species data. A "grounded
+for N ticks" node would have been a label over nothing. What IS real is
+`lockTicks`: `useMove` writes `agent.actionLockTicks` and `tickAgentAction`
+refuses the agent an action while it is above zero — on the utility path too,
+since both `maybeUseUtilityMove` and `maybeUseUtilityMoveInCombat` call
+`useMove`. Measured on a real fight: the full Boldness build reaches
+`lockTicks: 14` and `selfHeal: 0.7`, and the lock lands on the agent.
+
+### Defense Curl — a ball has no handles
+
+Harden already owns "raise your own Defense," so Defense Curl had to be a
+different answer rather than a bigger one. Harden's answer is to stop being
+an animal: `immovable`, `lockTicks`, `nonTerritorial` — furniture. **Defense
+Curl's tree contains no `lockTicks` and no `immovable` anywhere, on
+purpose**, and its Aggression branch spends Speed stages on a DEFENSIVE move,
+which nothing else defensive in the roster does. The curl is a wind-up; the
+payoff is that it is already somewhere else. There is a test asserting both
+halves of that, with Harden as the control.
+
+- **Aggression — the roll.** Lane R is momentum (the Speed ladder, a much
+  shorter cooldown); lane W is the weight on the outside (`thorns`). Its
+  filler leaves turned earth behind it (`fertilityBoost`).
+- **Boldness — the tuck.** Lane N is no purchase (`unshaken`, flat
+  mitigation); lane E is everything in (the Defense ladder, `regenFlat`).
+- **Sociability — a heap of them.** Lane P is the pile (`allyEffects`,
+  `healAura`); lane Q is nothing gets in (`statusImmunityAura`,
+  `calmingPresence`, `nonTerritorial`).
+
+### Measured: every branch fires, and the controls stay quiet
+
+`npx tsx packages/runner/src/validateRoostAndDefenseCurl.ts 3000 3` — six
+branch builds, each put in a real fight against a real opponent and driven
+through the real `maybeUseUtilityMoveInCombat` with a real rng:
+
+| build | fired | what landed |
+|---|---|---|
+| roost / boldness | 1x | hp 22 -> 55, `actionLockTicks` 14 |
+| roost / aggression | 1x | hp +13.75, Defense stage 4 |
+| roost / sociability | 1x | status immunity 110 ticks |
+| defense_curl / aggression | 2x | **Speed stage 4** |
+| defense_curl / boldness | 1x | Defense stage 5 |
+| defense_curl / sociability | 2x | status immunity 150 ticks |
+
+Controls: a full-HP Roost heal build fired **0x** in the same 60 action
+opportunities; a Defense Curl aura build against an opponent with no status
+move fired **0x**; and the untreed base moves in the same fight heal +13.75
+with no lock, no Speed stage and no aura.
+
+### Finding: the utility-move trigger is starved for some species
+
+3 seeds x 3000 ticks, learners spawned into a real `createDemoWorld` and
+then just ticked, nothing arranged:
+
+| | Pidgey (roost) | Geodude (defense_curl) |
+|---|---|---|
+| alive-ticks | 33,597 | 50,468 |
+| behaviour = idle | **30 (0.09%)** | 36 (0.07%) |
+| attacker-side hostile actions | **1** | 0 |
+| move uses (idle / in combat) | 0 / 0 | 2 / 1 |
+
+The out-of-combat trigger needs `chooseBehavior(agent.needs) === "idle"`
+(needs.ts:1719) and then a 15% roll; the in-combat one is only ever called on
+the ATTACKER (predation.ts:1302) and then rolls 20%. A species that neither
+idles nor initiates fights can hold **any** utility move and effectively
+never use it. This is roster-wide, not specific to these two trees — the
+shipped `validateUtilityMoves.ts` on the same world logs 3 Agility uses and 1
+Withdraw use across 4000 ticks for the same reason. Flagged, not fixed:
+changing the idle gate or the roll is a balance decision, not a bug fix.
+
+### Finding: `COMBAT_USABLE_FIELDS` was missing the plural form
+
+`packages/data/test/moveTrees.test.ts` listed the fields
+`maybeUseUtilityMoveInCombat` will spend a fight action on as `selfHeal`,
+`statChangeOnHit`, `statusImmunityAura`. It reads
+`resolveStatChangesOnHit(move)`, which folds the APPENDING form
+`statChangesOnHit` in as well — so the singular-only list would have called a
+branch dead that is not. Corrected, and the same correction retires the
+test's "Harden's Aggression is the one deliberate exception" carve-out:
+*Honed Carapace* sets `statChangesOnHit` (self Defense +2), so that branch
+has been fight-usable since it shipped.
+
+## Safeguard and Withdraw — v4 trees for the last two treeless status moves (Shipped)
+
+45 nodes each, same v4 shape as the rest of the roster (three branches of 12
+= opener, two parallel lanes each ending in a lane notable, a deep
+convergence notable, a filler, a capstone; plus three 3-node bridges). Both
+are `utilityMove`s, so both were written against the narrow surface a utility
+move can actually reach — checked at the call sites, not assumed.
+
+### The fantasies
+
+**Safeguard is a watch, not a shield.** One animal stays awake and draws a
+line around the ones that are asleep, and while it holds, nothing that gets
+carried crosses it. It does nothing for the warden; its whole value is who
+else is standing inside it — which is why Chansey, Clefairy, Lapras and Seel
+are its learners.
+
+- Sociability, *the ring*: WIDTH (the `statusImmunityAura` ladder, 60/4 ->
+  220/8) vs. TENDING (`targetsAlly` heals and Defense buffs for the ones
+  already inside). How many are in it, versus what you do for them.
+- Boldness, *the vigil*: ENDURANCE (`selfHeal`, `regen` — outlast the night)
+  vs. THE POST (`immovable` at the boundary, or walking it far more often).
+  Time versus ground.
+- Aggression, *the warden goes out to meet it*: WEAR IT DOWN (`drainNeeds` —
+  an outsider loitering by a warded herd leaves hungrier than it came) vs.
+  STAND IN FRONT (`thorns`, `unshaken`, flat mitigation). Deny versus absorb.
+
+**Withdraw: a shell is a room you go into, not armour you wear.** The animal
+is still there and the water still carries it; there is simply nothing on the
+outside left to hit.
+
+- Boldness, *nobody is home*: SEALED (the hatch — flat mitigation,
+  `unshaken`, the Defense ladder 1 -> 4) vs. QUIET (not a thicker wall —
+  `damageReduction`, `selfHeal`: the hit lands where the animal is not).
+- Aggression, *the shell keeps moving*: CARRIED (`aquaticHaste`, cooldown —
+  let the water do it) vs. THE KICK (a Speed stage, or coming back out
+  already covered). Drift versus push.
+- Sociability, *there is room in here*: TAKE THEM IN (`targetsAlly` heal +
+  Defense buff) vs. THE NURSERY (`matingRadiusBoost`, `healAura`, shallows —
+  a place, not a rescue).
+
+### How Withdraw is not Harden, stated as a rule the tests hold
+
+Harden already owns "raise your own Defense." Its answer to danger is to
+**stop**: `lockTicks` on four nodes, `immovable`, becoming scenery, shedding
+grit into the ground. Withdraw's answer is to leave **without stopping** — so
+its tree contains **no `lockTicks` at all and no `thorns` at all**, and buys
+Speed stages, `aquaticHaste` and cooldown instead. `moveTrees.test.ts` asserts
+both zeroes with Harden itself as the control (Harden must still spend both),
+so the day the two trees converge, a test says so.
+
+### Verified by running it, not by reading it
+
+`packages/runner/src/validateWardAndShell.ts` — a staged duel in a real
+`createDemoWorld`, driven by the engine's own egg-defence path (nothing calls
+a combat primitive directly). 3 seeds x 600 ticks:
+
+| build | fights | used mid-fight | what landed |
+|---|---|---|---|
+| Safeguard, base (control) | 1526 | 19 | herd-mate ward 59t |
+| Safeguard, Sociability capstone | 1541 | 9 | **herd-mate ward 219t** |
+| Safeguard, Boldness capstone | 1586 | 26 | self Defense +3 |
+| Safeguard, Aggression capstone | 1430 | 20 | self Attack +3, Defense +2 |
+| **CONTROL: ward vs. a foe that can inflict nothing** | 1538 | **0** | nothing, correctly |
+| Withdraw, base (control) | 1306 | 30 | self Defense +1 |
+| Withdraw, Boldness capstone | 1360 | 15 | **self Defense +4** |
+| Withdraw, Aggression capstone | 1785 | 29 | Speed +4, Defense +2 |
+| Withdraw, Sociability capstone | 1301 | 20 | self Defense +3 |
+
+The ward reached **only** herd-mates: a same-species, same-distance bystander
+in another herd read 0 ticks of immunity in every run.
+
+`drainNeeds` is idle-tick only — `maybeUseUtilityMoveInCombat` never drains —
+so it is measured separately, with the fight removed: 5 idle uses took **611%**
+of hunger off the outsiders over the window against **501%** for the same
+tableau running the untreed base move (plain decay). The gap is 5 x 22%, the
+capstone's own drain amount, to the percentage point.
+
+The heal is measured in isolation rather than off the HP bar, because passive
+regen, rests and the harness's own top-up all move that bar on the same tick —
+the untreed base Withdraw scored a 16% "heal" that way. A direct call into the
+real `maybeUseUtilityMoveInCombat` with the rng pinned: base Safeguard +0.0 HP,
+*Does Not Sleep* +45.6 (24% of 190); base Withdraw +0.0, *Nothing to Hit*
++19.8 (30% of 66).
+
+### Two defects in existing code, found on the way
+
+1. **`moveTrees.test.ts` carved out Harden's Aggression branch as "passives
+   only, can never be spent as a fight action" — and that exception was stale
+   and passing for the wrong reason.** The check only looked at the singular
+   `statChangeOnHit`, while Honed Carapace had already been migrated to the
+   appending `statChangesOnHit` form; `resolveStatChangesOnHit` folds both, so
+   that branch has been fight-usable (a +2 self Defense) ever since the
+   migration. Folding the plural form into the check is what surfaced it. The
+   exception is gone; no status branch is exempt now.
+2. **`MoveSpec.matingRadiusBoost.multiplier` is inert.**
+   `reproduction.ts`'s `mateSearchRadius` applies a fixed
+   `MATING_RADIUS_BOOST_MULTIPLIER = 2` whenever the boost is running and
+   never reads the field. Growth's tree ships nodes at 1.6, 2.2 and 3, and the
+   atlas prints "x3 mate-search radius" for a node that delivers x2 — a
+   mislabel of exactly the kind principle 5 was written for. Both new nodes
+   here say 2 so the label is honest. **Not fixed** (it is a balance question,
+   not a typo): either read the field, or drop it from the type.

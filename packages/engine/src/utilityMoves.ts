@@ -1,13 +1,14 @@
 import type { Agent, World } from "./types.js";
 import type { MoveSpec } from "./moves.js";
-import { resolveStatChangesOnHit } from "./moves.js";
+import { resolveAllyEffect, resolveStatChangesOnHit } from "./moves.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { useMove } from "./combat.js";
 import { applyStatStage, getStatStage } from "./status.js";
-import { raiseFertility, isNearSunbeam } from "./flora.js";
+import { raiseFertility, raiseFertilityCeiling, isNearSunbeam } from "./flora.js";
 import { spawnWeatherCellAt } from "./weather.js";
 import { agentsWithin, nearest } from "./predation.js";
+import { applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 
 /**
  * Real structural gap this file closes (see MOVES_DESIGN.md's "why status
@@ -37,7 +38,22 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
   if (candidates.length === 0) return false;
   if (rng() >= UTILITY_MOVE_USE_CHANCE) return false;
 
-  for (const move of candidates) {
+  // Rotate the starting point instead of always trying the movepool in
+  // order. This loop returns on the first move that fires, so a fixed order
+  // meant an agent knowing two utility moves only ever used the earlier one:
+  // measured, an Oddish that knows Growth AND Grassy Terrain used Grassy
+  // Terrain ZERO times in 1,500 ticks. Same defect the in-combat half had,
+  // where it was fixed by scoring.
+  //
+  // A rotation rather than a score, deliberately: out of combat these moves
+  // do incomparable things — enrich soil, spawn weather, widen a mate
+  // search — and inventing a common currency to rank them would be a balance
+  // decision dressed up as a bug fix. Rotating is neutral and gives every
+  // known move its turn.
+  const start = Math.floor(rng() * candidates.length);
+  const ordered = candidates.map((_, i) => candidates[(start + i) % candidates.length]);
+
+  for (const move of ordered) {
     if (move.drainNeeds) {
       const targets = agentsWithin(world, agent, move.drainNeeds.radius).filter((other) => other.herdId === undefined || other.herdId !== agent.herdId);
       const target = nearest(agent, targets);
@@ -71,6 +87,20 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
       }
     }
 
+    // Building the ground itself, as opposed to `fertilityBoost`'s "get
+    // this ground back to its own ceiling faster". On rocky (ceiling 0.25)
+    // and sandy (0.6) tiles worldgen already writes fertility AT the
+    // ceiling, so this is the only one of the two that changes anything
+    // there at all — see `MoveSpec.fertilityCeilingBoost`.
+    if (move.fertilityCeilingBoost) {
+      const { amount, radius } = move.fertilityCeilingBoost;
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          raiseFertilityCeiling(tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy), amount);
+        }
+      }
+    }
+
     for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
       applyStatStage(agent, change.stat, change.stage, change.ticks);
     }
@@ -86,7 +116,10 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
     }
 
     if (move.spawnsRain) {
-      spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, "rain", rng);
+      spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, move.weatherType ?? "rain", rng, {
+        radiusBonus: move.weatherRadiusBonus,
+        lifespanBonus: move.weatherLifespanBonus,
+      });
     }
 
     if (move.matingRadiusBoost) {
@@ -136,32 +169,82 @@ const REFRESH_WHEN_TICKS_LEFT = 5;
  * because bracing and heavy hits both already talk to the stat-stage system,
  * not because anything pairs the two moves together.
  */
-function worthAnActionInCombat(agent: Agent, move: MoveSpec): boolean {
+/**
+ * What spending a fight action on `move` is worth right now, 0 meaning "not
+ * worth it". Replaces a boolean, because the caller used to take
+ * `worthIt[0]` — the FIRST off-cooldown candidate, in movepool order. An
+ * agent holding Roost and Safeguard always roosted, however nearly dead its
+ * herd-mate was and however poisonous the thing in front of it.
+ *
+ * The numbers are priorities, not damage estimates: bigger means "do this
+ * one first". They are deliberately coarse — the point is a stable ordering
+ * (stay alive > stop the thing that ends fights > help the herd > set up >
+ * change the weather), not a tuned economy.
+ */
+function combatUtilityValue(world: World, agent: Agent, opponent: Agent, move: MoveSpec): number {
+  let value = 0;
+
+  // 1. Stay alive. Scales with how hurt it is, so a heal at 10% HP outranks
+  //    every other thing this function can score.
   if (move.selfHeal && agent.hp !== undefined && agent.maxHp !== undefined && agent.maxHp > 0) {
-    if (agent.hp / agent.maxHp <= COMBAT_HEAL_HP_FRACTION) return true;
+    const fraction = agent.hp / agent.maxHp;
+    if (fraction <= COMBAT_HEAL_HP_FRACTION) value = Math.max(value, 100 + (1 - fraction) * 100);
   }
-  for (const change of resolveStatChangesOnHit(move)) {
-    if (change.target !== "self" || change.stage <= 0) continue;
-    // Two reasons to spend an action here, and the second one only matters
-    // now that `applyStatStage` keys entries by their source move:
-    //
-    //  1. The agent is not yet at the setup ceiling. Re-buffing past that is
-    //     the classic "AI wastes its whole fight on setup" failure.
-    //  2. This move's OWN entry is about to expire. Entries refresh rather
-    //     than stack now, so a +3 buff sits above the ceiling forever and
-    //     rule 1 alone would make the move permanently unusable the moment
-    //     it first landed — worse than the bug the ceiling prevents.
-    const mine = (agent.statStages ?? []).find((st) => st.stat === change.stat && st.sourceMoveId === move.id);
-    if (!mine) {
-      if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) return true;
-    } else if ((mine.ticksRemaining ?? Infinity) <= REFRESH_WHEN_TICKS_LEFT) {
-      return true;
+
+  // 2. Status immunity, but only against something that can actually inflict
+  //    one — an aura raised against a thing with no status move is an action
+  //    spent on nothing.
+  if (
+    move.statusImmunityAura !== undefined &&
+    (agent.statusImmuneTicksRemaining ?? 0) <= 0 &&
+    (opponent.moves ?? []).some((m) => (m.statusChance ?? 0) > 0)
+  ) {
+    value = Math.max(value, 90);
+  }
+
+  // 3. Help a herd-mate who actually needs it. Only counts when there IS one
+  //    in range and it is genuinely hurt — otherwise a support move would
+  //    outrank fighting forever in a fight with nobody else in it.
+  const ally = resolveAllyEffect(move) ? nearestAllyEffectTarget(world, agent, move) : undefined;
+  if (ally) {
+    const allyFraction = ally.hp !== undefined && ally.maxHp ? ally.hp / ally.maxHp : 1;
+    if (resolveAllyEffect(move)?.healFraction !== undefined && allyFraction <= COMBAT_HEAL_HP_FRACTION) {
+      value = Math.max(value, 80 + (1 - allyFraction) * 40);
+    } else if ((resolveAllyEffect(move)?.buffs ?? []).length > 0) {
+      value = Math.max(value, 40);
     }
   }
-  // Status immunity is worth an action only against something that can
-  // actually inflict a status — checked by the caller, which has the
-  // opponent in scope.
-  return false;
+
+  // 4. Setup. Same two rules the boolean version had, kept verbatim in
+  //    spirit: not past the ceiling, but DO refresh this move's own entry
+  //    before it lapses (entries refresh rather than stack, so rule one
+  //    alone would make a landed buff permanently unusable).
+  for (const change of resolveStatChangesOnHit(move)) {
+    if (change.target !== "self" || change.stage <= 0) continue;
+    const mine = (agent.statStages ?? []).find((st) => st.stat === change.stat && st.sourceMoveId === move.id);
+    if (!mine) {
+      if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) value = Math.max(value, 50);
+    } else if ((mine.ticksRemaining ?? Infinity) <= REFRESH_WHEN_TICKS_LEFT) {
+      value = Math.max(value, 55);
+    }
+  }
+
+  // 5. Take something off the opponent. Real, but never the thing to do
+  //    while dying, so it sits below survival.
+  if (move.drainNeeds) {
+    const targets = agentsWithin(world, agent, move.drainNeeds.radius).filter(
+      (other) => other.herdId === undefined || other.herdId !== agent.herdId
+    );
+    if (nearest(agent, targets)) value = Math.max(value, 45);
+  }
+
+  // 6. Change the weather. Lowest: it is a real effect on a real fight
+  //    (weather multiplies damage), but it is the least urgent thing here
+  //    and should never be picked over healing.
+  const spawnType = move.weatherType ?? "rain";
+  if (move.spawnsRain && !(world.weatherCells ?? []).some((cell) => cell.type === spawnType)) value = Math.max(value, 20);
+
+  return value;
 }
 
 /**
@@ -190,16 +273,21 @@ export function maybeUseUtilityMoveInCombat(
   const candidates = (agent.moves ?? []).filter((m) => m.utilityMove && !agent.moveCooldowns?.[m.id]);
   if (candidates.length === 0) return false;
 
-  const opponentCanInflictStatus = (opponent.moves ?? []).some((m) => (m.statusChance ?? 0) > 0);
-  const worthIt = candidates.filter(
-    (m) =>
-      worthAnActionInCombat(agent, m) ||
-      (m.statusImmunityAura !== undefined && opponentCanInflictStatus && (agent.statusImmuneTicksRemaining ?? 0) <= 0)
-  );
-  if (worthIt.length === 0) return false;
+  // Best, not first. `worthIt[0]` took whichever candidate happened to sit
+  // earliest in the movepool, so an agent holding Roost and Safeguard always
+  // roosted no matter what the fight actually needed.
+  let move: MoveSpec | undefined;
+  let best = 0;
+  for (const candidate of candidates) {
+    const value = combatUtilityValue(world, agent, opponent, candidate);
+    if (value > best) {
+      best = value;
+      move = candidate;
+    }
+  }
+  if (!move) return false;
   if (rng() >= COMBAT_UTILITY_USE_CHANCE) return false;
 
-  const move = worthIt[0];
   useMove(agent, move, world.tick);
 
   if (move.selfHeal && agent.hp !== undefined && agent.maxHp !== undefined) {
@@ -218,6 +306,37 @@ export function maybeUseUtilityMoveInCombat(
         if (other.herdId === agent.herdId) other.statusImmuneTicksRemaining = ticks;
       }
     }
+  }
+
+  // The three effect families below were applied by the OUT-of-combat path
+  // and silently dropped by this one, which is why a status tree only ever
+  // had three usable levers: heal yourself, buff yourself, ward off status.
+  // Everything a support move exists to do — patch up a herd-mate mid-fight,
+  // take something off the thing attacking you, change the weather the fight
+  // is happening in — was dead the moment a fight started.
+  const allyEffect = resolveAllyEffect(move);
+  if (allyEffect) {
+    const ally = nearestAllyEffectTarget(world, agent, move);
+    if (ally) applyAllyEffect(world, agent, ally, allyEffect, log);
+  }
+
+  if (move.drainNeeds) {
+    const targets = agentsWithin(world, agent, move.drainNeeds.radius).filter(
+      (other) => other.herdId === undefined || other.herdId !== agent.herdId
+    );
+    const target = nearest(agent, targets);
+    if (target) {
+      const { need, amount } = move.drainNeeds;
+      target.needs[need] = Math.max(0, target.needs[need] - amount);
+      agent.needs[need] = Math.min(1, agent.needs[need] + amount);
+    }
+  }
+
+  if (move.spawnsRain) {
+    spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, move.weatherType ?? "rain", rng, {
+      radiusBonus: move.weatherRadiusBonus,
+      lifespanBonus: move.weatherLifespanBonus,
+    });
   }
 
   log?.record({

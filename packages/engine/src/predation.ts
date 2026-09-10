@@ -19,6 +19,7 @@ import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
 import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
+import { foulTile } from "./sludge.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { playerFleeRadius } from "./threat.js";
@@ -1383,7 +1384,26 @@ function resolveHitAgainstTarget(
     return false;
   }
 
-  if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
+  const landedCleanly = !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0;
+
+  // Status is the one on-hit effect a build can push out to the whole area.
+  // Base behaviour is unchanged — primary target only — and `areaStatus` is
+  // what a skill-tree notable sets to change it. Direct: "I do not like the
+  // aoe status thing. That's fine as a base but should be modified with
+  // notable nodes in the skill tree."
+  //
+  // Only status. Forced movement and `positionSwap` stay primary-only below,
+  // because their geometry is defined relative to the ONE deliberately-picked
+  // defender — "swap places with the target" has no meaning against five of
+  // them at once.
+  if (landedCleanly && !isPrimaryTarget && move.areaStatus) {
+    maybeInflictStatus(defender, attacker.id, move, world, log, rng);
+    if (move.statusSpreads && defender.status) {
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
+    }
+  }
+
+  if (isPrimaryTarget && landedCleanly) {
     // A landed, damaging, non-killing hit — the one place status, the
     // defender-side stat change, on-hit forced movement, and a position
     // swap get a chance to apply.
@@ -1421,7 +1441,12 @@ function resolveHitAgainstTarget(
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
-      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
+      // Sludge has its own rules — it ruins water into mud and kills plants,
+      // neither of which `TERRAIN_FILLABLE` allows — so it routes through
+      // `foulTile` instead of the plain fill. See sludge.ts.
+      if (move.terrainFill.terrain === "sludge") {
+        foulTile(world, defender.layer, defender.pos.x, defender.pos.y, log);
+      } else if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
         setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
         // Direct ask: "Pokémon that help, like watering it via water
         // moves." `terrainFill` is currently exclusive to Water Gun's

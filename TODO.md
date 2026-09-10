@@ -8360,6 +8360,51 @@ Two smaller things worth remembering, both measured:
   by injecting one. Folding it into `check-proposed-trees.ts` would be the
   natural next step.
 
+## Round seven shipped: Rain Dance and Grassy Terrain — four defects the build found
+
+Both are live at 45 nodes. Full writeup, tables and live verification in
+MOVES_DESIGN.md's "Round seven SHIPPED" section. Four things it turned up in
+EXISTING code, none of them caused by these trees, all measured:
+
+- **A species that knows two utility moves only ever uses the first.**
+  `maybeUseUtilityMove` (utilityMoves.ts) returns on the first eligible move
+  in movepool order. Oddish knows Growth before Grassy Terrain, so Grassy
+  Terrain fired **0 times in 1,500 ticks** with both in hand. The in-combat
+  half already picks the best candidate rather than the first
+  (`combatUtilityValue`); the out-of-combat half never got the same fix.
+
+- **`mateDrive` locks a healthy adult out of every utility move.**
+  `chooseBehavior` returns `"idle"` only while every need is satisfied, and
+  `mateDrive` climbs to 1 and stays there until an agent mates — urgency 0.5
+  against an idle threshold of 0.3. Measured: 3-23 free uses per 1,500 ticks
+  against 55-110 when the same call is driven on a cadence. Affects Growth,
+  Agility, Harden, Roost, Safeguard, all of them.
+
+- **Both moves unlock at or above the population's p99 level.** Dratini 45,
+  Oddish 44, Gyarados 51, Gloom 51, Vileplume 51, Dragonair/Dragonite 53,
+  against a measured live distribution of p50 27 / p90 37 / p99 52 / max 52
+  (3 seeds x 4,000 ticks). Ninety nodes of tree sit behind that. A curated
+  unlock level would fix it and is a balance call, so it is logged here
+  rather than taken.
+
+- **Purchase order can DOWNGRADE an overwrite ladder, seen live.** A real
+  rolled Dratini build took *One Sky* (`statusImmunityAura` 120/r5) via the
+  bridge route, then later bought *Shared Shelter* (60/r3) from earlier on
+  the same chain, and finished with 60/r3. The "one ancestry chain per
+  overwrite field" rule assumes purchase order follows ancestry; a bridge
+  breaks that. Every shipped ladder has the same exposure. The fix is a
+  strongest-wins resolver for `selfHeal`/`statusImmunityAura`/
+  `fertilityBoost`/`drainNeeds`/`matingRadiusBoost`, matching what
+  `statChangesOnHit`/`allyEffects` already do.
+
+Also worth remembering from this round: **`fertilityBoost` moves nothing at
+all on a freshly generated map** — 0 of ~9,200-10,400 land tiles on each of
+three seeds, because worldgen writes every non-loam tile's fertility AT its
+own ceiling and loam reads `undefined` as 1. The new `fertilityCeilingBoost`
+(MoveSpec + `Tile.fertilityCeilingBonus` + flora.ts's
+`raiseFertilityCeiling`, clamped at loam's 1.0) is the lever the round-six
+TODO entry above asked for, and it closes that entry's second bullet.
+
 ## Side note from the master merge: runner reaches into web's source
 
 `packages/runner/src/rollBuilds.ts` deep-imports `describeMoveTreeNode` and
@@ -8758,3 +8803,68 @@ whoever next has reason to look at `simulation.test.ts`.
       doesn't exist. Confirmed instead via direct function-level tests
       (real emoji string picked per archetype/sex) and a clean `vite
       build`. Said plainly rather than claimed as seen.
+
+## Finding: utility moves are unreachable for some species, not all
+
+Surfaced while building the status trees, confirmed against
+`validateUtilityMoves.ts` on a real run:
+
+| species | utility uses |
+|---|---|
+| ivysaur | growth 68, leech_seed 44 |
+| bulbasaur | growth 13, leech_seed 6 |
+| pidgeot | roost 3 |
+| fearow | agility 1 |
+| squirtle | withdraw 1 |
+| **pidgeotto** | **0** |
+| **chansey** | **0** |
+
+Not a balance spread — a structural one. There are exactly two ways a utility
+move ever fires, and a species can miss both:
+
+1. **Out of combat** (`needs.ts`) requires `chooseBehavior(needs) === "idle"`
+   and then a 15% roll. A grazer idles constantly; a bird measured `idle` on
+   **30 of 33,597 alive-ticks (0.09%)**.
+2. **In combat** (`predation.ts:1303`) is called with the ATTACKER only, then
+   rolls 20%. A species that does not initiate fights never reaches it — a
+   DEFENDER cannot spend an action bracing, healing or warding, which is
+   precisely when a defensive status move is worth using.
+
+So Roost, Withdraw, Defense Curl and Safeguard can be fully specced and
+almost never fire on the species that learn them. That is the
+unreachable-content rule, and it is worth deciding on rather than tuning
+quietly. Options, in order of how much they change:
+
+1. **Let the defender use one too.** The narrowest fix and the one that most
+   matches what these moves are FOR — bracing is a defensive act. One extra
+   call site.
+2. **Loosen the out-of-combat gate** from strict `idle` to "no urgent need",
+   so a bird between errands can preen.
+3. **Raise the rolls** (15% / 20%). Cheapest, least targeted, and does nothing
+   for a species that reaches neither gate.
+
+Not acted on — the shape of the fix changes how these species behave, which
+is a design call.
+
+## Defect: `matingRadiusBoost.multiplier` is inert
+
+Found while building the status trees, confirmed at both call sites (not a
+probabilistic thing — the field is simply never read):
+
+- `utilityMoves.ts` stores only the duration: `agent.matingRadiusBoostTicksRemaining = move.matingRadiusBoost.ticks`.
+- `reproduction.ts`'s `mateSearchRadius` returns `base * MATING_RADIUS_BOOST_MULTIPLIER`, a flat `2`.
+
+So every declared multiplier delivers exactly ×2. Growth ships three nodes at
+**1.6, 2.2 and 3.0** — the 1.6 node quietly over-delivers, the 3.0 node
+under-delivers by a third, and the atlas prints "×3 mate-search radius" for
+something that gives ×2. The two new Safeguard/Withdraw nodes were written as
+`2` so at least their labels are honest.
+
+Not fixed, because either repair is a balance change:
+1. **Read the field.** Labels become true; Growth's capstone gets a real buff
+   (2 → 3) and its opener a real nerf (2 → 1.6).
+2. **Drop `multiplier` from the type** and let the flat constant be the rule.
+   Nothing changes in play; three node descriptions get rewritten.
+
+I'd take 1 — an advertised number that does nothing is the same class of
+defect as unreachable content — but it moves real numbers, so it is yours.

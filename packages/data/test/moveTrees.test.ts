@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMoveTree, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
+import { applyMoveTree, raiseFertility, raiseFertilityCeiling, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
 import type { MoveSpec, MoveTreeNode } from "@pokuelike/engine";
 import { MOVES } from "../src/moves.js";
 
@@ -1631,12 +1631,54 @@ const DEAD_ON_A_UTILITY_MOVE = [
 ] as const;
 
 /**
- * The ONLY three effect fields `maybeUseUtilityMoveInCombat` (utilityMoves.ts)
- * will spend a fight action on. It decides by effect field, not by move id, so
- * a status tree whose branch reaches none of them can never fire in a fight —
+ * The effect fields `maybeUseUtilityMoveInCombat` (utilityMoves.ts) will
+ * spend a fight action on. It decides by effect field, not by move id, so a
+ * status tree whose branch reaches none of them can never fire in a fight —
  * which is the single most important thing to check about one.
  */
-const COMBAT_USABLE_FIELDS = ["selfHeal", "statChangeOnHit", "statusImmunityAura"] as const;
+const COMBAT_USABLE_FIELDS = [
+  "selfHeal",
+  "statChangeOnHit",
+  // The plural belongs here for the same reason the singular does, and
+  // leaving it out was a real gap rather than a policy:
+  // `combatUtilityValue` reads `resolveStatChangesOnHit(move)`, which folds
+  // BOTH forms. The plural is the one that does not silently race a
+  // co-takeable setter, so it is what a careful tree reaches for — and the
+  // singular-only list called those branches dead.
+  "statChangesOnHit",
+  "statusImmunityAura",
+  // Widened from three families to six. `maybeUseUtilityMoveInCombat` used
+  // to apply only the first three while the out-of-combat path applied
+  // several more, which meant everything a support move exists to do — patch
+  // up a herd-mate, take something off the thing attacking you, change the
+  // weather — went dead the instant a fight started. That was the real
+  // constraint on status-move trees, and it was an engine gap, not a design
+  // one.
+  "allyEffect",
+  "drainNeeds",
+  "spawnsRain",
+] as const;
+
+/**
+ * The APPENDING form of a self stat change is the same combat-usable lever as
+ * the singular one — `resolveStatChangesOnHit` (engine/moves.ts) folds both
+ * and `maybeUseUtilityMoveInCombat` reads only that folded result. Keying the
+ * check on the singular name alone reported a branch built entirely out of
+ * `statChangesOnHit` as unable to fire in a fight, which is the opposite of
+ * true; safeguard and withdraw use the plural form throughout precisely
+ * because the singular is an overwrite field.
+ */
+const combatUsableFields = (delta: Record<string, unknown>): string[] =>
+  [
+    ...COMBAT_USABLE_FIELDS.filter((f) => delta[f] !== undefined),
+    ...(Array.isArray(delta.statChangesOnHit) && delta.statChangesOnHit.length ? ["statChangesOnHit"] : []),
+  ];
+
+/** Every self stat change a node declares, in either form. */
+const statChangesOf = (node: MoveTreeNode) => [
+  ...(node.delta.statChangeOnHit ? [node.delta.statChangeOnHit] : []),
+  ...(node.delta.statChangesOnHit ?? []),
+];
 
 const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, kind: string) =>
   Object.values(move.tree)
@@ -1644,8 +1686,8 @@ const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, k
     .filter((g) => g.kind === kind)
     .reduce((sum, g) => sum + g.value, 0);
 
-describe("the three new status trees only pull levers a utilityMove can actually reach", () => {
-  for (const moveId of ["harden", "growth", "agility"]) {
+describe("the status trees only pull levers a utilityMove can actually reach", () => {
+  for (const moveId of ["harden", "growth", "agility", "roost", "defense_curl", "safeguard", "withdraw"]) {
     const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
 
     it(`${moveId} is flagged utilityMove, so these are the right rules for it`, () => {
@@ -1663,12 +1705,12 @@ describe("the three new status trees only pull levers a utilityMove can actually
       expect(offenders).toEqual([]);
     });
 
-    it(`every ${moveId} statChangeOnHit targets self and is positive — the defender side would be dead`, () => {
+    it(`every ${moveId} stat change targets self and is positive — the defender side would be dead`, () => {
       for (const node of Object.values(move.tree)) {
-        const change = node.delta.statChangeOnHit;
-        if (!change) continue;
-        expect(change.target).toBe("self");
-        expect(change.stage).toBeGreaterThan(0);
+        for (const change of statChangesOf(node)) {
+          expect(change.target).toBe("self");
+          expect(change.stage).toBeGreaterThan(0);
+        }
       }
     });
 
@@ -1676,19 +1718,18 @@ describe("the three new status trees only pull levers a utilityMove can actually
       for (const branch of ["aggression", "boldness", "sociability"] as const) {
         const inBranch = Object.values(move.tree).filter((n) => n.leaning === branch);
         expect(inBranch.length).toBeGreaterThan(0);
-        const reaches = inBranch.some((n) =>
-          COMBAT_USABLE_FIELDS.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined)
-        );
-        // Harden's Aggression is the one deliberate exception: its entire
-        // payoff is passives (thorns/unshaken/defenseBoost), which need no
-        // trigger at all and are live even in a fight the agent never chooses
-        // to spend an action in.
-        if (moveId === "harden" && branch === "aggression") {
-          expect(reaches).toBe(false);
-          expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(4);
-          continue;
-        }
+        const reaches = inBranch.some((n) => combatUsableFields(n.delta as Record<string, unknown>).length > 0);
+        // Harden's Aggression used to be carved out here as "the one
+        // deliberate exception — passives only, can never be spent as a fight
+        // action." That exception was STALE, and it was passing for the wrong
+        // reason: the check only looked at the singular `statChangeOnHit`,
+        // while Honed Carapace had already migrated to the appending
+        // `statChangesOnHit` form. `resolveStatChangesOnHit` folds both, so
+        // that branch has been fight-usable (a +2 self Defense) ever since.
+        // Two separate rounds found this independently. No branch in any
+        // status tree is exempt now.
         expect(reaches).toBe(true);
+        expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(2);
       }
     });
   }
@@ -1755,6 +1796,107 @@ describe("Harden tree: a body clenching until it is a different material", () =>
     // own statChangeOnHit already reaches +4, so a bigger defenseBoost pile
     // would be points spent on nothing.
     expect(passiveTotal(harden, "defenseBoost")).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("Safeguard tree: one animal stays awake and draws a line around the rest", () => {
+  const safeguard = MOVES.safeguard as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const auraAt = (id: string) =>
+    applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, id)]).statusImmunityAura;
+
+  it("the ward itself is one ladder on one chain, so no two setters race", () => {
+    // `statusImmunityAura` is an OVERWRITE field: two co-takeable setters
+    // resolve to whichever `applyMoveTree` reaches last. Every setter here is
+    // an ancestor or descendant of every other, so a build holding two is a
+    // deliberate escalation.
+    expect(safeguard.statusImmunityAura).toEqual({ ticks: 60, radius: 4 });
+    expect(auraAt("drawn_ring")).toEqual({ ticks: 90, radius: 5 });
+    expect(auraAt("the_line")).toEqual({ ticks: 120, radius: 6 });
+    expect(auraAt("nothing_crosses")).toEqual({ ticks: 220, radius: 8 });
+    expect(Object.values(safeguard.tree).filter((n) => n.delta.statusImmunityAura).map((n) => n.id).sort())
+      .toEqual(["drawn_ring", "held_line", "nothing_crosses", "the_line"]);
+  });
+
+  it("Aggression's drain is a real, visible hunger transfer and it escalates on one chain", () => {
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "no_grazing_here")]).drainNeeds)
+      .toEqual({ need: "hunger", amount: 0.06, radius: 4 });
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "not_worth_the_walk")]).drainNeeds)
+      .toEqual({ need: "hunger", amount: 0.22, radius: 6 });
+    expect(safeguard.drainNeeds).toBeUndefined(); // the base move steals nothing
+  });
+
+  it("the warden's own payoff is a heal, which is what makes Boldness spendable in a fight", () => {
+    // `maybeUseUtilityMoveInCombat` spends an action on a `selfHeal` under 60%
+    // HP — without one, a whole branch of a status tree can never fire mid-fight.
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "second_wind")]).selfHeal)
+      .toEqual({ fraction: 0.08 });
+    expect(applyMoveTree(safeguard, [...resolveChosenSetFor(safeguard.tree, "the_whole_night")]).selfHeal)
+      .toEqual({ fraction: 0.24 });
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(safeguard, "thorns")).toBeLessThanOrEqual(0.5);
+    expect(passiveTotal(safeguard, "damageReduction")).toBeLessThanOrEqual(0.2);
+    // One healing budget across all three kinds, the way status.ts spends it.
+    const heal =
+      passiveTotal(safeguard, "regen") + passiveTotal(safeguard, "healAura") + passiveTotal(safeguard, "regenFlat") / 43;
+    expect(heal).toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe("Withdraw tree: a shell is a room you go into, not armour you wear", () => {
+  const withdraw = MOVES.withdraw as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const stageAt = (id: string, stat: string) => {
+    const built = applyMoveTree(withdraw, [...resolveChosenSetFor(withdraw.tree, id)]);
+    return resolveStatChangesOnHit(built).find((c) => c.target === "self" && c.stat === stat)?.stage;
+  };
+
+  it("is not Harden: no lockTicks and no thorns anywhere in the tree", () => {
+    // The load-bearing difference. Harden's answer to danger is to stop
+    // acting — `lockTicks` on four of its nodes — and its shell is a surface
+    // that hurts to touch (`thorns` on six). Withdraw pays neither: the shell
+    // is portable, so it costs no tempo, and it has an inside rather than an
+    // edge. If either of these ever becomes non-zero the two trees have
+    // converged and one of them is redundant.
+    const lock = Object.values(withdraw.tree).filter((n) => n.delta.lockTicks !== undefined);
+    expect(lock.map((n) => n.id)).toEqual([]);
+    expect(passiveTotal(withdraw, "thorns")).toBe(0);
+    // The control: Harden really does spend both, so this is a difference
+    // between the trees rather than a lever nothing in the roster uses.
+    const harden = MOVES.harden as MoveSpec & { tree: Record<string, MoveTreeNode> };
+    expect(Object.values(harden.tree).filter((n) => n.delta.lockTicks !== undefined).length).toBeGreaterThan(0);
+    expect(passiveTotal(harden, "thorns")).toBeGreaterThan(0);
+  });
+
+  it("buys Speed while defended — the tempo Harden gives up — without out-running Agility", () => {
+    expect(stageAt("tucked_and_rolling", "speed")).toBe(2);
+    expect(stageAt("the_shell_gets_there_first", "speed")).toBe(4);
+    const agility = MOVES.agility as MoveSpec & { tree: Record<string, MoveTreeNode> };
+    const agilityMax = Math.max(
+      ...Object.values(agility.tree).flatMap((n) =>
+        [...(n.delta.statChangeOnHit ? [n.delta.statChangeOnHit] : []), ...(n.delta.statChangesOnHit ?? [])]
+          .filter((c) => c.stat === "speed")
+          .map((c) => c.stage)
+      )
+    );
+    expect(agilityMax).toBeGreaterThan(4); // the roster's actual speed move still wins
+  });
+
+  it("the Defense ladder climbs 1 -> 2 -> 3 -> 4 and stops at the clamp", () => {
+    expect(withdraw.statChangeOnHit?.stage).toBe(1);
+    expect(stageAt("pulled_in", "defense")).toBe(2);
+    expect(stageAt("nobody_home", "defense")).toBe(3);
+    expect(stageAt("an_empty_shell", "defense")).toBe(4);
+    // Stat stages clamp at +6 (`statStageMultiplier`), and `defenseBoost` is a
+    // permanent stage on top, so the passive pile has to stay small too.
+    expect(passiveTotal(withdraw, "defenseBoost")).toBeLessThanOrEqual(4);
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(withdraw, "damageReduction")).toBeLessThanOrEqual(0.2);
+    const heal =
+      passiveTotal(withdraw, "regen") + passiveTotal(withdraw, "healAura") + passiveTotal(withdraw, "regenFlat") / 43;
+    expect(heal).toBeLessThanOrEqual(0.1);
   });
 });
 
@@ -1967,5 +2109,269 @@ describe("Poison Sting tree: the sting is not the point, the sting is delivery",
     expect(ticksAt("scent_trail")).toBe(80);
     expect(ticksAt("nothing_leaves")).toBe(200);
     expect(ticksAt("circling_nest")).toBe(260);
+  });
+});
+
+describe("Roost tree: the bird comes down, and being down is the price", () => {
+  const roost = MOVES.roost as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the landing is a real action lock, not a label — and it is bought, never free", () => {
+    // `lockTicks` is additive and applied by `useMove`, which the utility
+    // path DOES call, so this is a genuine window of not acting.
+    expect(roost.lockTicks ?? 0).toBe(0); // the base move grounds nobody
+    const settled = applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "settled_in")]);
+    expect(settled.lockTicks).toBe(6); // Wings Folded 3 + Settled In 3
+    expect(settled.selfHeal).toEqual({ fraction: 0.4 });
+    const night = applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "night_on_the_branch")]);
+    expect(night.selfHeal).toEqual({ fraction: 0.7 });
+    expect(night.lockTicks).toBe(14); // + Dead Asleep 3 + Night on the Branch 5
+    // Every node that spends lock ticks pays for them in the same node.
+    for (const node of Object.values(roost.tree)) {
+      if (!node.delta.lockTicks) continue;
+      const upside = Object.keys(node.delta).some((k) => k !== "lockTicks") || node.grantsPassive || node.grantsPassives;
+      expect(upside).toBeTruthy();
+    }
+  });
+
+  it("the two Boldness lanes are opposites: lane D locks and heals, lane B never locks at all", () => {
+    const laneB = resolveChosenSetFor(roost.tree, "up_again");
+    expect([...laneB].some((id) => roost.tree[id].delta.lockTicks)).toBe(false);
+    const spec = applyMoveTree(roost, [...laneB]);
+    expect(spec.lockTicks ?? 0).toBe(0);
+    expect(spec.cooldownTicks).toBe(19); // 30 - 2 - 3 - 4 - 2
+    expect(spec.statChangesOnHit).toEqual([{ target: "self", stat: "speed", stage: 2, ticks: 60 }]);
+  });
+
+  it("every selfHeal setter lies on one ancestry chain, so no two of them race", () => {
+    const healers = Object.values(roost.tree).filter((n) => n.delta.selfHeal).map((n) => n.id).sort();
+    expect(healers).toEqual(["full_crop", "night_on_the_branch", "settled_in"]);
+    const chain = resolveChosenSetFor(roost.tree, "night_on_the_branch");
+    for (const id of healers) expect(chain.has(id)).toBe(true);
+  });
+
+  it("the roost is a place: a real fertilityBoost and a real status aura, laddered on one chain", () => {
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "rich_ground")]).fertilityBoost)
+      .toEqual({ amount: 0.5, radius: 2 });
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "roosting_hours")]).fertilityBoost)
+      .toEqual({ amount: 0.7, radius: 2 });
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "whole_tree_down")]).statusImmunityAura)
+      .toEqual({ ticks: 70, radius: 3 });
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(roost, "thorns")).toBeLessThanOrEqual(0.5);
+    expect(passiveTotal(roost, "damageReduction")).toBeLessThanOrEqual(0.2);
+    expect(passiveTotal(roost, "regen") + passiveTotal(roost, "healAura") + passiveTotal(roost, "regenFlat") / 43)
+      .toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe("Defense Curl tree: a ball has no handles", () => {
+  const curl = MOVES.defense_curl as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const harden = MOVES.harden as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const passivesOf = (n: MoveTreeNode) => [...(n.grantsPassives ?? []), ...(n.grantsPassive ? [n.grantsPassive] : [])];
+
+  it("is not Harden: no lockTicks and no immovable anywhere, where Harden leans on both", () => {
+    const uses = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, pred: (n: MoveTreeNode) => unknown) =>
+      Object.values(move.tree).filter(pred).length;
+    expect(uses(curl, (n) => n.delta.lockTicks)).toBe(0);
+    expect(uses(curl, (n) => passivesOf(n).some((p) => p.kind === "immovable"))).toBe(0);
+    // The control: Harden uses both, which is why the two moves read
+    // differently rather than being the same tree twice.
+    expect(uses(harden, (n) => n.delta.lockTicks)).toBeGreaterThan(0);
+    expect(uses(harden, (n) => passivesOf(n).some((p) => p.kind === "immovable"))).toBeGreaterThan(0);
+  });
+
+  it("a defensive move that buys Speed: the roll ladder is 1 -> 2 -> 3 -> 4", () => {
+    const speedAt = (id: string) => {
+      const spec = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, id)]);
+      const speeds = (spec.statChangesOnHit ?? []).filter((c) => c.stat === "speed");
+      return Math.max(0, ...speeds.map((c) => c.stage));
+    };
+    expect(speedAt("set_the_spin")).toBe(1);
+    expect(speedAt("still_rolling")).toBe(2);
+    expect(speedAt("long_grade")).toBe(3);
+    expect(speedAt("comes_back_around")).toBe(4);
+    // Harden's whole tree never touches Speed — the control for "this is a
+    // different answer, not a bigger one".
+    expect(Object.values(harden.tree).some((n) =>
+      [...(n.delta.statChangesOnHit ?? []), ...(n.delta.statChangeOnHit ? [n.delta.statChangeOnHit] : [])].some((c) => c.stat === "speed")
+    )).toBe(false);
+  });
+
+  it("the Defense ladder climbs 2 -> 3 -> 4 -> 5 and stops one stage short of the +6 clamp", () => {
+    const setters = Object.values(curl.tree)
+      .filter((n) => (n.delta.statChangesOnHit ?? []).some((c) => c.stat === "defense"))
+      .map((n) => n.id).sort();
+    expect(setters).toEqual(["limbs_in", "one_curve", "the_soft_side_in", "tuck"]);
+    const defenseAt = (id: string) => {
+      const spec = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, id)]);
+      return Math.max(0, ...(spec.statChangesOnHit ?? []).filter((c) => c.stat === "defense").map((c) => c.stage));
+    };
+    expect(curl.statChangeOnHit?.stage).toBe(1); // the base move
+    expect(defenseAt("tuck")).toBe(2);
+    expect(defenseAt("limbs_in")).toBe(3);
+    expect(defenseAt("the_soft_side_in")).toBe(4);
+    // One Curve is reachable by three routes and only one of them walks the
+    // Defense lane, so its own +5 has to stand on its own — which is exactly
+    // why every rung uses the APPENDING form: two rungs in one build resolve
+    // to the strongest (`resolveStatChangesOnHit`), never to whichever the
+    // engine happened to apply last.
+    expect(defenseAt("one_curve")).toBe(5);
+    const bothRoutes = new Set([
+      ...resolveChosenSetFor(curl.tree, "heat_kept"),
+      ...resolveChosenSetFor(curl.tree, "one_curve"),
+    ]);
+    expect(bothRoutes.has("the_soft_side_in")).toBe(true);
+    const spec = applyMoveTree(curl, [...bothRoutes, "one_curve"].filter((id, i, a) => a.indexOf(id) === i));
+    expect(Math.max(...(spec.statChangesOnHit ?? []).filter((c) => c.stat === "defense").map((c) => c.stage))).toBe(5);
+  });
+
+  it("both halves of lane R's fork differ in kind, not degree — measured on the respec'd spec", () => {
+    const long = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, "long_grade")]);
+    const short = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, "short_hops")]);
+    expect(Math.max(...(long.statChangesOnHit ?? []).map((c) => c.stage))).toBe(3);
+    expect(Math.max(...(short.statChangesOnHit ?? []).map((c) => c.stage))).toBe(2);
+    expect(short.cooldownTicks).toBeLessThan(long.cooldownTicks);
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(curl, "thorns")).toBeLessThanOrEqual(0.5);
+    // Slack Hide and Packed Tight exclude each other, so the reachable
+    // damageReduction total is what matters; both sides are under the cap.
+    expect(passiveTotal(curl, "damageReduction")).toBeLessThanOrEqual(0.2);
+    expect(passiveTotal(curl, "regen") + passiveTotal(curl, "healAura") + passiveTotal(curl, "regenFlat") / 43)
+      .toBeLessThanOrEqual(0.1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round seven: the two world-changing trees — Rain Dance and Grassy Terrain.
+// ---------------------------------------------------------------------------
+
+describe("the two world-changing status trees pull only levers a utilityMove can reach", () => {
+  for (const moveId of ["rain_dance", "grassy_terrain"]) {
+    const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+    it(`${moveId} is a 45-node utilityMove tree`, () => {
+      expect(move.utilityMove).toBe(true);
+      expect(Object.keys(move.tree)).toHaveLength(45);
+    });
+
+    it(`${moveId} sets no field only the hostile hit pipeline reads`, () => {
+      const offenders: string[] = [];
+      for (const node of Object.values(move.tree)) {
+        for (const field of DEAD_ON_A_UTILITY_MOVE) {
+          if ((node.delta as Record<string, unknown>)[field] !== undefined) offenders.push(`${node.id}.${field}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it(`every ${moveId} statChangeOnHit targets self and is positive`, () => {
+      for (const node of Object.values(move.tree)) {
+        const change = node.delta.statChangeOnHit;
+        if (!change) continue;
+        expect(change.target).toBe("self");
+        expect(change.stage).toBeGreaterThan(0);
+      }
+    });
+
+    it(`every ${moveId} branch can spend a real fight action`, () => {
+      // The families `maybeUseUtilityMoveInCombat` (utilityMoves.ts) scores.
+      // `spawnsRain` is deliberately NOT in this list even though it scores
+      // 20: it only scores while no cell of its own type is up, so a branch
+      // resting on it alone would fire rarely and this test would pass for
+      // the wrong reason.
+      const COMBAT_USABLE = ["selfHeal", "statChangeOnHit", "statusImmunityAura", "allyEffect", "allyEffects", "drainNeeds"];
+      for (const branch of ["aggression", "boldness", "sociability"] as const) {
+        const inBranch = Object.values(move.tree).filter((n) => n.leaning === branch);
+        expect(inBranch.length).toBeGreaterThan(0);
+        const reaches = inBranch.filter((n) => COMBAT_USABLE.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined));
+        expect(reaches.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
+
+describe("Rain Dance tree: the move whose target is the sky", () => {
+  const rain = MOVES.rain_dance as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the base move can only say 'yes, rain' — the tree is what makes the cell bigger, longer and worse", () => {
+    expect(rain.spawnsRain).toBe(true);
+    expect(rain.weatherRadiusBonus).toBeUndefined();
+    expect(rain.weatherLifespanBonus).toBeUndefined();
+    expect(rain.weatherType).toBeUndefined();
+  });
+
+  it("Black Water turns the cell into a real storm, and is the only node that changes its kind", () => {
+    const respec = applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "black_water")]);
+    expect(respec.weatherType).toBe("storm");
+    expect(Object.values(rain.tree).filter((n) => n.delta.weatherType).map((n) => n.id)).toEqual(["black_water"]);
+  });
+
+  it("radius and lifespan are ADDITIVE, so two nodes buying width both count", () => {
+    const radiusNodes = Object.values(rain.tree).filter((n) => n.delta.weatherRadiusBonus !== undefined);
+    expect(radiusNodes.length).toBeGreaterThan(3);
+    // squall_line 2 + low_sky 3 + black_water 4 + nowhere_dry 4
+    expect(applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "nowhere_dry")]).weatherRadiusBonus).toBe(13);
+    // open_water 40 + slow_front 60 + it_does_not_pass 200 + mist_after 80
+    expect(applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "mist_after")]).weatherLifespanBonus).toBe(380);
+  });
+
+  it("the thirst-theft ladder is one chain, and the two deepest rungs exclude each other", () => {
+    const amountAt = (id: string) => applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, id)]).drainNeeds?.amount;
+    expect(rain.drainNeeds).toBeUndefined();
+    expect(amountAt("drinking_it")).toBeCloseTo(0.03);
+    expect(amountAt("rain_shadow")).toBeCloseTo(0.07);
+    expect(rain.tree.undertow!.excludes).toEqual(["standing_flood"]);
+    expect(rain.tree.standing_flood!.excludes).toEqual(["undertow"]);
+  });
+
+  it("the cooldown cut stays inside the 3x tempo cap for a 150-tick move", () => {
+    const cut = Object.values(rain.tree).reduce((sum, n) => sum + Math.max(0, -(n.delta.cooldownTicks ?? 0)), 0);
+    const floor = Math.ceil((rain.cooldownTicks + 1) / 3) - 1;
+    expect(cut).toBeLessThanOrEqual(rain.cooldownTicks - floor);
+  });
+});
+
+describe("Grassy Terrain tree: the ground, and what it can hold", () => {
+  const grass = MOVES.grassy_terrain as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the base move only raises fertility, which on rock is measurably nothing", () => {
+    expect(grass.fertilityBoost).toEqual({ amount: 0.15, radius: 2 });
+    expect(grass.fertilityCeilingBoost).toBeUndefined();
+    // The control that makes that claim mean something: a rocky tile exactly
+    // as worldgen leaves it, its fertility written AT the 0.25 ceiling.
+    const tile = { terrain: "floor" as const, walkable: true, groundType: "rocky" as const, fertility: 0.25 };
+    raiseFertility(tile, grass.fertilityBoost!.amount);
+    expect(tile.fertility).toBeCloseTo(0.25); // nothing moved
+    raiseFertilityCeiling(tile, 0.15);
+    raiseFertility(tile, grass.fertilityBoost!.amount);
+    expect(tile.fertility).toBeCloseTo(0.4); // the ceiling lever is what moved it
+  });
+
+  it("the ceiling ladder is one chain — 0.05 -> 0.08 -> 0.15 -> 0.3 — widening as it climbs", () => {
+    const at = (id: string) => applyMoveTree(grass, [...resolveChosenSetFor(grass.tree, id)]).fertilityCeilingBoost;
+    expect(at("breaking_ground")).toEqual({ amount: 0.05, radius: 1 });
+    expect(at("root_split")).toEqual({ amount: 0.08, radius: 2 });
+    expect(at("made_ground")).toEqual({ amount: 0.15, radius: 3 });
+    expect(at("it_was_a_meadow")).toEqual({ amount: 0.3, radius: 4 });
+  });
+
+  it("Oddish and Gloom already carry Growth's thorns, so this tree grants none", () => {
+    const thorns = Object.values(grass.tree)
+      .flatMap((n) => [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
+      .filter((p) => p.kind === "thorns");
+    expect(thorns).toEqual([]);
+    // The control: Growth, which the same two species learn, does grant it.
+    expect(passiveTotal(MOVES.growth as MoveSpec & { tree: Record<string, MoveTreeNode> }, "thorns")).toBeGreaterThan(0.2);
+  });
+
+  it("the fertility ladder is one chain ending in an 11-tile-wide flood", () => {
+    const at = (id: string) => applyMoveTree(grass, [...resolveChosenSetFor(grass.tree, id)]).fertilityBoost;
+    expect(at("settling_in")).toEqual({ amount: 0.25, radius: 2 });
+    expect(at("whole_field")).toEqual({ amount: 0.7, radius: 4 });
+    expect(at("the_meadow_holds")).toEqual({ amount: 1, radius: 5 });
   });
 });

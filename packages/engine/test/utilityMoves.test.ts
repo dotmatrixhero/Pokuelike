@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { maybeUseUtilityMove } from "../src/utilityMoves.js";
+import { maybeUseUtilityMove, maybeUseUtilityMoveInCombat } from "../src/utilityMoves.js";
 import { getStatStage } from "../src/status.js";
+import { fertilityCeiling } from "../src/flora.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
@@ -159,6 +160,67 @@ describe("maybeUseUtilityMove", () => {
     expect(cell.center).toEqual({ x: 8, y: 8 });
   });
 
+  it("weatherRadiusBonus/weatherLifespanBonus/weatherType shape the cell the move puts down", () => {
+    // Control first: the same move with no shaping, on the same seed, so
+    // the shaped numbers are a difference and not just "a cell exists".
+    const control = createWorld(40, 40, 1);
+    maybeUseUtilityMove(control, makeAgent({ moves: [makeMove({ id: "rain_dance", spawnsRain: true })], pos: { x: 8, y: 8 } }), undefined, alwaysFire);
+    const plain = control.weatherCells![0]!;
+
+    const world = createWorld(40, 40, 1);
+    const move = makeMove({
+      id: "rain_dance",
+      spawnsRain: true,
+      weatherRadiusBonus: 6,
+      weatherLifespanBonus: 300,
+      weatherType: "storm",
+    });
+    maybeUseUtilityMove(world, makeAgent({ moves: [move], pos: { x: 8, y: 8 } }), undefined, alwaysFire);
+    const shaped = world.weatherCells![0]!;
+
+    expect(plain.type).toBe("rain");
+    expect(shaped.type).toBe("storm");
+    expect(shaped.radius).toBeCloseTo(plain.radius + 6);
+    expect(shaped.lifespanTicks).toBe(plain.lifespanTicks + 300);
+  });
+
+  it("fertilityCeilingBoost raises rocky ground's ceiling — the one thing fertilityBoost cannot do there", () => {
+    const world = createWorld(10, 10, 1);
+    // Rocky ground as worldgen actually leaves it: fertility written AT the
+    // 0.25 ceiling, which is why the plain boost has nothing to move.
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]] as const) {
+      const tile = tileAt(world, "surface", 5 + dx, 5 + dy)!;
+      tile.groundType = "rocky";
+      tile.fertility = 0.25;
+    }
+    const plain = makeMove({ id: "grassy_terrain", fertilityBoost: { amount: 0.6, radius: 1 } });
+    maybeUseUtilityMove(world, makeAgent({ moves: [plain] }), undefined, alwaysFire);
+    expect(tileAt(world, "surface", 5, 5)!.fertility).toBeCloseTo(0.25); // the control: nothing moved
+
+    const built = makeMove({ id: "grassy_terrain", fertilityCeilingBoost: { amount: 0.3, radius: 1 } });
+    maybeUseUtilityMove(world, makeAgent({ id: "a2", moves: [built] }), undefined, alwaysFire);
+    const tile = tileAt(world, "surface", 5, 5)!;
+    expect(tile.fertilityCeilingBonus).toBeCloseTo(0.3);
+    expect(fertilityCeiling(tile)).toBeCloseTo(0.55);
+    expect(tile.fertility).toBeCloseTo(0.55);
+    // And a tile outside the radius is untouched — the radius is real.
+    expect(tileAt(world, "surface", 8, 8)!.fertilityCeilingBonus).toBeUndefined();
+  });
+
+  it("built ground can never pass loam's own ceiling, however much is poured on it", () => {
+    const world = createWorld(10, 10, 1);
+    const tile = tileAt(world, "surface", 5, 5)!;
+    tile.groundType = "sandy";
+    tile.fertility = 0.6;
+    const move = makeMove({ id: "grassy_terrain", fertilityCeilingBoost: { amount: 0.9, radius: 0 } });
+    for (let i = 0; i < 5; i++) {
+      const agent = makeAgent({ id: `a${i}`, moves: [makeMove({ ...move })] });
+      maybeUseUtilityMove(world, agent, undefined, alwaysFire);
+    }
+    expect(fertilityCeiling(tile)).toBeCloseTo(1);
+    expect(tile.fertility).toBeCloseTo(1);
+  });
+
   it("matingRadiusBoost sets the agent's own boost counter", () => {
     const world = createWorld(10, 10, 1);
     const move = makeMove({ id: "sweet_scent", matingRadiusBoost: { multiplier: 2, ticks: 60 } });
@@ -247,5 +309,92 @@ describe("maybeUseUtilityMove", () => {
     const usedGrowth = agent.moveCooldowns?.["growth"] !== undefined;
     const usedRoost = agent.moveCooldowns?.["roost"] !== undefined;
     expect(usedGrowth !== usedRoost).toBe(true); // exactly one, not both
+  });
+});
+
+/**
+ * Widening the in-combat picker. Before this, `maybeUseUtilityMoveInCombat`
+ * applied exactly three effect families — `selfHeal`, self `statChangeOnHit`
+ * and `statusImmunityAura` — while the out-of-combat path applied several
+ * more. That is why a status-move skill tree had only three usable levers:
+ * everything a support move exists to do went dead the moment a fight
+ * started.
+ *
+ * Each test below pairs the new lever with the control that shows it was
+ * genuinely off before: the same move used through the SAME function with
+ * the thing it needs absent.
+ */
+describe("maybeUseUtilityMoveInCombat: the widened lever set", () => {
+  const opponent = () => makeAgent({ id: "opp", pos: { x: 6, y: 5 }, hp: 100, maxHp: 100 });
+
+  it("heals a hurt herd-mate mid-fight, and does not fire with no ally in range (control)", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "mend", range: { min: 0, max: 3 }, allyEffect: { healFraction: 0.5 } })] });
+    const ally = makeAgent({ id: "ally", herdId: "h", species: "bulbasaur", pos: { x: 6, y: 6 }, hp: 10, maxHp: 100 });
+    const foe = opponent();
+    world.agents.push(user, ally, foe);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(ally.hp!).toBeGreaterThan(10);
+
+    // CONTROL: identical, but the ally is elsewhere entirely.
+    const w2 = createWorld(15, 15, 1);
+    const user2 = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "mend", range: { min: 0, max: 3 }, allyEffect: { healFraction: 0.5 } })] });
+    const foe2 = opponent();
+    w2.agents.push(user2, foe2);
+    expect(maybeUseUtilityMoveInCombat(w2, user2, foe2, undefined, alwaysFire)).toBe(false);
+  });
+
+  it("drains a need off the opponent mid-fight", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "siphon", drainNeeds: { need: "hunger", amount: 0.3, radius: 3 } })] });
+    const foe = opponent();
+    foe.needs.hunger = 0.9;
+    world.agents.push(user, foe);
+    const before = foe.needs.hunger;
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(foe.needs.hunger).toBeLessThan(before);
+  });
+
+  it("spawns real weather mid-fight", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", moves: [makeMove({ id: "downpour", spawnsRain: true })] });
+    const foe = opponent();
+    world.agents.push(user, foe);
+    expect((world.weatherCells ?? []).length).toBe(0);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect((world.weatherCells ?? []).some((c) => c.type === "rain")).toBe(true);
+  });
+
+  it("picks the most valuable candidate, not whichever sits first in the movepool", () => {
+    const world = createWorld(15, 15, 1);
+    // Movepool order puts the weather move first. Survival must still win.
+    const user = makeAgent({
+      id: "user",
+      hp: 5,
+      maxHp: 100,
+      moves: [makeMove({ id: "downpour", spawnsRain: true }), makeMove({ id: "recover", selfHeal: { fraction: 0.5 } })],
+    });
+    const foe = opponent();
+    world.agents.push(user, foe);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(user.hp!).toBeGreaterThan(5); // healed
+    expect(user.moveCooldowns?.recover).toBeGreaterThan(0); // and it was recover that fired
+    expect(world.weatherCells ?? []).toHaveLength(0); // downpour did not
+  });
+
+  it("does not spend an action on a ward against something with no status move (control)", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", moves: [makeMove({ id: "ward", statusImmunityAura: { ticks: 100, radius: 3 } })] });
+    const harmless = opponent();
+    harmless.moves = [makeMove({ id: "plain", utilityMove: false, statusChance: 0 })];
+    world.agents.push(user, harmless);
+    expect(maybeUseUtilityMoveInCombat(world, user, harmless, undefined, alwaysFire)).toBe(false);
+
+    const venomous = opponent();
+    venomous.moves = [makeMove({ id: "toxic", utilityMove: false, statusChance: 0.5, statusKind: "poison" })];
+    const w2 = createWorld(15, 15, 1);
+    const user2 = makeAgent({ id: "user", moves: [makeMove({ id: "ward", statusImmunityAura: { ticks: 100, radius: 3 } })] });
+    w2.agents.push(user2, venomous);
+    expect(maybeUseUtilityMoveInCombat(w2, user2, venomous, undefined, alwaysFire)).toBe(true);
   });
 });

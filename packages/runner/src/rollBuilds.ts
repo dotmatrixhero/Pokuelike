@@ -42,15 +42,35 @@ const treedMoves = (Object.values(MOVES) as any[]).filter((m) => m.tree && Objec
 const learnersOf = (moveId: string) =>
   (Object.values(SPECIES) as any[]).filter((sp) => (sp.moves ?? []).includes(moveId));
 
+/**
+ * A sampled build has to actually show a tree, or the sample is a blank page.
+ *
+ * `maybeAutoRespec` spends across every move an agent knows and banks when it
+ * is one point short of something, so a randomly rolled agent very often puts
+ * nothing at all into the move being sampled — 4 of 18 across three seeds took
+ * 0 or 1 nodes. Those are correct engine behaviour and useless for review.
+ *
+ * Rerolling until the build clears this bar makes the OUTPUT a biased sample,
+ * which is why the header says so and the footer prints how many rolls were
+ * discarded. That rejection rate is a real measurement of how often the
+ * spend/bank logic ignores a given move — do not read the sample as a
+ * distribution of what the sim typically produces, because it is not one.
+ */
+const MIN_NODES_TAKEN = 3;
+/** Stops a move nothing can meaningfully spend on from spinning forever. */
+const MAX_ATTEMPTS_PER_BUILD = 200;
+let discarded = 0;
+
 const rng = rngFrom(seed);
 const pick = <T,>(xs: T[]) => xs[Math.floor(rng() * xs.length)];
 /** Identity/immutable fields — never differ between a base move and its build, so listing them is noise. */
 const SKIP_FIELDS = new Set(["id", "name", "tree", "type", "category", "pp"]);
 const fmt = (v: any): string => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v));
 
-if (md) console.log(`# ${count} random builds\n\nSeed \`${seed}\` — reproduce with \`npx tsx packages/runner/src/rollBuilds.ts ${count} ${seed} --md\`.\n\nEvery point below was spent by the engine's own \`maybeAutoRespec\` on a real spawned agent with a real disposition — these are builds the sim actually produces, not ones I picked.\n`);
+if (md) console.log(`# ${count} random builds\n\nSeed \`${seed}\` — reproduce with \`npx tsx packages/runner/src/rollBuilds.ts ${count} ${seed} --md\`.\n\nEvery point below was spent by the engine's own \`maybeAutoRespec\` on a real spawned agent with a real disposition — these are builds the sim actually produces, not ones I picked.\n\n> Filtered: only rolls where the agent put at least ${MIN_NODES_TAKEN} nodes into the sampled move are shown. See the discard count at the end.\n`);
 else console.log(`${count} random builds — seed ${seed}\n`);
 
+let attempts = 0;
 for (let i = 0; i < count; i++) {
   const move = onlyMove ? treedMoves.find((m) => m.id === onlyMove) : pick(treedMoves);
   if (!move) { console.error(`no tree for "${onlyMove}"`); process.exit(1); }
@@ -69,6 +89,23 @@ for (let i = 0; i < count; i++) {
   for (let p = 0; p < points; p++) grantSkillPoint(agent, type, world, undefined, ctx, rng);
 
   const chosen: string[] = agent.moveTreeChoices?.[move.id.toUpperCase()] ?? agent.moveTreeChoices?.[move.id] ?? [];
+
+  // Reject before printing anything, so a discarded roll leaves no trace in
+  // the output beyond the tally.
+  if (chosen.length < MIN_NODES_TAKEN) {
+    discarded++;
+    attempts++;
+    if (attempts < MAX_ATTEMPTS_PER_BUILD) {
+      i--;
+      continue;
+    }
+    // Gave up: print it anyway rather than silently returning fewer builds
+    // than asked for, and say why — a move that cannot clear the bar in 200
+    // tries is itself the finding.
+    console.log(md ? `\n---\n\n> **Note:** no roll for this slot reached ${MIN_NODES_TAKEN} nodes in ${MAX_ATTEMPTS_PER_BUILD} attempts. Showing the last one.` : `\n(no roll reached ${MIN_NODES_TAKEN} nodes in ${MAX_ATTEMPTS_PER_BUILD} attempts — showing the last)`);
+  }
+  attempts = 0;
+
   const disp = agent.disposition ?? {};
   const dispStr = ["aggression", "boldness", "sociability"]
     .map((k) => `${k[0].toUpperCase()}${(disp[k] ?? 0).toFixed(2)}`).join(" ");
@@ -194,3 +231,13 @@ for (let i = 0; i < count; i++) {
   }
   console.log();
 }
+
+// The discard rate is the honest caveat on everything above: it says how many
+// rolled agents put fewer than MIN_NODES_TAKEN nodes into the move being
+// sampled and were thrown away. A high number is not a bug in this script —
+// it is `maybeAutoRespec` spreading points across the agent's other moves and
+// banking the remainder.
+const shown = count;
+const total = shown + discarded;
+const line = `${discarded} of ${total} rolls discarded for taking fewer than ${MIN_NODES_TAKEN} nodes (${((100 * discarded) / total).toFixed(0)}%).`;
+console.log(md ? `\n---\n\n_${line}_` : `\n${line}`);

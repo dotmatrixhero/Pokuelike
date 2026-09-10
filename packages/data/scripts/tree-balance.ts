@@ -18,7 +18,7 @@ const FLAVOUR: Record<string, string[]> = {
   "aggressive movement": ["chargeAttack", "forcedMovement", "reposition", "lockTicks"],
   "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType", "rangeBonus"],
   "defence": ["p:damageReduction", "p:damageReductionFlat", "p:defenseBoost", "p:thorns", "p:unshaken", "p:immovable", "p:fireproof"],
-  "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "fertilityBoost"],
+  "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "weatherRadiusBonus", "weatherLifespanBonus", "weatherType", "fertilityCeilingBoost", "fertilityBoost"],
   "wider aoe": ["shape", "hitsArea", "areaBonus"],
   "reposition others": ["positionSwap", "positionSwapPull"],
   "planted/duration": ["statChangeOnHit", "statChangesOnHit", "p:terrainUnhindered", "p:dispersalSpeed"],
