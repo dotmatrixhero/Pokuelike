@@ -225,6 +225,19 @@ export type TerrainKind =
   | "mud"
   | "shelter"
   /**
+   * Fouled ground — see sludge.ts. Left behind by a Sludge hit: walkable,
+   * not opaque, poisons what stands in it, and lingers on a countdown
+   * (`Tile.sludgeTicksRemaining`) before draining away to bare "floor".
+   *
+   * The tile is temporary; what it destroyed is not. Sludge landing on
+   * flora/food/seedling/bush KILLS the plant, and sludge landing on water
+   * turns that water to "mud" — direct: "Sludge should create a poisonous
+   * tile that kills plants and turns water into mud." So a fouled patch
+   * drains away and leaves behind dead ground and a ruined pond, which is
+   * the visible, diegetic consequence rather than a hidden meter.
+   */
+  | "sludge"
+  /**
    * A tile that is actively on fire — see fire.ts. Walkable (you can run
    * through a fire, it just hurts) and not opaque. Burns down over
    * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading
@@ -341,6 +354,9 @@ export interface Tile {
    * burning tile refreshes this rather than stacking.
    */
   burnTicksRemaining?: number;
+
+  /** Ticks of fouling left on a "sludge" tile before it drains back to "floor" — see sludge.ts. */
+  sludgeTicksRemaining?: number;
   /**
    * "bush" tiles only: true if standing here makes an agent harder to
    * detect — a real (not cosmetic) reduction to predation.ts's flee/hunt

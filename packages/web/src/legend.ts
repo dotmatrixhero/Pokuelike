@@ -15,6 +15,7 @@ const TERRAIN_LABEL: Record<TerrainKind, string> = {
   bush: "bush (concealment)",
   sand: "sand",
   mud: "mud",
+  sludge: "fouled ground",
   shelter: "shelter (concealment + storm cover)",
   fire: "fire (spreads, burns down flora, damages anything standing in it)",
   ice: "ice (a frozen small water body, walkable — melts once winter ends)",

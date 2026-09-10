@@ -19,6 +19,7 @@ import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
 import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
+import { foulTile } from "./sludge.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { playerFleeRadius } from "./threat.js";
@@ -1440,7 +1441,12 @@ function resolveHitAgainstTarget(
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
-      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
+      // Sludge has its own rules — it ruins water into mud and kills plants,
+      // neither of which `TERRAIN_FILLABLE` allows — so it routes through
+      // `foulTile` instead of the plain fill. See sludge.ts.
+      if (move.terrainFill.terrain === "sludge") {
+        foulTile(world, defender.layer, defender.pos.x, defender.pos.y, log);
+      } else if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
         setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
         // Direct ask: "Pokémon that help, like watering it via water
         // moves." `terrainFill` is currently exclusive to Water Gun's

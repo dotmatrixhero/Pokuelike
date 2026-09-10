@@ -489,7 +489,7 @@ export type SimEvent =
        * "thaw" from weather.ts's own seasonal ice cycle (small water bodies
        * only — see `ICE_FREEZE_CHANCE_PER_TICK`'s own doc comment).
        */
-      cause: "drought" | "rain" | "dug" | "fire" | "freeze" | "thaw";
+      cause: "drought" | "rain" | "dug" | "fire" | "freeze" | "thaw" | "sludge" | "sludgeKilledPlant";
     }
   | {
       kind: "herdClash";

@@ -8587,6 +8587,12 @@ export const MOVES: Record<string, MoveSpec> = {
     hitsArea: true,
     statusChance: 0.3,
     statusKind: "poison",
+    // "Sludge should create a poisonous tile that kills plants and turns
+    // water into mud." Base behaviour of the move itself, not something the
+    // tree has to buy: every landed hit fouls the ground it lands on. See
+    // sludge.ts — the fouled tile drains away after 40 ticks, but the plant
+    // it killed stays dead and the water it ruined stays mud.
+    terrainFill: { terrain: "sludge" },
     // v4 (two-lane standard).
     //
     // THE FANTASY. It throws a piece of itself and the piece stays where it
@@ -9025,7 +9031,17 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["the_cloud"],
         leaning: "sociability",
-        delta: { rangeBonus: 1, statusChance: 0.1 },
+        // LANE NOTABLE, and the one place the base AoE rule gets bought out.
+        // The engine's default is that an area move damages everyone and
+        // poisons only whoever it was aimed at (`isPrimaryTarget`,
+        // predation.ts) — deliberate, and correct for a thrown gob. It is
+        // wrong for a cloud that HANGS, which is what this lane is about, so
+        // `areaStatus` makes the poison land on everything standing in it.
+        //
+        // Direct: "I do not like the aoe status thing. That's fine as a base
+        // but should be modified with notable nodes in the skill tree." This
+        // is that node.
+        delta: { rangeBonus: 1, statusChance: 0.1, areaStatus: true },
       },
       // --- Lane R: the reek. Nobody wants to be here.
       foul_ground: {
