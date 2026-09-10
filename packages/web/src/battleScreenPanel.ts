@@ -646,16 +646,24 @@ function battleLinesFor(event: SimEvent, world: World): BattleLine[] {
     case "missed":
       return [...moveOpeningLines(event, "used", world), { kind: "miss", text: "But it missed!" }];
     case "herdClash": {
+      // Direct report: "Why don't i see what moves they used here?" — this
+      // opening line used to hardcode "clashes with", ignoring the real
+      // `event.moveId` entirely (eventText.ts's own Event Log formatter
+      // already names the move for a herdClash; this panel's own per-line
+      // battle-textbox rendering just never picked it up). Same
+      // `findMoveUsed` lookup `moveOpeningLines` uses for "fought"/"missed".
       const attacker = battleName(world, event.attackerId, event.attackerSpecies);
       const defender = battleName(world, event.defenderId, event.defenderSpecies);
+      const move = findMoveUsed(event, world);
+      const moveName = move?.name ?? event.moveId;
       if (event.outcome === "missed") {
         return [
-          { kind: "move", text: `${attacker} clashes with ${defender}!`, agentId: event.attackerId },
+          { kind: "move", text: `${attacker} used ${moveName} on ${defender}!`, agentId: event.attackerId },
           { kind: "miss", text: "But it missed!" },
         ];
       }
       return [
-        { kind: "move", text: `${attacker} clashes with ${defender}!`, agentId: event.attackerId },
+        { kind: "move", text: `${attacker} used ${moveName} on ${defender}!`, agentId: event.attackerId },
         ...(event.critical ? [{ kind: "crit" as const, text: "A critical hit!" }] : []),
         {
           kind: "damage",
