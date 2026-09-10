@@ -11,6 +11,24 @@ export type SimEvent =
       to: Layer;
       pos: Vec2;
     }
+  /** ROADMAP.md M7 — the player used stairs to move a cave depth. See climb.ts's `useStairs`. */
+  | {
+      kind: "crossedCaveLevel";
+      tick: number;
+      agentId: string;
+      species: string;
+      fromDepth: number;
+      toDepth: number;
+      direction: "down" | "up";
+    }
+  /** ROADMAP.md M7 — "Done when: you emerge." The player reached the exit tile on the deepest level. See climb.ts's `isAtExit`. */
+  | {
+      kind: "emerged";
+      tick: number;
+      agentId: string;
+      species: string;
+      depth: number;
+    }
   | {
       kind: "consumed";
       tick: number;

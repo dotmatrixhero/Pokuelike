@@ -543,6 +543,55 @@ Build:
 
 **Done when:** you emerge.
 
+**STATUS: the core climb works — 5 chained levels, real stairs, escalating
+predators, a real exit and win screen.** Direct ask, arriving simple after
+a scoping tangent got resolved: *"i think i just want to be able to move to
+the next level of the cave and shit."* Given the choice between chaining
+five independent `World`s (linked by stairs) and widening the three-valued
+`Layer` union to five-plus values, took HANDOFF.md's own recommendation:
+chained worlds. Built:
+- **`World.below`/`above`** (types.ts) link one cave level to the next;
+  `"stairsDown"`/`"stairsUp"`/`"exit"` are new, plain walkable terrain kinds
+  (not auto-triggered by stepping on them, same as "food" not auto-eating).
+- **`climb.ts`'s `useStairs`** moves the player agent between two `World`s'
+  `agents` arrays and returns the new active world; `main.ts` re-points its
+  own `world` reference the same way it already does for the macro grid's
+  `focusZone`. `isAtExit` detects the deepest level's win tile.
+- **`createCaveRun`** (data package): level 1 is `createCaveScenario`
+  completely unchanged; levels 2–5 are freshly generated `underground` maps
+  with real, already-in-the-roster predators escalating by depth — Zubat
+  (8) → Golbat (15) → Onix (22) → Haunter (28) — not invented placeholders.
+  Every stairs/exit tile is placed by BFS from a real anchor point, so
+  reachability is by construction, checked on 5 seeds (`caveRun.test.ts`).
+- Web: a new `>` key / 🪜 button crosses stairs; a depth readout ("Level 3
+  of 5") is always on screen — mechanics visible, not hidden in a meter;
+  a real win screen ("You emerge") fires off `isAtExit` through the
+  ordinary player-turn pipeline. Live-verified in a real browser: descended
+  all 4 stairs via real keypresses, correct HUD message and depth reading
+  at each level, real win screen with correct stats on stepping onto the
+  actual exit tile.
+- **Measured** (`validateClimb.ts`, HANDOFF.md's own call: "a layer that
+  kills the bot every time is a balance report for the user, not a number
+  to tune yourself"): a bot that walks straight for each level's stairs,
+  fighting back when a predator closes to melee and resting when energy
+  runs low, reached the exit on 5/5 seeds with zero deaths. But it barely
+  fought at all — 2 melee encounters total across all 5 seeds and 5 levels,
+  and HP climbed the whole run (19 → 27–30) instead of dropping. **5/5
+  survival is not evidence the escalation curve is tuned; it's evidence the
+  bot mostly never met the predators it was supposed to be tested
+  against.** Root cause not yet dug into — plausibly too few predators (2-3
+  per a 90×60 level) relative to map size, or they spawn too far from the
+  straight-line path between stairs. Left as an open finding for the user
+  rather than guessed-and-fixed; see TODO.md's write-up for the numbers.
+
+**Not built this round** (still open Build items above): Fight-alongside
+and Rescue (real danger now exists on levels 2+, so these are newly
+reachable, just not yet wired up); "the stone" (unclear referent in this
+doc — not built, not scoped); underground-as-generated-ecology (levels 2-5
+use plain `generateWorld`, no ground-type/water-kind/fertility pass); the
+disperser door's "one armful" cache (still M6/M7's own open item,
+untouched).
+
 ---
 
 ## What this does NOT include, on purpose

@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
-import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
@@ -133,9 +133,12 @@ const modePlayBtn = document.getElementById("mode-play") as HTMLButtonElement;
 const playerHudEl = document.getElementById("player-hud") as HTMLElement;
 const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
 const gameOverEl = document.getElementById("game-over") as HTMLElement;
+const runWonEl = document.getElementById("run-won") as HTMLElement;
+const runWonStatsEl = document.getElementById("run-won-stats") as HTMLElement;
 const gameOverCauseEl = document.getElementById("game-over-cause") as HTMLElement;
 const gameOverStatsEl = document.getElementById("game-over-stats") as HTMLElement;
 const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
+const hudDepthEl = document.getElementById("hud-depth") as HTMLElement;
 const packMenuEl = document.getElementById("pack-menu") as HTMLElement;
 const packMenuBodyEl = document.getElementById("pack-menu-body") as HTMLElement;
 const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButtonElement;
@@ -184,6 +187,8 @@ let playerMode = false;
 let playerScene: "surface" | "cave" = "surface";
 let playerSeed = 0;
 let playerDead = false;
+/** ROADMAP.md M7: "Done when: you emerge." Set once the player steps onto the deepest level's exit tile — see `checkWinCondition`. */
+let playerWon = false;
 let lastLoggedEventCount = 0;
 /**
  * MOVES_AND_TOOLS.md's `attack` needs a direction, and there's no on-screen
@@ -416,10 +421,11 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   canvasWrap.classList.remove("force-hide");
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
-  world = scene === "cave" ? createCaveScenario(seed) : createPlayerDemoWorld(seed);
+  world = scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
   playerScene = scene;
   playerSeed = seed;
   playerDead = false;
+  playerWon = false;
   log = new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
@@ -431,6 +437,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
     focusCameraOn(player.pos);
   }
   gameOverEl.hidden = true;
+  runWonEl.hidden = true;
   playerHudEl.hidden = false;
   packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
@@ -455,8 +462,10 @@ function enterWatchMode(seed: number): void {
   cancelTravel();
   playerMode = false;
   playerDead = false;
+  playerWon = false;
   playerHudEl.hidden = true;
   gameOverEl.hidden = true;
+  runWonEl.hidden = true;
   document.body.classList.remove("player-mode");
   enterOverworldMode(seed, "zone");
   syncModeButtons();
@@ -504,6 +513,9 @@ function renderPlayerHud(): void {
   const outcome = player.lastActionOutcome;
   if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
   renderPack(player);
+  // ROADMAP.md M7: mechanics visible on the map, not hidden in a meter — the
+  // player should always know how deep they are, same reasoning as the HP bar.
+  hudDepthEl.textContent = world.depth ? `Level ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
 }
 
 /** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
@@ -834,6 +846,43 @@ function showGameOver(playerId: string): void {
   gameOverEl.hidden = false;
 }
 
+/** ROADMAP.md M7 — "Done when: you emerge." The win screen for reaching the deepest level's exit tile. */
+function showWinScreen(): void {
+  playerWon = true;
+  runWonStatsEl.textContent = `Tick ${world.tick} · seed ${playerSeed}`;
+  runWonEl.hidden = false;
+}
+
+/** Checked after every player turn: only the deepest level carries an `"exit"` tile at all, so this is a no-op everywhere else. */
+function checkWinCondition(player: Agent): void {
+  if (world.depth === CAVE_RUN_DEPTH && isAtExit(world, player)) showWinScreen();
+}
+
+/**
+ * ROADMAP.md M7 — direct ask: "i think i just want to be able to move to
+ * the next level of the cave." Not a `PlayerAction`/turn at all — crossing
+ * levels swaps which `World` the whole app is looking at (same "re-point
+ * `world` after the engine call" dance `focusZone` already does for the
+ * macro grid), which an ordinary turn-advancing action can't express.
+ */
+function tryUseStairs(): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  const fromDepth = world.depth;
+  const next = useStairs(world, player, log);
+  if (!next) {
+    hudMessageEl.textContent = "There are no stairs here.";
+    return;
+  }
+  world = next;
+  const down = fromDepth !== undefined && world.depth !== undefined && world.depth > fromDepth;
+  resetUiForNewWorld();
+  registerHerdsForFirstFrame();
+  renderPlayerHud();
+  focusCameraOn(player.pos);
+  hudMessageEl.textContent = `You climb ${down ? "down" : "up"} to level ${world.depth}.`;
+}
+
 /**
  * One player turn: queue the action and run world ticks until the player's
  * action energy comes round and it is applied — a slow human lets more of
@@ -854,6 +903,7 @@ function playerAct(action: PlayerAction): void {
   focusCameraOn(player.pos);
   renderPlayerHud();
   if (!findPlayer(world)) showGameOver(player.id);
+  else checkWinCondition(player);
 }
 
 const PLAYER_KEYS: Record<string, PlayerAction> = {
@@ -899,7 +949,7 @@ window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
-  if (playerDead) {
+  if (playerDead || playerWon) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
       loadPlayerWorld(playerSeed, playerScene);
@@ -938,6 +988,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "v") {
     e.preventDefault();
     playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
+    return;
+  }
+  if (e.key === ">" || e.key === "<") {
+    e.preventDefault();
+    tryUseStairs();
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1255,7 +1310,7 @@ function travelTo(target: Vec2): void {
 // by its own id alongside the row.
 document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (!playerMode || playerDead) return;
+    if (!playerMode || playerDead || playerWon) return;
     const act = btn.dataset.act;
     if (targeting && act !== "attack") return; // a target tile is the only thing that should land next
     cancelTravel();
@@ -1266,6 +1321,7 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").f
     } else if (act === "pack") openPackMenu();
     else if (act === "attack") attemptAttack();
     else if (act === "lightFire") playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
+    else if (act === "useStairs") tryUseStairs();
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });

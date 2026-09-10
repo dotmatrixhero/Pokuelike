@@ -65,6 +65,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
   switch (event.kind) {
     case "crossedLayer":
       return `${idLabel(world, event.agentId, event.species)} crossed ${event.from} -> ${event.to}`;
+    case "crossedCaveLevel":
+      return `${idLabel(world, event.agentId, event.species)} went ${event.direction} to level ${event.toDepth}`;
+    case "emerged":
+      return `${idLabel(world, event.agentId, event.species)} emerged from the cave`;
     case "consumed":
       return `${idLabel(world, event.agentId, event.species)} ${event.need === "thirst" ? "drank" : "ate"} on ${event.layer}`;
     case "behaviorChanged":

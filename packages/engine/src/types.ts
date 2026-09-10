@@ -248,7 +248,26 @@ export type TerrainKind =
    * reset), so a frozen river tile still remembers it's a river once it
    * thaws.
    */
-  | "ice";
+  | "ice"
+  /**
+   * ROADMAP.md M7: links one cave level to the next-deeper one. Walkable,
+   * not opaque — same "just terrain" treatment `climb.ts`'s `useStairs`
+   * gives it (crossing is a deliberate action on this tile, not automatic
+   * on stepping onto it, same as "food" doesn't auto-eat). Always paired
+   * with a `"stairsUp"` tile on the level below (`World.below`), placed by
+   * `data`'s `createCaveRun` at generation time.
+   */
+  | "stairsDown"
+  /** The other side of a `"stairsDown"` — links back up to `World.above`. */
+  | "stairsUp"
+  /**
+   * The end of the run — ROADMAP.md M7's "Done when: you emerge." Placed
+   * once, on the deepest level. Walkable, not opaque; stepping onto it is
+   * detected by `climb.ts`'s `isAtExit`, same "terrain is just terrain,
+   * the caller decides what stepping onto it means" split as the stairs
+   * kinds above.
+   */
+  | "exit";
 
 /**
  * Which real body of water a "water" (or currently-frozen "ice") tile
@@ -2494,4 +2513,29 @@ export interface World {
    * per-agent — only ever a handful of entries (at most one per title).
    */
   notables?: Partial<Record<NotableTitleId, NotableRecord>>;
+
+  /**
+   * ROADMAP.md M7 Climb — "Multiple cave layers and transitions between
+   * them." HANDOFF.md's own architecture recommendation, taken: each cave
+   * level is a full, independent `World` (its own `agents`, its own
+   * generated terrain) rather than widening the three-valued `Layer` union
+   * to five-plus values, which would touch every `Record<Layer, ...>` in
+   * the engine for no real player-facing difference. `below`/`above` chain
+   * levels together; `climb.ts`'s `useStairs` moves the player agent
+   * between a level's `agents` array and its neighbor's, and the caller
+   * (`main.ts`) re-points its own `world` reference the same way it already
+   * does for the macro grid's `focusZone`. Wild sim agents do not cross
+   * levels in v1 — only the player does.
+   */
+  below?: World;
+  /** See `below`'s doc comment. */
+  above?: World;
+  /** 1 = the surface-adjacent chamber (`createCaveScenario`'s own layer 1); increases with depth. Absent means this world isn't part of a chained cave run at all. */
+  depth?: number;
+  /** Where a player arriving from `above` lands — the `"stairsUp"` tile on this level. Absent on level 1 (nothing above it). */
+  stairsUpAt?: Vec2;
+  /** Where a player arriving from `below` lands — the `"stairsDown"` tile on this level. Absent on the deepest level (it has the exit instead). */
+  stairsDownAt?: Vec2;
+  /** The `"exit"` tile's position — only set on the deepest level. See `climb.ts`'s `isAtExit`. */
+  exitAt?: Vec2;
 }

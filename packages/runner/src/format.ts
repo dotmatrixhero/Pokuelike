@@ -4,6 +4,10 @@ export function formatEvent(event: SimEvent): string {
   switch (event.kind) {
     case "crossedLayer":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed ${event.from} -> ${event.to} at (${event.pos.x},${event.pos.y})`;
+    case "crossedCaveLevel":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) went ${event.direction} from cave level ${event.fromDepth} to ${event.toDepth}`;
+    case "emerged":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) emerged from the cave at depth ${event.depth}`;
     case "consumed":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) ${event.need === "thirst" ? "drank" : "ate"} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "behaviorChanged":

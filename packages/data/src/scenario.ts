@@ -380,6 +380,127 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   return world;
 }
 
+/** ROADMAP.md M7 Climb — how many cave levels a run chains together. */
+export const CAVE_RUN_DEPTH = 5;
+
+interface CaveLevelPopulation {
+  predators: { species: string; count: number; level: number }[];
+  prey: { species: string; count: number; level: number }[];
+}
+
+/**
+ * Real underground roster (`species.ts`), escalating with depth — not
+ * invented placeholders. Zubat (a real predator, low level) -> Golbat (its
+ * own evolution, higher level) -> Onix (the roster's heaviest melee
+ * predator) -> Haunter (an ambush predator) guarding the exit. Prey species
+ * are the same underground natives (Diglett/Sandshrew/Dugtrio) the
+ * chamber's own herd draws from — see `CAVE_STARTER_SPECIES`.
+ */
+const CAVE_RUN_POPULATION: Record<number, CaveLevelPopulation> = {
+  2: {
+    predators: [{ species: "zubat", count: 3, level: 8 }],
+    prey: [{ species: "diglett", count: 3, level: 6 }],
+  },
+  3: {
+    predators: [{ species: "golbat", count: 2, level: 15 }],
+    prey: [
+      { species: "sandshrew", count: 2, level: 10 },
+      { species: "diglett", count: 2, level: 10 },
+    ],
+  },
+  4: {
+    predators: [{ species: "onix", count: 3, level: 22 }],
+    prey: [{ species: "dugtrio", count: 2, level: 16 }],
+  },
+  5: {
+    predators: [{ species: "haunter", count: 2, level: 28 }],
+    prey: [],
+  },
+};
+
+function buildDeeperLevel(seed: number, depth: number): World {
+  const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed ^ (depth * 0x9e3779b1));
+  const pop = CAVE_RUN_POPULATION[depth]!;
+  let i = 0;
+  for (const group of [...pop.predators, ...pop.prey]) {
+    for (let n = 0; n < group.count; n++) {
+      const pos = findWalkableNear(world, "underground", Math.floor(world.rng() * SCENARIO_WIDTH), Math.floor(world.rng() * SCENARIO_HEIGHT));
+      world.agents.push(spawnAgent(group.species, `${group.species}-${depth}-${i++}`, pos, group.level, world.rng));
+    }
+  }
+  return world;
+}
+
+function farthestReachable(dist: Map<string, number>, fallback: Vec2): Vec2 {
+  let best = fallback;
+  let bestDist = -1;
+  for (const [key, d] of dist) {
+    if (d > bestDist) {
+      const [x, y] = key.split(",").map(Number) as [number, number];
+      best = { x, y };
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+/** Places a `"stairsDown"` tile at the farthest walkable point from the level's own center — a real walk, not adjacent to wherever the player lands. */
+function attachStairsDown(world: World, depth: number): void {
+  const anchor = findWalkableNear(world, "underground", world.width / 2, world.height / 2);
+  const pos = farthestReachable(walkDistances(world, "underground", anchor), anchor);
+  setTile(world, "underground", pos.x, pos.y, "stairsDown");
+  world.stairsDownAt = pos;
+}
+
+/** Same placement rule as `attachStairsDown`, for the deepest level's exit instead. */
+function attachExit(world: World): void {
+  const anchor = findWalkableNear(world, "underground", world.width / 2, world.height / 2);
+  const pos = farthestReachable(walkDistances(world, "underground", anchor), anchor);
+  setTile(world, "underground", pos.x, pos.y, "exit");
+  world.exitAt = pos;
+}
+
+/** Links `below` under `above`: sets `depth`, `below`/`above` pointers, and `below`'s own `"stairsUp"` landing tile. */
+function linkLevels(above: World, below: World): void {
+  below.depth = (above.depth ?? 1) + 1;
+  const landing = findWalkableNear(below, "underground", below.width / 2, below.height / 2);
+  setTile(below, "underground", landing.x, landing.y, "stairsUp");
+  below.stairsUpAt = landing;
+  above.below = below;
+  below.above = above;
+}
+
+/**
+ * ROADMAP.md M7 Climb — direct ask, once the design conversation resolved
+ * back to something simple: "i think i just want to be able to move to the
+ * next level of the cave and shit." HANDOFF.md's own architecture
+ * recommendation, taken: chained `World`s (`World.below`/`above`) linked by
+ * stairs, rather than widening `Layer` to five-plus values that would touch
+ * every `Record<Layer, ...>` in the engine.
+ *
+ * Level 1 is `createCaveScenario` completely unchanged (M1/M6's own tested
+ * chamber), with a `"stairsDown"` tile added afterward the same way the
+ * scenario already places its own spawn — a real walk via `walkDistances`,
+ * not adjacent to anything. Levels 2-5 are freshly generated `underground`
+ * maps (`CAVE_RUN_POPULATION`'s escalating real predators/prey). Returns
+ * level 1; the rest of the chain hangs off its `below` pointer.
+ */
+export function createCaveRun(seed: number = SCENARIO_SEED): World {
+  const level1 = createCaveScenario(seed);
+  level1.depth = 1;
+  attachStairsDown(level1, 1);
+
+  let current = level1;
+  for (let depth = 2; depth <= CAVE_RUN_DEPTH; depth++) {
+    const next = buildDeeperLevel(seed, depth);
+    linkLevels(current, next);
+    if (depth < CAVE_RUN_DEPTH) attachStairsDown(next, depth);
+    else attachExit(next);
+    current = next;
+  }
+  return level1;
+}
+
 export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed);
 

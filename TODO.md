@@ -9135,3 +9135,119 @@ and the missing button).
 Full suite after the fix: engine 1497/1497 (12 new in `cooking.test.ts`),
 data 393/393, web build clean (`tsc --noEmit && vite build`), runner
 typecheck clean.
+
+## M7 Climb, built: 5 chained cave levels, real stairs, escalating predators, a real exit
+
+Direct ask, arriving after a scoping tangent: I'd asked "what's left in M6,"
+laid out the disperser-door ruling, and got back: *"i think i just want to
+be able to move to the next level of the cave and shit.\ni dunnow hat youre
+asking"* — i.e., drop the M6 disperser-door tangent, they want the actual
+next milestone: going deeper in the cave.
+
+**Scoping first**, since the architecture choice is expensive to reverse:
+asked two questions. (1) How should going down a level work under the hood
+— chained `World`s linked by stairs (cheap, reuses the macro grid's own
+`focusZone` swap pattern) vs. widening `Layer` to 5+ values (touches every
+`Record<Layer,...>` in the engine). Answered: chained worlds. (2) How much
+to build right now — just prove one level 2 works, or the whole climb (5
+levels, escalating predators, exit/win screen) at once. Answered: the whole
+climb. This matches HANDOFF.md's own pre-existing M7 sketch almost exactly
+(`World.below`/`above`, stairs terrain, `createCaveRun`) — that doc had
+already scoped this milestone in an earlier session, just never built.
+
+**Engine** (`packages/engine/src`):
+- `types.ts`: three new `TerrainKind`s (`"stairsDown"`, `"stairsUp"`,
+  `"exit"`) — plain walkable, not-opaque terrain, not auto-triggered by
+  stepping onto them (same split as "food" not auto-eating). `World`
+  gained `below?`/`above?` (the level chain), `depth?`, `stairsUpAt?`/
+  `stairsDownAt?`/`exitAt?` (where each level's own special tiles are).
+  Two new `SimEvent` kinds, `crossedCaveLevel` and `emerged` — registered
+  in both exhaustive formatters (`web/eventText.ts`, `runner/format.ts`)
+  plus the 5 other `Record<TerrainKind,...>` tables that needed the new
+  kinds too (`web/legend.ts`, `web/palette.ts` ×3, `runner/ascii.ts` ×3) —
+  all compile-time errors, all caught by `tsc`, none missed.
+- New `climb.ts`: `useStairs(world, agent, log?)` moves the player agent
+  between two `World`s' `agents` arrays and returns the new active world
+  (or `undefined` off ordinary terrain, or a malformed/missing link) —
+  NOT a `PlayerAction`/turn at all, since re-pointing which `World` the
+  whole app looks at can't be expressed as a boolean-returning action the
+  way `applyPlayerAction` works; the caller (`main.ts`) re-points its own
+  `world` reference the same way it already does for the macro grid's
+  `focusZone`. `isAtExit(world, agent)` checks the exit tile;
+  `recordEmerged` logs the win moment.
+
+**Data** (`packages/data/src/scenario.ts`): `createCaveRun(seed)`. Level 1
+is `createCaveScenario(seed)` completely UNCHANGED (M1/M6's own tested
+chamber) — a `"stairsDown"` tile is added afterward, placed at the farthest
+walkable point from a real BFS anchor (`walkDistances`, the same tool the
+scenario already uses for spawn placement), so it's a real walk, not
+adjacent to anything. Levels 2-5 are freshly generated `underground` maps
+(`generateWorld`) with real, already-in-the-roster predators escalating by
+depth — not invented placeholders: Zubat (level 8) → Golbat (15) → Onix
+(22) → Haunter (28), each with real underground prey alongside (Diglett,
+Sandshrew, Dugtrio). Level 5 gets an `"exit"` tile instead of a
+`stairsDown`. Every stairs/exit tile's reachability is BY CONSTRUCTION (a
+real BFS from the level's own arrival point), not hoped for — checked in
+`caveRun.test.ts` on 5 seeds.
+
+**Web** (`main.ts`, `index.html`): new `>` key / 🪜 HUD button
+(`tryUseStairs`) crosses stairs — calls `useStairs`, re-points `world`,
+re-runs the same UI-reset pipeline `focusZone` already uses
+(`resetUiForNewWorld`/`registerHerdsForFirstFrame`), keeps the SAME
+`EventLog` across the crossing (narrative history persists across levels,
+unlike a fresh `loadWorld`). A depth readout ("Level 3 of 5") is always on
+screen in the HUD — direct precedent from this project's own design
+principle, "mechanics visible on the map, not hidden in a meter," applied
+to "how deep am I" the same way HP/hunger bars are never hidden. A new
+`#run-won` overlay (`showWinScreen`, wired through `checkWinCondition`
+inside the ordinary `playerAct` pipeline right where the existing death
+check already lives) fires "You emerge" once `isAtExit` is true on the
+deepest level.
+
+**Tests**: 7 new engine tests (`climb.test.ts` — both crossing directions,
+every failure mode: no below/above, malformed link, ordinary floor) and 7
+new data tests (`caveRun.test.ts` — reachability on 5 seeds, predator
+escalation by depth, and a full walk-the-whole-chain-via-useStairs test).
+Full suite: engine 1504/1504, data 400/400, web build clean, runner
+typecheck clean.
+
+**Live-verified** (Playwright, real dev server): descended all 4 stairs via
+the real `>` key, four times, each landing correctly and updating the HUD
+depth readout and message ("You climb down to level 4."); reached depth 5,
+walked one real step onto the actual exit tile, and the real win screen
+appeared with correct stats — the whole pipeline through actual UI
+interaction, not just unit tests.
+
+**Measured, and a real finding, not a clean bill of health**
+(`validateClimb.ts`, per HANDOFF.md's own stated bar: *"a layer that kills
+the bot every time is a balance report for the user, not a number to tune
+yourself"*). A bot that walks straight for each level's stairs, fights back
+when a predator gets adjacent, and rests (`wait`) when energy drops below
+0.3 (a real bug in the FIRST version of this bot, not the game: it never
+rested at all, and died of exhaustion damage at depth 1 in 63 ticks —
+zero predators there, purely from marching non-stop; the M6 round's own
+"wait recovers energy" fix exists for exactly this and the bot just never
+used it) reached the exit on **5 of 5 seeds, zero deaths**. But:
+
+| | depth 2 | depth 3 | depth 4 | depth 5 |
+|---|---|---|---|---|
+| melee encounters (5 seeds summed) | 0 | 0 | 0 | 2 |
+
+HP climbed the entire run on every seed (19 → 27–30), never dropped. **This
+is not evidence the escalation curve is tuned — it's evidence the bot
+barely met the predators it was supposed to be tested against.** Not
+guessed-and-fixed myself (never unilaterally retune balance numbers): 2-3
+predators scattered randomly across a 90×60 map, versus a bot beelining
+for the far-corner stairs, plausibly just don't cross paths often. Open
+options for the user: (1) more predators per level; (2) place them nearer
+the straight-line path between a level's arrival point and its stairs/exit
+(deliberately, not randomly); (3) leave it — a gentle first climb may be
+fine, and a less-optimal real player (wandering, gathering, not beelining)
+would encounter more than this bot did anyway.
+
+**Not built this round** (still open from ROADMAP.md's M7 Build list):
+Fight-alongside and Rescue (real danger exists now, just not wired up
+yet); "the stone" (unclear referent, not scoped); underground as a
+generated ecology (ground-type/water-kind/fertility — levels 2-5 use plain
+`generateWorld`); the disperser door's "one armful" cache (still open from
+M6).

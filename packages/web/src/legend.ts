@@ -18,6 +18,9 @@ const TERRAIN_LABEL: Record<TerrainKind, string> = {
   shelter: "shelter (concealment + storm cover)",
   fire: "fire (spreads, burns down flora, damages anything standing in it)",
   ice: "ice (a frozen small water body, walkable — melts once winter ends)",
+  stairsDown: "stairs down to the next cave level",
+  stairsUp: "stairs up to the previous cave level",
+  exit: "the way out",
 };
 
 /** Static — the palette doesn't change at runtime, so this renders once rather than every frame. */
