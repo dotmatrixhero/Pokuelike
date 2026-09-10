@@ -11607,6 +11607,590 @@ export const MOVES: Record<string, MoveSpec> = {
     // terrain scaling (mainline Roost isn't weather/terrain-conditional,
     // unlike Synthesis/Moonlight above).
     selfHeal: { fraction: 0.25 },
+    // v4 (two-lane standard).
+    //
+    // THE FANTASY. Roost is the only healing in this roster that has to
+    // happen ON THE GROUND. The bird stops flying, folds its wings, puts
+    // its feet on something solid, and for as long as it is down it is a
+    // walking animal with a lot of feathers. Every learner here —
+    // Pidgey, Spearow, Fearow — has `homeLayer: "canopy"`, so coming
+    // down is a real change of place for exactly the species that know
+    // this move. The tree is about that trade: what the landing is worth,
+    // how long it costs, and what a landed bird can still do to whatever
+    // finds it there.
+    //
+    // THE COST, AND WHAT COULD NOT BE BUILT. Mainline Roost's price is
+    // that the bird stops being Flying while it is down. That price is
+    // NOT representable here, checked at the call site rather than
+    // assumed: `canFlyOverObstacle` (movement.ts) reads exactly two
+    // things, `layer === "canopy"` and `agent.types.includes("flying")`,
+    // and NOTHING in `MoveSpec` or `MoveTreeNode.delta` writes either one
+    // — `agent.layer` is moved only by `burrow` (a flee-only field, not a
+    // delta field) and by needs.ts's own idle return to `homeLayer`, and
+    // `agent.types` is species data. A "you are grounded for N ticks"
+    // node would have been a label over nothing.
+    //
+    // What IS real, and what this tree actually spends, is `lockTicks`:
+    // `useMove` (combat.ts) adds it to `agent.actionLockTicks`, and
+    // `tickAgentAction` (needs.ts) refuses the agent an action while that
+    // is above zero — on the utility path too, since BOTH
+    // `maybeUseUtilityMove` and `maybeUseUtilityMoveInCombat` go through
+    // `useMove`. So the landing is a real window of not acting, bought
+    // for a real heal, and Boldness is built on paying it (lane D) or
+    // refusing to (lane B).
+    //
+    // BOLDNESS — the landing. Lane D COMES DOWN PROPERLY: wings folded,
+    // a big `selfHeal`, paid for in `lockTicks`. Lane B is a TOUCH AND
+    // GO: no lock at all, a much shorter cooldown and a Speed stage —
+    // down and up before anything has walked over. They differ in kind,
+    // not degree: one buys magnitude with time, the other buys frequency
+    // by never committing.
+    // AGGRESSION — a landed bird is not a helpless bird. Lane T is THE
+    // FEET (`thorns`: whatever jumps a roosting bird gets the talons);
+    // lane G REFUSES THE GROUND ARGUMENT (`immovable`, a Defense stage
+    // ladder, flat mitigation — it does not give up the branch).
+    // SOCIABILITY — a roost is a place, not a moment. Lane C is THE
+    // COLONY (the first bird down preens the ones that come after:
+    // `targetsAlly`/`allyEffects`, `healAura`); lane U is UNDER THE
+    // ROOST — a tree a flock sleeps in every night has the richest
+    // ground in the zone, which is a real `fertilityBoost` and visible on
+    // the map, not a hidden number.
+    //
+    // COMBAT REACHABILITY, the check that matters most on a
+    // `utilityMove`: `maybeUseUtilityMoveInCombat` (utilityMoves.ts)
+    // decides by EFFECT FIELD and will only spend a fight action on
+    // `selfHeal`, a positive self `statChangeOnHit`, or a
+    // `statusImmunityAura`. Boldness reaches the first two (the base
+    // move already carries `selfHeal`, so Roost is fight-usable out of
+    // the box), Aggression reaches the Defense ladder, Sociability
+    // reaches the immunity aura at its deep notable. No branch here is
+    // one that can never fire in a fight.
+    //
+    // AND THE DEAD SURFACE, for the same reason: `pickBestMove`
+    // (combat.ts) excludes every `utilityMove` from hostile selection, so
+    // `resolveHit` never runs with Roost and `power`, `accuracy`,
+    // `shape`/`hitsArea`, `range`, `defensePenetration`, `statusChance`,
+    // `forcedMovement`, `critRateStage`, `weightScaling`,
+    // `situationalBonus` and the rest of that pipeline are all provably
+    // dead here. None of them appear below.
+    tree: {
+      // ===== BOLDNESS: the landing =====
+      feet_down: {
+        id: "feet_down",
+        name: "Feet Down",
+        cost: 1,
+        leaning: "boldness",
+        // OPENER. It stops treating the ground as a last resort. Splits
+        // into coming down properly and barely coming down at all.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { cooldownTicks: -2 },
+      },
+      // --- Lane D: down properly. Time on the ground, bought and paid for.
+      wings_folded: {
+        id: "wings_folded",
+        name: "Wings Folded",
+        cost: 1,
+        prerequisites: ["feet_down"],
+        leaning: "boldness",
+        // Three ticks of not acting (`actionLockTicks`), and braced while
+        // it happens — the flat mitigation is the offsetting half, in the
+        // same node.
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: { lockTicks: 3 },
+      },
+      settled_in: {
+        id: "settled_in",
+        name: "Settled In",
+        cost: 1,
+        prerequisitesAnyOf: [["wings_folded"], ["comes_down_ready"]],
+        leaning: "boldness",
+        // LANE D NOTABLE. 25% -> 40% of max HP, for three more ticks of
+        // standing there unable to do anything about it.
+        delta: { selfHeal: { fraction: 0.4 }, lockTicks: 3 },
+      },
+      dead_asleep: {
+        id: "dead_asleep",
+        name: "Dead Asleep",
+        cost: 1,
+        prerequisites: ["settled_in"],
+        excludes: ["one_eye_open"],
+        leaning: "boldness",
+        // FORK, lane D's tail. All the way down: real percentage regen
+        // (status.ts), three more locked ticks to earn it.
+        grantsPassive: { kind: "regen", value: 0.012 },
+        delta: { lockTicks: 3 },
+      },
+      one_eye_open: {
+        id: "one_eye_open",
+        name: "One Eye Open",
+        cost: 1,
+        prerequisites: ["settled_in"],
+        excludes: ["dead_asleep"],
+        leaning: "boldness",
+        // The other half of the fork, and a different KIND of answer: no
+        // deeper sleep, no extra lock — the first thing that reaches it
+        // does not connect at all (`unshaken`, checked at the top of
+        // `resolveHitAgainstTarget`).
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: {},
+      },
+      // --- Lane B: barely down. Never commits, so never pays.
+      touch_and_go: {
+        id: "touch_and_go",
+        name: "Touch and Go",
+        cost: 1,
+        prerequisites: ["feet_down"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -3 },
+      },
+      light_feet: {
+        id: "light_feet",
+        name: "Light Feet",
+        cost: 1,
+        prerequisites: ["touch_and_go"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      never_fully_down: {
+        id: "never_fully_down",
+        name: "Never Fully Down",
+        cost: 1,
+        prerequisitesAnyOf: [["light_feet"], ["sleeps_easier"]],
+        leaning: "boldness",
+        // LANE B NOTABLE. The whole opposite answer to lane D: it lands
+        // constantly and never settles, so it is quicker on the ground
+        // than it was in the air. `actionSpeedOf` (simulation.ts) really
+        // does fold a Speed stage in, so this is action economy, not a
+        // display number.
+        delta: { cooldownTicks: -4, statChangesOnHit: [{ target: "self", stat: "speed", stage: 2, ticks: 60 }] },
+      },
+      up_again: {
+        id: "up_again",
+        name: "Up Again",
+        cost: 1,
+        prerequisites: ["never_fully_down"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -2 },
+      },
+      // --- Convergence, filler, capstone.
+      sure_of_the_ground: {
+        id: "sure_of_the_ground",
+        name: "Sure of the Ground",
+        cost: 1,
+        prerequisitesAnyOf: [["dead_asleep"], ["one_eye_open"], ["up_again"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes end here: the bird has stopped
+        // treating the floor as the dangerous place.
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 1.5 },
+          { kind: "defenseBoost", value: 1 },
+        ],
+        delta: { cooldownTicks: -2 },
+      },
+      full_crop: {
+        id: "full_crop",
+        name: "Full Crop",
+        cost: 1,
+        prerequisites: ["sure_of_the_ground"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { selfHeal: { fraction: 0.5 } },
+      },
+      night_on_the_branch: {
+        id: "night_on_the_branch",
+        name: "Night on the Branch",
+        cost: 1,
+        prerequisites: ["full_crop"],
+        leaning: "boldness",
+        // CAPSTONE. Not a landing — a night. Five ticks of being unable
+        // to act at all, and it comes off the branch with 70% of its
+        // health back and its feet locked around the wood
+        // (`immovable`, checked in `applyForcedMovement`).
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.1 },
+          { kind: "immovable", value: 1 },
+        ],
+        delta: { selfHeal: { fraction: 0.7 }, lockTicks: 5 },
+      },
+
+      // ===== AGGRESSION: a landed bird is not a helpless bird =====
+      talons_down: {
+        id: "talons_down",
+        name: "Talons Down",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER. It came down feet first. Splits into using the feet and
+        // into simply not being moved off the perch.
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
+      },
+      // --- Lane T: the feet. Whatever jumps a roosting bird gets them.
+      hooked_claws: {
+        id: "hooked_claws",
+        name: "Hooked Claws",
+        cost: 1,
+        prerequisites: ["talons_down"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
+      },
+      feet_first: {
+        id: "feet_first",
+        name: "Feet First",
+        cost: 1,
+        prerequisitesAnyOf: [["hooked_claws"], ["comes_down_ready"]],
+        leaning: "aggression",
+        // LANE T NOTABLE. A bird on its back is all talons, and `thorns`
+        // (status.ts) is damage returned to whatever landed the hit.
+        grantsPassive: { kind: "thorns", value: 0.12 },
+        delta: {},
+      },
+      raked_back: {
+        id: "raked_back",
+        name: "Raked Back",
+        cost: 1,
+        prerequisites: ["feet_first"],
+        excludes: ["spread_wings"],
+        leaning: "aggression",
+        // FORK, lane T's tail: hurt it.
+        grantsPassive: { kind: "thorns", value: 0.08 },
+        delta: {},
+      },
+      spread_wings: {
+        id: "spread_wings",
+        name: "Spread Wings",
+        cost: 1,
+        prerequisites: ["feet_first"],
+        excludes: ["raked_back"],
+        leaning: "aggression",
+        // The other half, and a different kind of answer: don't hurt it,
+        // convince it. A mantling bird reads as twice its size and
+        // nothing near it starts anything (`calmingPresence`).
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      // --- Lane G: it does not give up the perch.
+      grip_pads: {
+        id: "grip_pads",
+        name: "Grip Pads",
+        cost: 1,
+        prerequisites: ["talons_down"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      braced_wings: {
+        id: "braced_wings",
+        name: "Braced Wings",
+        cost: 1,
+        prerequisites: ["grip_pads"],
+        leaning: "aggression",
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 60 }] },
+      },
+      holds_the_branch: {
+        id: "holds_the_branch",
+        name: "Holds the Branch",
+        cost: 1,
+        prerequisitesAnyOf: [["braced_wings"], ["the_flock_stands"]],
+        leaning: "aggression",
+        // LANE G NOTABLE. It cannot be dragged, shoved or lunged off the
+        // spot it chose (`immovable`, `applyForcedMovement`).
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 3, ticks: 80 }] },
+      },
+      dug_in_claws: {
+        id: "dug_in_claws",
+        name: "Dug-In Claws",
+        cost: 1,
+        prerequisites: ["holds_the_branch"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      the_perch_holds: {
+        id: "the_perch_holds",
+        name: "The Perch Holds",
+        cost: 1,
+        prerequisitesAnyOf: [["raked_back"], ["spread_wings"], ["dug_in_claws"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: the ground stopped being
+        // somewhere it is caught and became somewhere it is standing.
+        grantsPassives: [
+          { kind: "thorns", value: 0.1 },
+          { kind: "damageReductionFlat", value: 1.5 },
+        ],
+        delta: {},
+      },
+      heels_in: {
+        id: "heels_in",
+        name: "Heels In",
+        cost: 1,
+        prerequisites: ["the_perch_holds"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -3 },
+      },
+      it_does_not_fly: {
+        id: "it_does_not_fly",
+        name: "It Does Not Fly",
+        cost: 1,
+        prerequisites: ["heels_in"],
+        leaning: "aggression",
+        // CAPSTONE. The inversion the whole branch is for: a bird that
+        // has decided the answer to being found on the ground is to stay
+        // on the ground. The first thing to reach it does not connect,
+        // and its Defense stage tops the ladder at +4.
+        grantsPassives: [
+          { kind: "unshaken", value: 1 },
+          { kind: "defenseBoost", value: 1 },
+        ],
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 4, ticks: 120 }] },
+      },
+
+      // ===== SOCIABILITY: a roost is a place, not a moment =====
+      come_down_together: {
+        id: "come_down_together",
+        name: "Come Down Together",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER. Birds do not roost one at a time. Splits into what the
+        // colony does for the birds and what it does to the ground.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.1 }] },
+      },
+      // --- Lane C: the colony. The first one down tends the rest.
+      first_one_down: {
+        id: "first_one_down",
+        name: "First One Down",
+        cost: 1,
+        prerequisites: ["come_down_together"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      preening: {
+        id: "preening",
+        name: "Preening",
+        cost: 1,
+        prerequisitesAnyOf: [["first_one_down"], ["the_flock_stands"]],
+        leaning: "sociability",
+        // LANE C NOTABLE. `applySupportMove` (support.ts) does not exclude
+        // utility moves, so a `targetsAlly` Roost is a real idle-tick
+        // support action on the nearest hurt herd-mate.
+        delta: { allyEffects: [{ healFraction: 0.2, buff: { stat: "defense", stage: 1, ticks: 50 } }] },
+      },
+      share_the_branch: {
+        id: "share_the_branch",
+        name: "Share the Branch",
+        cost: 1,
+        prerequisites: ["preening"],
+        excludes: ["wing_over"],
+        leaning: "sociability",
+        // FORK, lane C's tail: constant, passive, nobody has to do
+        // anything (`healAura` ticks on its own).
+        grantsPassive: { kind: "healAura", value: 0.006 },
+        delta: {},
+      },
+      wing_over: {
+        id: "wing_over",
+        name: "Wing Over",
+        cost: 1,
+        prerequisites: ["preening"],
+        excludes: ["share_the_branch"],
+        leaning: "sociability",
+        // The other half, differing in kind: not healing at all — a wing
+        // put over the neighbour, which is Defense, and only when the
+        // bird actually spends its action on them.
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 2, ticks: 70 } }] },
+      },
+      // --- Lane U: under the roost. The ground pays for the tenancy.
+      white_branches: {
+        id: "white_branches",
+        name: "White Branches",
+        cost: 1,
+        prerequisites: ["come_down_together"],
+        leaning: "sociability",
+        // A tree a flock sleeps in is a tree standing in its own
+        // droppings — `raiseFertility` (flora.ts), real and visible on
+        // the map rather than a hidden number.
+        delta: { fertilityBoost: { amount: 0.25, radius: 1 } },
+      },
+      well_used_tree: {
+        id: "well_used_tree",
+        name: "Well-Used Tree",
+        cost: 1,
+        prerequisites: ["white_branches"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
+      },
+      rich_ground: {
+        id: "rich_ground",
+        name: "Rich Ground",
+        cost: 1,
+        prerequisitesAnyOf: [["well_used_tree"], ["sleeps_easier"]],
+        leaning: "sociability",
+        // LANE U NOTABLE. Two tiles out, and enough of it that things
+        // grow where the flock sleeps.
+        delta: { fertilityBoost: { amount: 0.5, radius: 2 } },
+      },
+      settled_colony: {
+        id: "settled_colony",
+        name: "Settled Colony",
+        cost: 1,
+        prerequisites: ["rich_ground"],
+        leaning: "sociability",
+        // A colony with a tree it has always used does not go looking for
+        // someone else's (`nonTerritorial`, checked at the top of
+        // `applyHerdRivalryConflict`).
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      whole_tree_down: {
+        id: "whole_tree_down",
+        name: "The Whole Tree Comes Down",
+        cost: 1,
+        prerequisitesAnyOf: [["share_the_branch"], ["wing_over"], ["settled_colony"]],
+        leaning: "sociability",
+        // DEEP NOTABLE, and Sociability's fight-usable node:
+        // `maybeUseUtilityMoveInCombat` spends an action on a
+        // `statusImmunityAura` against an opponent that can actually
+        // inflict a status. A flock that preens each other every night
+        // does not carry anything for long.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: { statusImmunityAura: { ticks: 70, radius: 3 } },
+      },
+      roosting_hours: {
+        id: "roosting_hours",
+        name: "Roosting Hours",
+        cost: 1,
+        prerequisites: ["whole_tree_down"],
+        leaning: "sociability",
+        delta: {
+          statusImmunityAura: { ticks: 110, radius: 4 },
+          fertilityBoost: { amount: 0.7, radius: 2 },
+        },
+      },
+      the_roost: {
+        id: "the_roost",
+        name: "The Roost",
+        cost: 1,
+        prerequisites: ["roosting_hours"],
+        leaning: "sociability",
+        // CAPSTONE. The tree is now the reason the flock exists rather
+        // than the other way round: nothing there starts anything, and
+        // the bird that lands first puts a third of a herd-mate's health
+        // back on them.
+        grantsPassives: [
+          { kind: "calmingPresence", value: 0.2 },
+          { kind: "nonTerritorial", value: 1 },
+        ],
+        delta: { allyEffects: [{ healFraction: 0.3, buff: { stat: "defense", stage: 3, ticks: 120 } }] },
+      },
+
+      // ===== Bridges =====
+      braced_landing: {
+        id: "braced_landing",
+        name: "Braced Landing",
+        cost: 1,
+        prerequisites: ["feet_down", "talons_down"],
+        leaning: "aggression",
+        // CROSSLINK Boldness<->Aggression. It comes down the way it means
+        // to come down, not the way it is knocked down.
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      shoulders_set: {
+        id: "shoulders_set",
+        name: "Shoulders Set",
+        cost: 1,
+        prerequisites: ["braced_landing"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      comes_down_ready: {
+        id: "comes_down_ready",
+        name: "Comes Down Ready",
+        cost: 1,
+        prerequisites: ["shoulders_set"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Its own crosslink's lever escalated, plus the
+        // feet it lands on. Routes into Settled In (Boldness) and Feet
+        // First (Aggression).
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 2 },
+          { kind: "thorns", value: 0.05 },
+        ],
+        delta: {},
+      },
+
+      all_turn_at_once: {
+        id: "all_turn_at_once",
+        name: "All Turn at Once",
+        cost: 1,
+        prerequisites: ["talons_down", "come_down_together"],
+        leaning: "sociability",
+        // CROSSLINK Aggression<->Sociability. A colony on the ground does
+        // not scatter; it turns and faces the thing.
+        delta: { targetsAlly: true, allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 50 } }] },
+      },
+      closed_ranks: {
+        id: "closed_ranks",
+        name: "Closed Ranks",
+        cost: 1,
+        prerequisites: ["all_turn_at_once"],
+        leaning: "sociability",
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 2, ticks: 60 } }] },
+      },
+      the_flock_stands: {
+        id: "the_flock_stands",
+        name: "The Flock Stands",
+        cost: 1,
+        prerequisites: ["closed_ranks"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Routes into Holds the Branch (Aggression) and
+        // Preening (Sociability).
+        grantsPassive: { kind: "thorns", value: 0.03 },
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 3, ticks: 90 } }] },
+      },
+
+      full_tree: {
+        id: "full_tree",
+        name: "Full Tree",
+        cost: 1,
+        prerequisites: ["come_down_together", "feet_down"],
+        leaning: "boldness",
+        // CROSSLINK Sociability<->Boldness. The colony is the reason the
+        // landing is safe enough to be worth anything.
+        grantsPassive: { kind: "calmingPresence", value: 0.06 },
+        delta: {},
+      },
+      quiet_branch: {
+        id: "quiet_branch",
+        name: "Quiet Branch",
+        cost: 1,
+        prerequisites: ["full_tree"],
+        leaning: "boldness",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
+      },
+      sleeps_easier: {
+        id: "sleeps_easier",
+        name: "Sleeps Easier",
+        cost: 1,
+        prerequisites: ["quiet_branch"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Routes into Never Fully Down (Boldness) and
+        // Rich Ground (Sociability).
+        grantsPassives: [
+          { kind: "calmingPresence", value: 0.1 },
+          { kind: "defenseBoost", value: 1 },
+        ],
+        delta: {},
+      },
+    },
   },
   agility: {
     id: "agility",
@@ -12831,6 +13415,560 @@ export const MOVES: Record<string, MoveSpec> = {
     // Real canonical move (sandshrew, geodude, snorlax) — same +1 Defense
     // family as Harden/Withdraw above.
     statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 50 },
+    // v4 (two-lane standard).
+    //
+    // THE FANTASY. A ball has no handles. Defense Curl is not armour and
+    // it is not stillness — it is a body reorganised into a shape with
+    // nothing to grab: head under, limbs in, one continuous curve that a
+    // jaw closes on and slides off. And a ball does not hold ground. The
+    // same shape that protects it also rolls it, so what this move buys
+    // is never a place to stand — it is a shape, and the shape keeps
+    // moving.
+    //
+    // HOW THIS IS NOT HARDEN, which already owns "raise your own
+    // Defense". Harden's answer is to stop being an animal: `immovable`,
+    // `lockTicks`, `nonTerritorial`, a thing that survives by not being
+    // worth the effort and by never moving again. THIS TREE HAS NO
+    // `lockTicks` AND NO `immovable` ANYWHERE, on purpose — a ball that
+    // cannot be moved is a boulder, which is the other move. Defense
+    // Curl's Aggression branch spends Speed stages
+    // (`actionSpeedOf`/`statStageMultiplier`, simulation.ts) on a
+    // DEFENSIVE move, which nothing else defensive in the roster does:
+    // the curl is a wind-up, and the payoff is that it is already
+    // somewhere else. Harden goes rigid and waits; Defense Curl rolls.
+    //
+    // AGGRESSION — the roll. Lane R is MOMENTUM (the Speed ladder and a
+    // much shorter cooldown: it curls and uncurls constantly); lane W is
+    // THE WEIGHT ON THE OUTSIDE (`thorns` — a moving curled body is
+    // something that happens TO whatever it touches). Its filler leaves
+    // real turned earth behind it (`fertilityBoost`), which is the one
+    // thing a heavy body rolling the same line every day would actually
+    // do to a map.
+    // BOLDNESS — the tuck. Lane N is NO PURCHASE (`unshaken`, flat
+    // mitigation: the jaw finds no edge); lane E is EVERYTHING IN (the
+    // Defense ladder and `regenFlat` — the parts that used to stick out
+    // are inside now, and they keep working).
+    // SOCIABILITY — a heap of them. Geodude pile on Geodude. Lane P is
+    // THE PILE (the outer bodies carry it for the inner ones:
+    // `targetsAlly`/`allyEffects`, `healAura`); lane Q is NOTHING GETS IN
+    // (a heap is one closed surface: `statusImmunityAura`,
+    // `calmingPresence`, `nonTerritorial`).
+    //
+    // COMBAT REACHABILITY. `maybeUseUtilityMoveInCombat` (utilityMoves.ts)
+    // decides by EFFECT FIELD and spends a fight action only on
+    // `selfHeal`, a positive self `statChangeOnHit`, or a
+    // `statusImmunityAura`. Aggression reaches the Speed ladder, Boldness
+    // the Defense ladder (the base move already carries one, so this is
+    // fight-usable out of the box), Sociability the immunity aura. No
+    // branch here is one that can never fire in a fight.
+    //
+    // AND THE DEAD SURFACE: `pickBestMove` (combat.ts) excludes every
+    // `utilityMove` from hostile selection, so `resolveHit` never runs
+    // with this move — `power`, `accuracy`, `shape`/`hitsArea`,
+    // `weightScaling`, `forcedMovement`, `defensePenetration`,
+    // `statusChance` and the rest of that pipeline are provably dead
+    // here. A rolling boulder wants every one of them and gets none;
+    // what it gets instead is Speed, `thorns` and turned ground, which
+    // are the same fantasy through levers that actually run.
+    tree: {
+      // ===== AGGRESSION: the roll =====
+      set_the_spin: {
+        id: "set_the_spin",
+        name: "Set the Spin",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER. The curl is a wind-up, not a stop. Splits into keeping
+        // the momentum and into what the outside of a moving body does.
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 1, ticks: 50 }] },
+      },
+      // --- Lane R: momentum. It is already somewhere else.
+      downhill: {
+        id: "downhill",
+        name: "Downhill",
+        cost: 1,
+        prerequisites: ["set_the_spin"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -4 },
+      },
+      still_rolling: {
+        id: "still_rolling",
+        name: "Still Rolling",
+        cost: 1,
+        prerequisitesAnyOf: [["downhill"], ["curls_on_the_move"]],
+        leaning: "aggression",
+        // LANE R NOTABLE. A Speed stage on a defensive move: `actionSpeedOf`
+        // (simulation.ts) folds the stage in, so this really does buy the
+        // curled body more actions, not a display number.
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 2, ticks: 60 }], cooldownTicks: -3 },
+      },
+      long_grade: {
+        id: "long_grade",
+        name: "Long Grade",
+        cost: 1,
+        prerequisites: ["still_rolling"],
+        excludes: ["short_hops"],
+        leaning: "aggression",
+        // FORK, lane R's tail. One long run: a higher stage that lasts
+        // most of a fight.
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 3, ticks: 100 }] },
+      },
+      short_hops: {
+        id: "short_hops",
+        name: "Short Hops",
+        cost: 1,
+        prerequisites: ["still_rolling"],
+        excludes: ["long_grade"],
+        leaning: "aggression",
+        // The other half, differing in kind rather than degree: no bigger
+        // stage at all, just curling and uncurling twice as often
+        // (-6 more cooldown, which is counted in the agent's OWN action
+        // ticks — `tickCooldowns` runs inside `tickAgentAction`).
+        delta: { cooldownTicks: -6 },
+      },
+      // --- Lane W: the weight on the outside.
+      knuckles_out: {
+        id: "knuckles_out",
+        name: "Knuckles Out",
+        cost: 1,
+        prerequisites: ["set_the_spin"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.04 },
+        delta: {},
+      },
+      grit_in_the_hide: {
+        id: "grit_in_the_hide",
+        name: "Grit in the Hide",
+        cost: 1,
+        prerequisites: ["knuckles_out"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.04 },
+        delta: {},
+      },
+      on_the_turn: {
+        id: "on_the_turn",
+        name: "On the Turn",
+        cost: 1,
+        prerequisitesAnyOf: [["grit_in_the_hide"], ["the_whole_slope"]],
+        leaning: "aggression",
+        // LANE W NOTABLE. Biting a body that is mid-roll is a decision
+        // with a cost (`thorns`, status.ts: damage back to whatever
+        // landed the hit).
+        grantsPassive: { kind: "thorns", value: 0.1 },
+        delta: {},
+      },
+      no_soft_side: {
+        id: "no_soft_side",
+        name: "No Soft Side",
+        cost: 1,
+        prerequisites: ["on_the_turn"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      a_wheel: {
+        id: "a_wheel",
+        name: "A Wheel",
+        cost: 1,
+        prerequisitesAnyOf: [["long_grade"], ["short_hops"], ["no_soft_side"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: the body is no longer a
+        // curled animal, it is a wheel, and a wheel is heavier than the
+        // thing riding on it.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.5 },
+          { kind: "damageReductionFlat", value: 1.5 },
+        ],
+        delta: {},
+      },
+      broken_ground: {
+        id: "broken_ground",
+        name: "Broken Ground",
+        cost: 1,
+        prerequisites: ["a_wheel"],
+        leaning: "aggression",
+        // The line a heavy rolling body leaves is turned earth, and
+        // things grow in turned earth (`raiseFertility`, flora.ts) — a
+        // defensive move that changes the map by being used.
+        delta: { fertilityBoost: { amount: 0.3, radius: 1 }, cooldownTicks: -4 },
+      },
+      comes_back_around: {
+        id: "comes_back_around",
+        name: "Comes Back Around",
+        cost: 1,
+        prerequisites: ["broken_ground"],
+        leaning: "aggression",
+        // CAPSTONE. The thing you did not deal with is still moving.
+        grantsPassive: { kind: "thorns", value: 0.12 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 4, ticks: 160 }] },
+      },
+
+      // ===== BOLDNESS: the tuck =====
+      tuck: {
+        id: "tuck",
+        name: "Tuck",
+        cost: 1,
+        leaning: "boldness",
+        // OPENER. Doubles the base move's own Defense stage. Splits into
+        // giving a jaw nothing to close on and into putting the soft
+        // parts somewhere they still work.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 60 }] },
+      },
+      // --- Lane N: no purchase.
+      chin_under: {
+        id: "chin_under",
+        name: "Chin Under",
+        cost: 1,
+        prerequisites: ["tuck"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      no_edges: {
+        id: "no_edges",
+        name: "No Edges",
+        cost: 1,
+        prerequisitesAnyOf: [["chin_under"], ["curls_on_the_move"]],
+        leaning: "boldness",
+        // LANE N NOTABLE. There is no first bite, because there is
+        // nowhere to start one (`unshaken`, checked at the top of
+        // `resolveHitAgainstTarget` before damage, accuracy or status).
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: {},
+      },
+      slack_hide: {
+        id: "slack_hide",
+        name: "Slack Hide",
+        cost: 1,
+        prerequisites: ["no_edges"],
+        excludes: ["packed_tight"],
+        leaning: "boldness",
+        // FORK, lane N's tail: a loose hide over a curled body gives with
+        // the blow — proportional mitigation, so it scales with whatever
+        // hit it.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: {},
+      },
+      packed_tight: {
+        id: "packed_tight",
+        name: "Packed Tight",
+        cost: 1,
+        prerequisites: ["no_edges"],
+        excludes: ["slack_hide"],
+        leaning: "boldness",
+        // The other half, differing in kind: nothing gives at all. Flat
+        // mitigation, which is worth most against the many small hits a
+        // low-level body actually dies to.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      // --- Lane E: everything in, and it all still works.
+      limbs_in: {
+        id: "limbs_in",
+        name: "Limbs In",
+        cost: 1,
+        prerequisites: ["tuck"],
+        leaning: "boldness",
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 3, ticks: 70 }] },
+      },
+      kept_warm: {
+        id: "kept_warm",
+        name: "Kept Warm",
+        cost: 1,
+        prerequisites: ["limbs_in"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      the_soft_side_in: {
+        id: "the_soft_side_in",
+        name: "The Soft Side In",
+        cost: 1,
+        prerequisitesAnyOf: [["kept_warm"], ["the_middle_of_it"]],
+        leaning: "boldness",
+        // LANE E NOTABLE. Everything that could be bitten is now on the
+        // inside of the curve, and the Defense stage tops out at +4.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 4, ticks: 90 }] },
+      },
+      heat_kept: {
+        id: "heat_kept",
+        name: "Heat Kept",
+        cost: 1,
+        prerequisites: ["the_soft_side_in"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      one_curve: {
+        id: "one_curve",
+        name: "One Curve",
+        cost: 1,
+        prerequisitesAnyOf: [["slack_hide"], ["packed_tight"], ["heat_kept"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes end here: not a creature with its head
+        // down, one continuous surface.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 5, ticks: 140 }] },
+      },
+      nothing_loose: {
+        id: "nothing_loose",
+        name: "Nothing Loose",
+        cost: 1,
+        prerequisites: ["one_curve"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      nothing_to_hold: {
+        id: "nothing_to_hold",
+        name: "Nothing to Hold",
+        cost: 1,
+        prerequisites: ["nothing_loose"],
+        leaning: "boldness",
+        // CAPSTONE. Whatever gets hold of it does not have hold of it for
+        // long, and the body inside the curve is repairing while that
+        // happens.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.08 },
+          { kind: "regenFlat", value: 1 },
+        ],
+        delta: {},
+      },
+
+      // ===== SOCIABILITY: a heap of them =====
+      pile_in: {
+        id: "pile_in",
+        name: "Pile In",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER. Curled bodies stack, and a stack is a different problem
+        // from an animal. Splits into what the outside ones do for the
+        // inside ones and into the heap as one closed surface.
+        delta: { targetsAlly: true, allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 50 } }] },
+      },
+      // --- Lane P: the pile. The outside carries it.
+      outer_ring: {
+        id: "outer_ring",
+        name: "Outer Ring",
+        cost: 1,
+        prerequisites: ["pile_in"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      take_the_outside: {
+        id: "take_the_outside",
+        name: "Take the Outside",
+        cost: 1,
+        prerequisitesAnyOf: [["outer_ring"], ["the_whole_slope"]],
+        leaning: "sociability",
+        // LANE P NOTABLE. `applySupportMove` (support.ts) does not exclude
+        // utility moves, so this really is a spent action on the nearest
+        // hurt herd-mate — the body on the windward side of the heap.
+        delta: { allyEffects: [{ healFraction: 0.1, buff: { stat: "defense", stage: 2, ticks: 60 } }] },
+      },
+      back_to_back: {
+        id: "back_to_back",
+        name: "Back to Back",
+        cost: 1,
+        prerequisites: ["take_the_outside"],
+        excludes: ["young_in_the_middle"],
+        leaning: "sociability",
+        // FORK, lane P's tail: nobody has to do anything — `healAura`
+        // ticks on its own for every herd-mate in range.
+        grantsPassive: { kind: "healAura", value: 0.006 },
+        delta: {},
+      },
+      young_in_the_middle: {
+        id: "young_in_the_middle",
+        name: "Young in the Middle",
+        cost: 1,
+        prerequisites: ["take_the_outside"],
+        excludes: ["back_to_back"],
+        leaning: "sociability",
+        // The other half, differing in kind: nothing continuous at all —
+        // one big deliberate heal, on one chosen body, when the agent
+        // spends its action on it.
+        delta: { allyEffects: [{ healFraction: 0.22 }] },
+      },
+      // --- Lane Q: nothing gets in.
+      one_surface: {
+        id: "one_surface",
+        name: "One Surface",
+        cost: 1,
+        prerequisites: ["pile_in"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
+      },
+      no_way_in: {
+        id: "no_way_in",
+        name: "No Way In",
+        cost: 1,
+        prerequisites: ["one_surface"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      closed_heap: {
+        id: "closed_heap",
+        name: "Closed Heap",
+        cost: 1,
+        prerequisitesAnyOf: [["no_way_in"], ["the_middle_of_it"]],
+        leaning: "sociability",
+        // LANE Q NOTABLE, and Sociability's fight-usable node:
+        // `maybeUseUtilityMoveInCombat` spends an action on a
+        // `statusImmunityAura` against an opponent that can inflict a
+        // status. A heap has no gaps, so nothing gets into the middle of
+        // one.
+        delta: { statusImmunityAura: { ticks: 60, radius: 3 } },
+      },
+      settled: {
+        id: "settled",
+        name: "Settled",
+        cost: 1,
+        prerequisites: ["closed_heap"],
+        leaning: "sociability",
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      the_heap: {
+        id: "the_heap",
+        name: "The Heap",
+        cost: 1,
+        prerequisitesAnyOf: [["back_to_back"], ["young_in_the_middle"], ["settled"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here: enough curled bodies in one
+        // place stop being a group of animals.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: { statusImmunityAura: { ticks: 100, radius: 4 } },
+      },
+      deep_in_the_pile: {
+        id: "deep_in_the_pile",
+        name: "Deep in the Pile",
+        cost: 1,
+        prerequisites: ["the_heap"],
+        leaning: "sociability",
+        delta: { statusImmunityAura: { ticks: 150, radius: 5 } },
+      },
+      a_field_of_stones: {
+        id: "a_field_of_stones",
+        name: "A Field of Stones",
+        cost: 1,
+        prerequisites: ["deep_in_the_pile"],
+        leaning: "sociability",
+        // CAPSTONE. A dozen curled Geodude in one place is scree. Nothing
+        // there starts a fight and nothing there is worth walking over
+        // to.
+        grantsPassives: [
+          { kind: "calmingPresence", value: 0.2 },
+          { kind: "nonTerritorial", value: 1 },
+        ],
+        delta: { allyEffects: [{ healFraction: 0.22, buff: { stat: "defense", stage: 3, ticks: 120 } }] },
+      },
+
+      // ===== Bridges =====
+      smaller_ball: {
+        id: "smaller_ball",
+        name: "Smaller Ball",
+        cost: 1,
+        prerequisites: ["tuck", "set_the_spin"],
+        leaning: "aggression",
+        // CROSSLINK Boldness<->Aggression. A tighter ball is a rounder
+        // one, and a rounder one goes back into the curl quicker.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: { cooldownTicks: -2 },
+      },
+      quicker_tuck: {
+        id: "quicker_tuck",
+        name: "Quicker Tuck",
+        cost: 1,
+        prerequisites: ["smaller_ball"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -2 },
+      },
+      curls_on_the_move: {
+        id: "curls_on_the_move",
+        name: "Curls on the Move",
+        cost: 1,
+        prerequisites: ["quicker_tuck"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Its own crosslink's lever escalated: it no
+        // longer has to stop to do this. Routes into No Edges (Boldness)
+        // and Still Rolling (Aggression).
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: { cooldownTicks: -3 },
+      },
+
+      they_all_go: {
+        id: "they_all_go",
+        name: "They All Go",
+        cost: 1,
+        prerequisites: ["set_the_spin", "pile_in"],
+        leaning: "sociability",
+        // CROSSLINK Aggression<->Sociability. One of them starts down the
+        // slope and the rest of the heap goes with it.
+        delta: { targetsAlly: true, allyEffects: [{ buff: { stat: "speed", stage: 1, ticks: 50 } }] },
+      },
+      same_grade: {
+        id: "same_grade",
+        name: "Same Grade",
+        cost: 1,
+        prerequisites: ["they_all_go"],
+        leaning: "sociability",
+        delta: { allyEffects: [{ buff: { stat: "speed", stage: 2, ticks: 60 } }] },
+      },
+      the_whole_slope: {
+        id: "the_whole_slope",
+        name: "The Whole Slope",
+        cost: 1,
+        prerequisites: ["same_grade"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Routes into On the Turn (Aggression) and Take
+        // the Outside (Sociability).
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: { allyEffects: [{ buff: { stat: "speed", stage: 3, ticks: 90 } }] },
+      },
+
+      inner_bodies: {
+        id: "inner_bodies",
+        name: "Inner Bodies",
+        cost: 1,
+        prerequisites: ["pile_in", "tuck"],
+        leaning: "boldness",
+        // CROSSLINK Sociability<->Boldness. The ones in the middle of a
+        // heap are the tightest curled and the least bothered.
+        grantsPassive: { kind: "calmingPresence", value: 0.06 },
+        delta: {},
+      },
+      deeper_in: {
+        id: "deeper_in",
+        name: "Deeper In",
+        cost: 1,
+        prerequisites: ["inner_bodies"],
+        leaning: "boldness",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
+      },
+      the_middle_of_it: {
+        id: "the_middle_of_it",
+        name: "The Middle of It",
+        cost: 1,
+        prerequisites: ["deeper_in"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Routes into The Soft Side In (Boldness) and
+        // Closed Heap (Sociability).
+        grantsPassives: [
+          { kind: "calmingPresence", value: 0.12 },
+          { kind: "damageReductionFlat", value: 1.5 },
+        ],
+        delta: {},
+      },
+    },
   },
   safeguard: {
     id: "safeguard",

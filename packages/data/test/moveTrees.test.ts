@@ -1636,7 +1636,13 @@ const DEAD_ON_A_UTILITY_MOVE = [
  * a status tree whose branch reaches none of them can never fire in a fight —
  * which is the single most important thing to check about one.
  */
-const COMBAT_USABLE_FIELDS = ["selfHeal", "statChangeOnHit", "statusImmunityAura"] as const;
+// `statChangesOnHit` (plural) belongs here for the same reason the singular
+// does, and leaving it out was a real gap in this list rather than a policy:
+// `worthAnActionInCombat` reads `resolveStatChangesOnHit(move)`, which folds
+// BOTH forms. Roost and Defense Curl reach their fight-usable buff through
+// the plural form (it is the one that does not silently race a co-takeable
+// setter), and the singular-only list would have called those branches dead.
+const COMBAT_USABLE_FIELDS = ["selfHeal", "statChangeOnHit", "statChangesOnHit", "statusImmunityAura"] as const;
 
 const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, kind: string) =>
   Object.values(move.tree)
@@ -1644,8 +1650,8 @@ const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, k
     .filter((g) => g.kind === kind)
     .reduce((sum, g) => sum + g.value, 0);
 
-describe("the three new status trees only pull levers a utilityMove can actually reach", () => {
-  for (const moveId of ["harden", "growth", "agility"]) {
+describe("the status trees only pull levers a utilityMove can actually reach", () => {
+  for (const moveId of ["harden", "growth", "agility", "roost", "defense_curl"]) {
     const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
 
     it(`${moveId} is flagged utilityMove, so these are the right rules for it`, () => {
@@ -1665,10 +1671,13 @@ describe("the three new status trees only pull levers a utilityMove can actually
 
     it(`every ${moveId} statChangeOnHit targets self and is positive — the defender side would be dead`, () => {
       for (const node of Object.values(move.tree)) {
-        const change = node.delta.statChangeOnHit;
-        if (!change) continue;
-        expect(change.target).toBe("self");
-        expect(change.stage).toBeGreaterThan(0);
+        for (const change of [
+          ...(node.delta.statChangeOnHit ? [node.delta.statChangeOnHit] : []),
+          ...(node.delta.statChangesOnHit ?? []),
+        ]) {
+          expect(change.target).toBe("self");
+          expect(change.stage).toBeGreaterThan(0);
+        }
       }
     });
 
@@ -1679,14 +1688,17 @@ describe("the three new status trees only pull levers a utilityMove can actually
         const reaches = inBranch.some((n) =>
           COMBAT_USABLE_FIELDS.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined)
         );
-        // Harden's Aggression is the one deliberate exception: its entire
-        // payoff is passives (thorns/unshaken/defenseBoost), which need no
-        // trigger at all and are live even in a fight the agent never chooses
-        // to spend an action in.
+        // Harden's Aggression was recorded here as the one deliberate
+        // exception — a branch whose entire payoff is passives and that
+        // therefore reaches nothing `maybeUseUtilityMoveInCombat` would spend
+        // an action on. That is no longer true and had already stopped being
+        // true before this list was widened: *Honed Carapace* sets
+        // `statChangesOnHit` (self Defense +2), which
+        // `resolveStatChangesOnHit` folds in exactly like the singular form,
+        // so the branch IS fight-usable. The passive assertion it carried is
+        // kept, because the passive payoff is still the branch's identity.
         if (moveId === "harden" && branch === "aggression") {
-          expect(reaches).toBe(false);
           expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(4);
-          continue;
         }
         expect(reaches).toBe(true);
       }
@@ -1967,5 +1979,138 @@ describe("Poison Sting tree: the sting is not the point, the sting is delivery",
     expect(ticksAt("scent_trail")).toBe(80);
     expect(ticksAt("nothing_leaves")).toBe(200);
     expect(ticksAt("circling_nest")).toBe(260);
+  });
+});
+
+describe("Roost tree: the bird comes down, and being down is the price", () => {
+  const roost = MOVES.roost as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the landing is a real action lock, not a label — and it is bought, never free", () => {
+    // `lockTicks` is additive and applied by `useMove`, which the utility
+    // path DOES call, so this is a genuine window of not acting.
+    expect(roost.lockTicks ?? 0).toBe(0); // the base move grounds nobody
+    const settled = applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "settled_in")]);
+    expect(settled.lockTicks).toBe(6); // Wings Folded 3 + Settled In 3
+    expect(settled.selfHeal).toEqual({ fraction: 0.4 });
+    const night = applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "night_on_the_branch")]);
+    expect(night.selfHeal).toEqual({ fraction: 0.7 });
+    expect(night.lockTicks).toBe(14); // + Dead Asleep 3 + Night on the Branch 5
+    // Every node that spends lock ticks pays for them in the same node.
+    for (const node of Object.values(roost.tree)) {
+      if (!node.delta.lockTicks) continue;
+      const upside = Object.keys(node.delta).some((k) => k !== "lockTicks") || node.grantsPassive || node.grantsPassives;
+      expect(upside).toBeTruthy();
+    }
+  });
+
+  it("the two Boldness lanes are opposites: lane D locks and heals, lane B never locks at all", () => {
+    const laneB = resolveChosenSetFor(roost.tree, "up_again");
+    expect([...laneB].some((id) => roost.tree[id].delta.lockTicks)).toBe(false);
+    const spec = applyMoveTree(roost, [...laneB]);
+    expect(spec.lockTicks ?? 0).toBe(0);
+    expect(spec.cooldownTicks).toBe(19); // 30 - 2 - 3 - 4 - 2
+    expect(spec.statChangesOnHit).toEqual([{ target: "self", stat: "speed", stage: 2, ticks: 60 }]);
+  });
+
+  it("every selfHeal setter lies on one ancestry chain, so no two of them race", () => {
+    const healers = Object.values(roost.tree).filter((n) => n.delta.selfHeal).map((n) => n.id).sort();
+    expect(healers).toEqual(["full_crop", "night_on_the_branch", "settled_in"]);
+    const chain = resolveChosenSetFor(roost.tree, "night_on_the_branch");
+    for (const id of healers) expect(chain.has(id)).toBe(true);
+  });
+
+  it("the roost is a place: a real fertilityBoost and a real status aura, laddered on one chain", () => {
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "rich_ground")]).fertilityBoost)
+      .toEqual({ amount: 0.5, radius: 2 });
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "roosting_hours")]).fertilityBoost)
+      .toEqual({ amount: 0.7, radius: 2 });
+    expect(applyMoveTree(roost, [...resolveChosenSetFor(roost.tree, "whole_tree_down")]).statusImmunityAura)
+      .toEqual({ ticks: 70, radius: 3 });
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(roost, "thorns")).toBeLessThanOrEqual(0.5);
+    expect(passiveTotal(roost, "damageReduction")).toBeLessThanOrEqual(0.2);
+    expect(passiveTotal(roost, "regen") + passiveTotal(roost, "healAura") + passiveTotal(roost, "regenFlat") / 43)
+      .toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe("Defense Curl tree: a ball has no handles", () => {
+  const curl = MOVES.defense_curl as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const harden = MOVES.harden as MoveSpec & { tree: Record<string, MoveTreeNode> };
+  const passivesOf = (n: MoveTreeNode) => [...(n.grantsPassives ?? []), ...(n.grantsPassive ? [n.grantsPassive] : [])];
+
+  it("is not Harden: no lockTicks and no immovable anywhere, where Harden leans on both", () => {
+    const uses = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, pred: (n: MoveTreeNode) => unknown) =>
+      Object.values(move.tree).filter(pred).length;
+    expect(uses(curl, (n) => n.delta.lockTicks)).toBe(0);
+    expect(uses(curl, (n) => passivesOf(n).some((p) => p.kind === "immovable"))).toBe(0);
+    // The control: Harden uses both, which is why the two moves read
+    // differently rather than being the same tree twice.
+    expect(uses(harden, (n) => n.delta.lockTicks)).toBeGreaterThan(0);
+    expect(uses(harden, (n) => passivesOf(n).some((p) => p.kind === "immovable"))).toBeGreaterThan(0);
+  });
+
+  it("a defensive move that buys Speed: the roll ladder is 1 -> 2 -> 3 -> 4", () => {
+    const speedAt = (id: string) => {
+      const spec = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, id)]);
+      const speeds = (spec.statChangesOnHit ?? []).filter((c) => c.stat === "speed");
+      return Math.max(0, ...speeds.map((c) => c.stage));
+    };
+    expect(speedAt("set_the_spin")).toBe(1);
+    expect(speedAt("still_rolling")).toBe(2);
+    expect(speedAt("long_grade")).toBe(3);
+    expect(speedAt("comes_back_around")).toBe(4);
+    // Harden's whole tree never touches Speed — the control for "this is a
+    // different answer, not a bigger one".
+    expect(Object.values(harden.tree).some((n) =>
+      [...(n.delta.statChangesOnHit ?? []), ...(n.delta.statChangeOnHit ? [n.delta.statChangeOnHit] : [])].some((c) => c.stat === "speed")
+    )).toBe(false);
+  });
+
+  it("the Defense ladder climbs 2 -> 3 -> 4 -> 5 and stops one stage short of the +6 clamp", () => {
+    const setters = Object.values(curl.tree)
+      .filter((n) => (n.delta.statChangesOnHit ?? []).some((c) => c.stat === "defense"))
+      .map((n) => n.id).sort();
+    expect(setters).toEqual(["limbs_in", "one_curve", "the_soft_side_in", "tuck"]);
+    const defenseAt = (id: string) => {
+      const spec = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, id)]);
+      return Math.max(0, ...(spec.statChangesOnHit ?? []).filter((c) => c.stat === "defense").map((c) => c.stage));
+    };
+    expect(curl.statChangeOnHit?.stage).toBe(1); // the base move
+    expect(defenseAt("tuck")).toBe(2);
+    expect(defenseAt("limbs_in")).toBe(3);
+    expect(defenseAt("the_soft_side_in")).toBe(4);
+    // One Curve is reachable by three routes and only one of them walks the
+    // Defense lane, so its own +5 has to stand on its own — which is exactly
+    // why every rung uses the APPENDING form: two rungs in one build resolve
+    // to the strongest (`resolveStatChangesOnHit`), never to whichever the
+    // engine happened to apply last.
+    expect(defenseAt("one_curve")).toBe(5);
+    const bothRoutes = new Set([
+      ...resolveChosenSetFor(curl.tree, "heat_kept"),
+      ...resolveChosenSetFor(curl.tree, "one_curve"),
+    ]);
+    expect(bothRoutes.has("the_soft_side_in")).toBe(true);
+    const spec = applyMoveTree(curl, [...bothRoutes, "one_curve"].filter((id, i, a) => a.indexOf(id) === i));
+    expect(Math.max(...(spec.statChangesOnHit ?? []).filter((c) => c.stat === "defense").map((c) => c.stage))).toBe(5);
+  });
+
+  it("both halves of lane R's fork differ in kind, not degree — measured on the respec'd spec", () => {
+    const long = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, "long_grade")]);
+    const short = applyMoveTree(curl, [...resolveChosenSetFor(curl.tree, "short_hops")]);
+    expect(Math.max(...(long.statChangesOnHit ?? []).map((c) => c.stage))).toBe(3);
+    expect(Math.max(...(short.statChangesOnHit ?? []).map((c) => c.stage))).toBe(2);
+    expect(short.cooldownTicks).toBeLessThan(long.cooldownTicks);
+  });
+
+  it("stays inside its per-move passive budgets", () => {
+    expect(passiveTotal(curl, "thorns")).toBeLessThanOrEqual(0.5);
+    // Slack Hide and Packed Tight exclude each other, so the reachable
+    // damageReduction total is what matters; both sides are under the cap.
+    expect(passiveTotal(curl, "damageReduction")).toBeLessThanOrEqual(0.2);
+    expect(passiveTotal(curl, "regen") + passiveTotal(curl, "healAura") + passiveTotal(curl, "regenFlat") / 43)
+      .toBeLessThanOrEqual(0.1);
   });
 });
