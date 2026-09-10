@@ -7649,23 +7649,57 @@ export const MOVES: Record<string, MoveSpec> = {
     // cooldown — unlike an ordinary flee step, which costs nothing and can
     // be repeated every tick, this can't be spammed.
     burrow: { ticks: 20 },
-    // v2 (MOVES_DESIGN.md's own template), but honestly scoped smaller than
-    // Vine Whip/Wing Attack/Rock Slide above — Dig is genuinely never
-    // resolved as a hit (see the comment above), so power/accuracy/
-    // defensePenetration/forcedMovement/lifesteal/every damage-facing lever
-    // this template usually leans on are all dead weight here; there's
-    // nothing for them to modify. The only two real levers left are
-    // `cooldownTicks` (this move's own real cooldown, genuinely gating how
-    // often Diglett/Sandshrew can burrow-flee) and `grantsPassive`/
-    // `grantsPassives` (agent-level, real regardless of how the move is
-    // used). Every node below is one or the other — no padded "+5 Power"
-    // filler pretending this move deals damage. Shared by Diglett AND
-    // Sandshrew (species.ts's own comment: they coexist underground, a
-    // real cross-species breeding pair) — Sociability leans directly into
-    // that literal, already-written flavor.
+    // v4 two-lane standard. Dig is genuinely never resolved as a hit
+    // (pickBestMove excludes every `burrow` move — combat.ts), so
+    // power/accuracy/defensePenetration/forcedMovement/lifesteal and every
+    // other damage-facing lever is dead weight here: there is nothing for
+    // them to modify. That much was already written down. What was NOT true
+    // is the old claim that cooldown and passives are "the only two real
+    // levers left" — that was read off the delta schema, never off the call
+    // sites. Measured against the real engine (a temporary harness driving
+    // predation/needs/support with the shipped dig spec, each with its own
+    // control), FOUR more deltas reach dig:
+    //
+    //   - `lockTicks` — `useMove` (combat.ts) applies it, and the burrow-flee
+    //     branch (predation.ts) calls `useMove`. Verified: a dig with
+    //     lockTicks 3 left the fleeing agent on actionLockTicks 3, control 0.
+    //   - `gatherBurst` — needs.ts's crop-dig and spring-dig paths, already
+    //     shipped and already used here.
+    //   - `targetsAlly` + `allyEffect` — `applySupportMove` (support.ts)
+    //     filters on `targetsAlly && allyEffect && !cooldown` and does NOT
+    //     exclude burrow moves. Verified: a dig so specced healed an adjacent
+    //     herd-mate on an idle tick; the shipped dig, as control, did not.
+    //     It costs what it looks like it costs — the same 15-tick cooldown
+    //     that gates the burrow-escape — so a Sociability build really is
+    //     spending its own escape hatch on somebody else's shelter.
+    //   - `range` — only through that same support path, deciding which
+    //     herd-mates are reachable. Verified: max 1 could not reach an ally
+    //     three tiles off, max 3 could.
+    //
+    // Everything else on the delta schema is gated behind resolveHit or the
+    // `utilityMove` idle path and stays dead for this move. That ceiling is
+    // real and worth stating plainly: dig can reach 5 of the colour pie's 16
+    // flavours, not because its fantasy is thin but because 11 of them are
+    // reachable only through hit resolution.
+    //
+    // Shared by Diglett AND Sandshrew (species.ts's own comment: they coexist
+    // underground, a real cross-species breeding pair) — Sociability leans
+    // directly into that literal, already-written flavor.
+    //
+    // THE FANTASY. Dig is the ground opening under something and closing
+    // again. Nothing is struck; something is simply not there any more. For a
+    // Diglett or a Sandshrew the tunnel is not an escape hatch, it is the
+    // house — it is where the water is, where the roots are, and where the
+    // other burrowers already live. It is the only move in the roster whose
+    // payoff is absence, and the only one whose real work happens where
+    // nobody can watch it.
     tree: {
-      // --- Aggression: "Quick Vanish" — gone before anything can react,
-      // burrowing so often the cooldown itself is the whole build.
+      // --- Aggression: "Gone Before It Lands". For a move that cannot hurt
+      // anything, aggression is refusal and theft: never be there when the
+      // blow lands, and be the one who gets to the root first. Two lanes that
+      // differ in kind, not degree — the short dive is FREQUENCY (be gone and
+      // back before anything gets a turn), the long dive is COMMITMENT (go
+      // down, stay down, come up with what you went for).
       quick_reflexes: {
         id: "quick_reflexes",
         name: "Quick Reflexes",
@@ -7676,34 +7710,85 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "unshaken", value: 1 },
         delta: {},
       },
+
+      // Lane A — "The Short Dive": frequency.
       shallow_dive: {
         id: "shallow_dive",
-        name: "-2 Cooldown",
-        cost: 2,
-        prerequisitesAnyOf: [["quick_reflexes"], ["braced_dive"], ["quick_warning"]],
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["quick_reflexes"],
         leaning: "aggression",
-        // Consolidated from two separate "-1 Cooldown" nodes into one —
-        // this branch's honestly-narrow lever set (only cooldownTicks and
-        // passives are real for a move that's never resolved as a hit)
-        // doesn't need the padding of splitting the same lever twice just
-        // to hit a node count.
+        // Name corrected from "-2 Cooldown": the delta is and always was -1.
+        // Principle 5 ("say the numbers, don't paraphrase them") names this
+        // exact class of bug, and it had shipped here.
         delta: { cooldownTicks: -1 },
+      },
+      scattered_grit: {
+        id: "scattered_grit",
+        name: "Scattered Grit",
+        cost: 1,
+        prerequisites: ["shallow_dive"],
+        leaning: "aggression",
+        // A shallow dive throws its spoil straight up. Whatever was standing
+        // over the hole takes a face full of hard grit for it.
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
       },
       never_still: {
         id: "never_still",
         name: "Never Still",
         cost: 1,
-        prerequisitesAnyOf: [["shallow_dive"], ["unflinching_burrow"], ["first_to_ground"]],
+        prerequisitesAnyOf: [["scattered_grit"], ["unflinching_burrow"]],
         leaning: "aggression",
-        // This branch's real "notable" is tempo, not power — there's
-        // nothing else honest to give it.
+        // This lane's notable is tempo, and tempo is the honest one for a
+        // move whose whole payoff is not being there.
         delta: { cooldownTicks: -2 },
+      },
+      loose_ground: {
+        id: "loose_ground",
+        name: "Loose Ground",
+        cost: 1,
+        prerequisites: ["never_still"],
+        leaning: "aggression",
+        // Ground worked this often never packs down again. A blow aimed at
+        // something standing on it lands in earth that gives.
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
+        delta: {},
+      },
+
+      // Lane B — "The Long Dive": commitment. The cost is real (`lockTicks`
+      // holds the agent's own action clock — needs.ts returns early on it),
+      // and the benefit sits in the same node, per principle 4.
+      down_deep: {
+        id: "down_deep",
+        name: "Down Deep",
+        cost: 1,
+        prerequisites: ["quick_reflexes"],
+        leaning: "aggression",
+        // Doesn't scrape — goes under and works while it is down there.
+        // Measured on the real crop-dig path: gatherBurst +4 took a buried
+        // potato from 11 ticks to 7; one tick of lock cost nothing (still 7),
+        // three cost two ticks (9). So a single lock tick against real
+        // gathering is a genuine trade, not a tax that eats its own payoff.
+        delta: { lockTicks: 1, gatherBurst: 3 },
+      },
+      straight_to_the_root: {
+        id: "straight_to_the_root",
+        name: "Straight to the Root",
+        cost: 1,
+        prerequisitesAnyOf: [["down_deep"], ["first_to_ground"]],
+        leaning: "aggression",
+        // Aggression as resource contest — the thing under the ground belongs
+        // to whoever reaches it first, and nothing else in the roster reaches
+        // it at all. This is the branch's answer to "what does aggression
+        // mean for a move that can never land a hit".
+        delta: { gatherBurst: 4 },
       },
       instant_vanish: {
         id: "instant_vanish",
         name: "Instant Vanish",
         cost: 1,
-        prerequisites: ["never_still"],
+        prerequisites: ["straight_to_the_root"],
         excludes: ["false_surface"],
         leaning: "aggression",
         // Was "+2.25 HP Regen". Healing was never this node's fantasy — it is
@@ -7711,43 +7796,78 @@ export const MOVES: Record<string, MoveSpec> = {
         // buys the tempo it describes.
         //
         // Deliberately NOT `unshaken`, which reads like a perfect fit: dig
-        // already grants it (Unflinching Burrow's own read of its name), and
-        // predation.ts gates on `passives.unshaken > 0` rather than summing,
-        // so a second grant would be a node that does literally nothing.
+        // already grants it (Quick Reflexes), and predation.ts gates on
+        // `passives.unshaken > 0` rather than summing, so a second grant would
+        // be a node that does literally nothing.
         delta: { cooldownTicks: -1 },
       },
       false_surface: {
         id: "false_surface",
         name: "False Surface",
         cost: 1,
-        prerequisites: ["never_still"],
+        prerequisites: ["straight_to_the_root"],
         excludes: ["instant_vanish"],
         leaning: "aggression",
-        // Surfaces just long enough to bite before vanishing again.
+        // Surfaces just long enough to bite before vanishing again. The other
+        // half of a real decision: leave immediately, or leave a mark on the
+        // way out.
         grantsPassive: { kind: "thorns", value: 0.1 },
         delta: {},
       },
+
       deepening_instincts: {
         id: "deepening_instincts",
         name: "Deepening Instincts",
-        cost: 2,
-        prerequisitesAnyOf: [["instant_vanish"], ["false_surface"]],
+        cost: 1,
+        prerequisitesAnyOf: [["loose_ground"], ["instant_vanish"], ["false_surface"]],
         leaning: "aggression",
         // Honest rename — the old "Gone Before It Lands" promised a
-        // dodge/timing effect this tree's real lever set (cooldownTicks +
-        // passives only, since Dig is never resolved as a hit) can't
-        // actually deliver.
+        // dodge/timing effect this move's real lever set cannot deliver.
         //
         // 0.12 -> 0.05 to bring the tree under the 20% per-move damage-
-        // reduction cap (it totalled 29%). The cut lands on Aggression
-        // rather than Boldness deliberately: mitigation is a Boldness
-        // flavour in the colour pie, and this node keeps its real lever,
-        // the cooldown.
+        // reduction cap (it totalled 29%). The cut lands on Aggression rather
+        // than Boldness deliberately: mitigation is a Boldness flavour in the
+        // colour pie, and this node keeps its real lever, the cooldown.
         grantsPassive: { kind: "damageReduction", value: 0.05 },
         delta: { cooldownTicks: -1 },
       },
-      // Crosslink: Aggression <-> Boldness — braces for real before every
-      // dive, Boldness's own sturdiness feeding Aggression's speed.
+      spoil_heap: {
+        id: "spoil_heap",
+        name: "Spoil Heap",
+        cost: 1,
+        prerequisites: ["deepening_instincts"],
+        leaning: "aggression",
+        // Every dive leaves a heap behind it, and a heap is a head start on
+        // the next one. Deliberately a delta rather than another passive:
+        // `damageReductionFlat` already sums to ~15 on a fully-invested
+        // Diglett across its whole movepool (passive-exposure.ts), and nothing
+        // in the engine bends that one.
+        delta: { gatherBurst: 2 },
+      },
+      stays_down: {
+        id: "stays_down",
+        name: "Stays Down",
+        cost: 1,
+        prerequisites: ["spoil_heap"],
+        leaning: "aggression",
+        // CAPSTONE. It does not come back up until it has what it came for,
+        // and the roof it comes up through takes whatever was standing on it.
+        // Nothing else in the roster trades the agent's own action clock for
+        // gathering — this is the only node in the game where standing still
+        // underground is the aggressive play. The lock is a real cost (two of
+        // its own turns), which is exactly why the payoff is the largest
+        // `gatherBurst` in the roster rather than another number on a hit
+        // that never happens. No passive at all on it, deliberately: thorns is
+        // Boldness's payoff in this tree, and a second big grant here is what
+        // pushed a fully-invested Diglett to 63% reflected damage on the first
+        // pass of this conversion (passive-exposure.ts, which is cross-move and
+        // sees what the per-tree checker cannot).
+        delta: { lockTicks: 2, gatherBurst: 6 },
+      },
+
+      // Crosslink 1: Aggression <-> Boldness — braces for real before every
+      // dive, Boldness's own sturdiness feeding Aggression's speed. Lands on
+      // Never Still (the fast lane) and Bedrock Grip (the soak lane).
       braced_dive: {
         id: "braced_dive",
         name: "Braced Dive",
@@ -7770,19 +7890,24 @@ export const MOVES: Record<string, MoveSpec> = {
       unflinching_burrow: {
         id: "unflinching_burrow",
         name: "Unflinching Burrow",
-        cost: 2,
+        cost: 1,
         prerequisites: ["hardened_dive"],
         leaning: "aggression",
         // Takes the hit mid-dive and keeps going. 0.05 -> 0.03 for the
-        // same per-move cap; the defenseBoost is what carries this node.
+        // per-move damage-reduction cap; the defenseBoost is what carries
+        // this node.
         grantsPassives: [
           { kind: "damageReduction", value: 0.03 },
           { kind: "defenseBoost", value: 0.04 },
         ],
         delta: {},
       },
-      // --- Boldness: "Iron Burrow" — toughens up between dives instead of
-      // just vanishing faster.
+
+      // --- Boldness: "The Roof Holds". Boldness for a burrower is not
+      // standing in the open taking it — there is no open. It is the tunnel
+      // not caving in, and nothing being able to get you out of it. Lane A
+      // soaks (flat mitigation, strong early, marginal late); lane B DENIES
+      // (it cannot be moved, and what comes down on the roof comes back).
       sturdy_return: {
         id: "sturdy_return",
         name: "Sturdy Return",
@@ -7791,6 +7916,8 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
+
+      // Lane A — "Packed Walls": soak.
       thicker_hide: {
         id: "thicker_hide",
         name: "-1 Cooldown",
@@ -7803,28 +7930,65 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "packed_earth",
         name: "Packed Earth",
         cost: 1,
-        prerequisitesAnyOf: [["thicker_hide"], ["braced_dive"], ["shared_shelter"]],
+        prerequisites: ["thicker_hide"],
         leaning: "boldness",
-        // Hard-packed ground is no obstacle to a digger that's built for
-        // it — another real `gatherBurst`, and another duplicate
-        // "-1 Cooldown" filler retired (this branch had two identical
-        // ones under names that both promised something else).
+        // Hard-packed ground is no obstacle to a digger that is built for it
+        // — a real `gatherBurst`, and another duplicate "-1 Cooldown" filler
+        // retired (this branch had two identical ones under names that both
+        // promised something else).
         delta: { gatherBurst: 3 },
       },
       bedrock_grip: {
         id: "bedrock_grip",
         name: "Bedrock Grip",
         cost: 1,
-        prerequisitesAnyOf: [["packed_earth"], ["unflinching_burrow"], ["communal_warren"]],
-        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        prerequisitesAnyOf: [["packed_earth"], ["unflinching_burrow"]],
         leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.05 },
+        delta: {},
+      },
+      shored_up: {
+        id: "shored_up",
+        name: "Shored Up",
+        cost: 1,
+        prerequisites: ["bedrock_grip"],
+        leaning: "boldness",
+        // Props and packed spoil along the walls. The tunnel stops shedding
+        // its own roof every time something heavy walks over it.
+        grantsPassive: { kind: "damageReductionFlat", value: 0.75 },
+        delta: {},
+      },
+
+      // Lane B — "Nothing Pulls It Out": denial.
+      braced_shoulders: {
+        id: "braced_shoulders",
+        name: "Braced Shoulders",
+        cost: 1,
+        prerequisites: ["sturdy_return"],
+        leaning: "boldness",
+        // Sets itself against both walls before anything can get a grip. The
+        // beat spent planting is the cost; the footing is the payoff.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+        delta: { lockTicks: 1 },
+      },
+      set_in_the_wall: {
+        id: "set_in_the_wall",
+        name: "Set in the Wall",
+        cost: 1,
+        prerequisitesAnyOf: [["braced_shoulders"], ["communal_warren"]],
+        leaning: "boldness",
+        // The lane's notable, and a different KIND of answer from Bedrock
+        // Grip's: not "the hit hurts less" but "you do not get to move me."
+        // `immovable` is `> 0`-gated (status.ts), so this is the tree's one
+        // and only grant of it — a second anywhere would be a dead node.
+        grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
       },
       weathered_scales: {
         id: "weathered_scales",
         name: "Weathered Scales",
         cost: 1,
-        prerequisites: ["bedrock_grip"],
+        prerequisites: ["set_in_the_wall"],
         excludes: ["stone_hide"],
         leaning: "boldness",
         // Was "+3 HP Regen", the single biggest healing node in the tree and
@@ -7839,19 +8003,27 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "stone_hide",
         name: "Stone Hide",
         cost: 1,
-        prerequisites: ["bedrock_grip"],
+        prerequisites: ["set_in_the_wall"],
         excludes: ["weathered_scales"],
         leaning: "boldness",
-        // Stacks with Sturdy Return's own damageReduction for a real,
-        // cumulative toughness.
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        // Was `damageReductionFlat: 1` against Weathered Scales' 1.5 — the
+        // same passive, strictly less of it. That is not a fork, it is a node
+        // nobody would ever pick, which is this project's own definition of a
+        // bug. Changed to `defenseBoost`, the lever MOVES_DESIGN.md's "Stop
+        // overusing damageReduction" section says an armour fiction should
+        // have been using all along: physical-only, scaling with the defence
+        // stat, so it is weak early and strong late — the exact opposite
+        // curve to the flat soak it now competes with. That is a real
+        // decision about when in a run you expect to need it.
+        grantsPassive: { kind: "defenseBoost", value: 0.06 },
         delta: {},
       },
+
       unshakable_ground: {
         id: "unshakable_ground",
         name: "Unshakable Ground",
-        cost: 2,
-        prerequisitesAnyOf: [["weathered_scales"], ["stone_hide"]],
+        cost: 1,
+        prerequisitesAnyOf: [["shored_up"], ["weathered_scales"], ["stone_hide"]],
         leaning: "boldness",
         grantsPassives: [
           { kind: "defenseBoost", value: 0.05 },
@@ -7859,8 +8031,38 @@ export const MOVES: Record<string, MoveSpec> = {
         ],
         delta: {},
       },
-      // Crosslink: Boldness <-> Sociability — a sturdy den shared with
-      // whoever else is burrowed nearby.
+      deep_footing: {
+        id: "deep_footing",
+        name: "Deep Footing",
+        cost: 1,
+        prerequisites: ["unshakable_ground"],
+        leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+        delta: {},
+      },
+      the_roof_holds: {
+        id: "the_roof_holds",
+        name: "The Roof Holds",
+        cost: 1,
+        prerequisites: ["deep_footing"],
+        leaning: "boldness",
+        // CAPSTONE. The tunnel takes the blow instead of the animal inside
+        // it, and the roof gives it back. Deliberately NOT more
+        // `damageReduction` — the tree is already at the 20% per-move cap and
+        // this branch has three separate mitigation nodes already; a fourth
+        // would be the "one lever answers the whole branch" failure. Thorns
+        // is the branch's own fiction finally paying out: something dug in
+        // this deep is not a wall you hit for free.
+        grantsPassives: [
+          { kind: "thorns", value: 0.1 },
+          { kind: "damageReductionFlat", value: 1.5 },
+        ],
+        delta: {},
+      },
+
+      // Crosslink 2: Boldness <-> Sociability — a sturdy den shared with
+      // whoever else is burrowed nearby. Lands on Set in the Wall (the denial
+      // lane) and Settling Earth (the quiet lane).
       shared_shelter: {
         id: "shared_shelter",
         name: "Shared Shelter",
@@ -7883,65 +8085,113 @@ export const MOVES: Record<string, MoveSpec> = {
       communal_warren: {
         id: "communal_warren",
         name: "Communal Warren",
-        cost: 2,
+        cost: 1,
         prerequisites: ["wider_shelter"],
         leaning: "boldness",
         // A warren dug together is dug faster — the shelter fantasy finally
-        // paying into this move's own gathering identity, not just another aura.
+        // paying into this move's own gathering identity, not just another
+        // aura.
         grantsPassive: { kind: "calmingPresence", value: 0.1 },
         delta: { gatherBurst: 3 },
       },
-      // --- Sociability: "Shared Ground" — Diglett and Sandshrew genuinely
+
+      // --- Sociability: "Shared Ground". Diglett and Sandshrew genuinely
       // coexist underground (species.ts's own note); this branch is that,
-      // mechanically.
+      // mechanically. Lane A PREVENTS trouble (the tunnels are neutral
+      // ground); lane B REPAIRS it — the digger spends its own escape hatch
+      // digging cover for somebody else. Those are different in kind, and the
+      // second one has a real price: `applySupportMove` puts dig on its full
+      // cooldown, so a Diglett that just dug a den for a herd-mate cannot
+      // vanish for itself.
       peaceful_tunnels: {
         id: "peaceful_tunnels",
         name: "Peaceful Tunnels",
         cost: 1,
         leaning: "sociability",
+        // `nonTerritorial` is read as a boolean (herdConflict.ts returns early
+        // on any value > 0), so this is the tree's only grant of it.
         grantsPassive: { kind: "nonTerritorial", value: 1 },
         delta: {},
+      },
+
+      // Lane A — "The Quiet Warren": prevention.
+      quiet_ground: {
+        id: "quiet_ground",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["peaceful_tunnels"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
       },
       wider_burrow: {
         id: "wider_burrow",
         name: "Wider Burrow",
         cost: 1,
-        prerequisites: ["peaceful_tunnels"],
+        prerequisites: ["quiet_ground"],
         leaning: "sociability",
         // Direct correction, and the hook this whole tree was missing:
         // "dig was supposed to make digging springs and food easier."
-        // It already did a little — needs.ts hands any off-cooldown
-        // `burrow` move a real `DIG_MOVE_BURST_TICKS` head start on
-        // uncovering an underground crop or digging a brand-new spring —
-        // but nothing in the tree could ever make that better. `gatherBurst`
-        // does, and it's the first lever on this tree that's about what Dig
-        // is actually FOR rather than how fast it recharges. Also clears a
-        // flagged name/mechanic mismatch: "Wider Burrow" used to grant a
-        // cooldown reduction.
+        // It already did a little — needs.ts hands any off-cooldown `burrow`
+        // move a real `DIG_MOVE_BURST_TICKS` head start on uncovering an
+        // underground crop or digging a brand-new spring — but nothing in the
+        // tree could ever make that better. `gatherBurst` does.
         delta: { gatherBurst: 3 },
-      },
-      quiet_ground: {
-        id: "quiet_ground",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["wider_burrow"], ["shared_shelter"], ["quick_warning"]],
-        leaning: "sociability",
-        delta: { cooldownTicks: -1 },
       },
       settling_earth: {
         id: "settling_earth",
         name: "Settling Earth",
         cost: 1,
-        prerequisitesAnyOf: [["quiet_ground"], ["communal_warren"], ["first_to_ground"]],
+        prerequisitesAnyOf: [["wider_burrow"], ["communal_warren"]],
         leaning: "sociability",
         grantsPassive: { kind: "calmingPresence", value: 0.2 },
         delta: {},
+      },
+      room_for_both: {
+        id: "room_for_both",
+        name: "Room for Both",
+        cost: 1,
+        prerequisites: ["settling_earth"],
+        leaning: "sociability",
+        // Two diggers never meet in the same tunnel, so neither has to make
+        // anything of it. The quiet lane's own answer to gathering: not
+        // faster, just enough for everybody.
+        delta: { gatherBurst: 3 },
+      },
+
+      // Lane B — "Dug for Others": repair.
+      dug_you_a_den: {
+        id: "dug_you_a_den",
+        name: "Dug You a Den",
+        cost: 1,
+        prerequisites: ["peaceful_tunnels"],
+        leaning: "sociability",
+        // The branch's hinge, and the one place in this tree where dig stops
+        // being about the digger. `applySupportMove` (support.ts) picks up any
+        // off-cooldown `targetsAlly` + `allyEffect` move on an idle tick and
+        // does not exclude burrow moves — verified live against the real
+        // engine, with the unspecced dig as the control. The cost is the same
+        // 15-tick cooldown that gates the burrow-escape, so this is a genuine
+        // decision rather than free value.
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.06 } },
+      },
+      second_entrance: {
+        id: "second_entrance",
+        name: "Second Entrance",
+        cost: 1,
+        prerequisitesAnyOf: [["dug_you_a_den"], ["first_to_ground"]],
+        leaning: "sociability",
+        // A den does not have to be dug where the digger is standing. `range`
+        // is otherwise completely dead on this move — it reaches nothing but
+        // `withinMoveRange` on the support path — which is exactly what makes
+        // it this lane's notable: verified live, max 1 could not reach a
+        // herd-mate three tiles off and max 3 could.
+        delta: { range: { min: 0, max: 3 }, gatherBurst: 2 },
       },
       deeper_calm: {
         id: "deeper_calm",
         name: "Deeper Calm",
         cost: 1,
-        prerequisites: ["settling_earth"],
+        prerequisites: ["second_entrance"],
         excludes: ["watchful_rest"],
         leaning: "sociability",
         grantsPassive: { kind: "calmingPresence", value: 0.15 },
@@ -7951,7 +8201,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "watchful_rest",
         name: "Watchful Rest",
         cost: 1,
-        prerequisites: ["settling_earth"],
+        prerequisites: ["second_entrance"],
         excludes: ["deeper_calm"],
         leaning: "sociability",
         // Kept as healing — this one IS rest — but 2.25 -> 1.5 against the
@@ -7959,14 +8209,15 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "regenFlat", value: 1.5 },
         delta: {},
       },
+
       denning_together: {
         id: "denning_together",
         name: "Denning Together",
-        cost: 2,
-        prerequisitesAnyOf: [["deeper_calm"], ["watchful_rest"]],
+        cost: 1,
+        prerequisitesAnyOf: [["room_for_both"], ["deeper_calm"], ["watchful_rest"]],
         leaning: "sociability",
-        // A shared den means real rest for everyone in it, not just a
-        // trickle of healing.
+        // A shared den means real rest for everyone in it, not just a trickle
+        // of healing.
         //
         // Group healing is held to a stricter standard than self-healing:
         // `healAura` pays out to every herd-mate in radius every tick, so one
@@ -7978,8 +8229,47 @@ export const MOVES: Record<string, MoveSpec> = {
         ],
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — even the quick-vanishing
-      // ones know the tunnels are shared ground.
+      warm_walls: {
+        id: "warm_walls",
+        name: "Warm Walls",
+        cost: 1,
+        prerequisites: ["denning_together"],
+        leaning: "sociability",
+        // A den with bodies in it holds its heat. The last of this tree's
+        // healing budget: regen + healAura + regenFlat/43 now totals 9.3%
+        // against the 10% per-move cap, so nothing else in this tree may heal.
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
+        delta: {},
+      },
+      open_tunnels: {
+        id: "open_tunnels",
+        name: "Open Tunnels",
+        cost: 1,
+        prerequisites: ["warm_walls"],
+        leaning: "sociability",
+        // CAPSTONE. The warren stops being a private hole and becomes a road:
+        // anything in the herd that needs cover gets a den dug for it, where
+        // it is standing, with walls already shored. Escalates Dug You a Den's
+        // own `allyEffect` rather than reaching for a new lever (principle 13
+        // read one level up) — a deliberate overwrite of an ancestor's value,
+        // which is the only shape of overwrite that is safe here.
+        //
+        // Deliberately NOT another aura passive: this branch already grants
+        // healAura, regen, regenFlat, calmingPresence and nonTerritorial, and
+        // a sixth would be the "one lever answers the branch" failure wearing
+        // a capstone's clothes. What is actually new is that the shelter is
+        // now something a herd-mate KEEPS — a real defence buff with a
+        // duration, dug into the ground rather than handed out as a number.
+        delta: {
+          targetsAlly: true,
+          allyEffect: { healFraction: 0.12, buff: { stat: "defense", stage: 1, ticks: 30 } },
+        },
+      },
+
+      // Crosslink 3: Sociability <-> Aggression — even the quick-vanishing
+      // ones know the tunnels are shared ground. Lands on Second Entrance
+      // (the lane that digs for others) and Straight to the Root (the lane
+      // that digs for itself).
       quick_warning: {
         id: "quick_warning",
         name: "Quick Warning",
@@ -7993,10 +8283,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // herd).
         //
         // Its -1 cooldown moved to Instant Vanish, whose entire identity is
-        // speed, rather than being shaved off some third node: dig sits
-        // exactly at the 3x tempo cap, so the tick had to come from
-        // somewhere, and a de-escalation node is the one place in this branch
-        // where tempo was never the point.
+        // speed, rather than being shaved off some third node.
         grantsPassive: { kind: "calmingPresence", value: 0.08 },
         delta: {},
       },
@@ -8009,15 +8296,14 @@ export const MOVES: Record<string, MoveSpec> = {
         // Deepens Quick Warning's own de-escalation lever, which is what that
         // node now grants — the whole bridge is about the warning working,
         // not about digging faster. This gave back the tick Instant Vanish
-        // needed: dig sat exactly at the 3x tempo cap, so the two cooldowns
-        // on this bridge were the ones with the least claim to it.
+        // needed.
         grantsPassive: { kind: "calmingPresence", value: 0.05 },
         delta: {},
       },
       first_to_ground: {
         id: "first_to_ground",
         name: "First to Ground",
-        cost: 2,
+        cost: 1,
         prerequisites: ["sharper_warning"],
         leaning: "aggression",
         // Underground before anything else has reacted, and recovering while

@@ -5071,3 +5071,131 @@ deeper trees are still outrunning what an 8,000-tick population levels into.
 Every capstone and every bridge shortcut *is* legal and reachable, proved by
 walking all six routes through the real `applyMoveTree` (which throws on an
 illegal walk) and by proving that harness rejects an illegal walk first.
+
+### Dig converted to v4 — "the only move whose payoff is absence"
+
+29 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. All
+three v3 forks survive, relocated to the tail of a lane. Checker findings for
+this tree: **10 → 0**, with no overwrite collisions left over.
+
+**The trap had to be cleared before any design was possible.** Dig is never
+resolved as a hit — `pickBestMove` (combat.ts) excludes every `burrow` move —
+so power/accuracy/crit/penetration/forced-movement and everything else the
+template usually leans on are dead weight. The tree's own source comment went
+further and claimed cooldown and passives were "the only two real levers
+left," and that turned out to be **read off the delta schema, never off the
+call sites**. Measured against the real engine, each with its own control:
+
+| lever | reaches dig through | verified |
+|---|---|---|
+| `cooldownTicks` | `useMove` + every off-cooldown gate | already known |
+| `gatherBurst` | needs.ts crop-dig and spring-dig | already known |
+| **`lockTicks`** | `useMove` (combat.ts), which the burrow-flee branch calls | lockTicks 3 → `actionLockTicks` 3, control 0 |
+| **`targetsAlly` + `allyEffect`** | `applySupportMove` (support.ts) — it filters on `targetsAlly && allyEffect && !cooldown` and does **not** exclude burrow moves | healed an adjacent herd-mate on an idle tick; the shipped dig, as control, did not |
+| **`range`** | only that same support path, deciding which herd-mates are reachable | max 1 could not reach an ally 3 tiles off, max 3 could |
+| `power` | nothing | 200 power changed no outcome; `pickBestMove` returns undefined |
+
+Both new engine facts are now regression-guarded with their controls in
+`predation.test.ts` and `support.test.ts`.
+
+**The fantasy:**
+
+> Dig is the ground opening under something and closing again. Nothing is
+> struck; something is simply not there any more. For a Diglett or a
+> Sandshrew the tunnel is not an escape hatch, it is the house — it is where
+> the water is, where the roots are, and where the other burrowers already
+> live. It is the only move in the roster whose payoff is absence, and the
+> only one whose real work happens where nobody can watch it.
+
+| branch | lane A | lane B | the new idea |
+|---|---|---|---|
+| **Gone Before It Lands** (agg) | FREQUENCY — be gone and back before anything gets a turn (`-1`, grit, *Never Still*) | COMMITMENT — go down, stay down, come up with it (`lockTicks` + `gatherBurst`, *Straight to the Root*, then the preserved vanish-vs-bite fork) | *Stays Down* |
+| **The Roof Holds** (bold) | SOAK — flat mitigation, strong early, marginal late | DENIAL — *Set in the Wall*'s `immovable`: not "the hit hurts less" but "you do not get to move me" | *Set in the Wall* |
+| **Shared Ground** (soc) | PREVENTION — the tunnels are neutral ground, nothing starts down here | REPAIR — *Dug You a Den* spends the escape hatch digging cover for somebody else | *Dug You a Den*, *Open Tunnels* |
+
+**The best node in the tree is *Dug You a Den*, and it is the one no other
+move could have.** Every other support move in the roster hands out a heal it
+was already going to hand out. Dig's support use costs the thing the move is
+*for*: `applySupportMove` puts it on the same full 15-tick cooldown that gates
+the burrow-escape, so a Diglett that just dug a den for a hurt herd-mate
+cannot vanish for itself. Predation runs before support in `tickAgentAction`,
+so it never costs a flee it was about to make — it costs the *next* one.
+
+**Two dead-content bugs found and fixed in passing:**
+
+- *Shallow Dive* was named **"-2 Cooldown"** and its delta was `-1`. Principle
+  5, shipped.
+- *Stone Hide* granted `damageReductionFlat: 1` against its own fork partner
+  *Weathered Scales*' `1.5` — the same passive, strictly less of it. Nobody
+  picks that. Changed to `defenseBoost`, which the doc's own "Stop overusing
+  `damageReduction`" section says an armour fiction should have been using
+  anyway: physical-only, scaling with the defence stat, so it is weak early
+  and strong late — the exact opposite curve to the flat soak it now competes
+  with. That is a real decision about *when in a run* you expect to need it.
+
+**Two ceilings this tree runs into, both worth knowing before touching it
+again:**
+
+- **`calmingPresence` is already past its useful maximum.** The escalation
+  multiplier is `1 - total` floored at `MIN_CALMING_MULTIPLIER` = 0.5
+  (herdConflict.ts), and dig alone grants **0.78**. Everything past 0.50 buys
+  nothing, so this conversion added **no new calming node at all** — one would
+  have been provably dead. Same reason there is no second `nonTerritorial`,
+  `unshaken` or `immovable` grant: all three are read as booleans (`> 0`).
+- **`gatherBurst` saturates at +15**, because `SPRING_DIG_TICKS` is 20 and the
+  base burst is 5, so a single use past that already completes the longest
+  gather in the game in one tick. The Aggression branch alone reaches exactly
+  +15 — no single lane wastes any of it. A hypothetical full-tree 45-point
+  build reaches +29 and wastes the last 14, the same way it wastes calm.
+
+**The colour-pie ceiling, stated plainly.** Dig can reach **5 of the 16
+flavours**, not because its fantasy is thin but because 11 of them are gated
+behind `resolveHit` or the `utilityMove` idle path and this move is neither.
+`environment` is the painful one — a digger churning earth is the obvious
+flavour and `terrainFill`/`consumesOwnTerrain`/`fertilityBoost` are all
+hit-or-utility-gated. Flagging dig as `utilityMove` would unlock them and was
+**rejected**: `maybeUseUtilityMove` would burn dig's cooldown on idle ticks,
+directly starving the burrow-escape and both gather paths that gate on the
+same cooldown. That is a regression to the move's core, bought with flavour
+variety. `fireproof` was rejected too — fire spreads only through
+flora/bush/tree/food/seedling (fire.ts) and a burrower's answer to fire is
+already free, since the engine's strict same-layer targeting means an agent
+underground is not standing on the burning tile at all.
+
+**Numbers, roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **10** | **0** | — |
+| nodes | 29 | 45 | 45 |
+| distinct levers | 12 | **17** | 24 |
+| colour-pie flavours | 3 | **5** | 10 |
+| tempo | 2.29x (cap 2.67) | 2.29x | 2.00x |
+| cheapest capstone | 7 pts | 7 pts | 10 pts |
+
+Levers and flavours are both still short of the median and both are at the
+honest ceiling described above — 17 of a possible 19, and 5 of a possible 5.
+Tempo did not move: the conversion added **no** cooldown node, and the
+often-repeated line that dig sits "at the 3x tempo cap" is off by one tick —
+it is at 2.29x against a 2.67x ceiling for a base-15 move, with `-1` still
+unspent.
+
+**Cross-move passive exposure moved, and it is the one thing here worth a
+second opinion** (`passive-exposure.ts`, worst case if a species takes every
+passive node across its whole movepool). Only the four dig species moved;
+nothing else in the roster changed:
+
+| | diglett / dugtrio | sandshrew / sandslash |
+|---|---|---|
+| thorns | 25% → **40%** | 25% → **40%** |
+| damageReductionFlat | 13.00 → **14.75** | 9.50 → **11.25** |
+| defenseBoost | 0.10 → 0.30 | 0.10 → 0.30 |
+| damageReduction | 33% (unchanged) | 33% (unchanged) |
+| regen + healAura | 9.6% (unchanged) | 13.6% (unchanged) |
+
+The thorns move is the deliberate one — "what comes down on the roof comes
+back" is Boldness's whole payoff here — and it was **63% on the first pass**
+before a second thorns grant was pulled off the Aggression capstone. 40% sits
+below Venusaur's 65% and above Bulbasaur's 35%. It is a real change to how
+these four species feel to attack, and it is a balance number, so it is
+recorded here rather than presented as settled.

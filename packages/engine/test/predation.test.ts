@@ -2638,6 +2638,33 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
     expect(log.events.some((e) => e.kind === "fought")).toBe(false);
     expect(attacker.burrowedTicksRemaining).toBeUndefined(); // never self-triggered either
   });
+
+  it("lockTicks on a burrow move really applies on the flee path — the escape can cost real turns", () => {
+    // Dig's v4 tree spends `lockTicks` as a deliberate commitment cost on its
+    // Aggression "long dive" lane, which only means anything because the
+    // burrow-flee branch goes through `useMove` (combat.ts) like every other
+    // move use. Written down as a regression guard because the tree's own
+    // source comment previously claimed cooldown and passives were the only
+    // levers this move could ever reach.
+    const LOCKING_BURROW: MoveSpec = { ...BURROW_MOVE, id: "locking-burrow", lockTicks: 3 };
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = prey({ x: 5, y: 5 }, { moves: [LOCKING_BURROW] });
+    world.agents.push(target, predator({ x: 6, y: 5 }));
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.burrowedTicksRemaining).toBe(20);
+    expect(target.actionLockTicks).toBe(3);
+
+    // Control: the same layout with the plain burrow move locks nothing, so
+    // the assertion above is reading `lockTicks` and not some other lock.
+    const control = createWorld(10, 10, AB_COMPARISON_SEED);
+    const unlocked = prey({ x: 5, y: 5 }, { moves: [BURROW_MOVE] });
+    control.agents.push(unlocked, predator({ x: 6, y: 5 }));
+    tickWorld(control, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(unlocked.burrowedTicksRemaining).toBe(20);
+    expect(unlocked.actionLockTicks ?? 0).toBe(0);
+  });
 });
 
 describe("targetsAlly moves are additive, not a replacement — real combat use", () => {
