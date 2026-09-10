@@ -8377,3 +8377,26 @@ quietly. Options, in order of how much they change:
 
 Not acted on — the shape of the fix changes how these species behave, which
 is a design call.
+
+## Defect: `matingRadiusBoost.multiplier` is inert
+
+Found while building the status trees, confirmed at both call sites (not a
+probabilistic thing — the field is simply never read):
+
+- `utilityMoves.ts` stores only the duration: `agent.matingRadiusBoostTicksRemaining = move.matingRadiusBoost.ticks`.
+- `reproduction.ts`'s `mateSearchRadius` returns `base * MATING_RADIUS_BOOST_MULTIPLIER`, a flat `2`.
+
+So every declared multiplier delivers exactly ×2. Growth ships three nodes at
+**1.6, 2.2 and 3.0** — the 1.6 node quietly over-delivers, the 3.0 node
+under-delivers by a third, and the atlas prints "×3 mate-search radius" for
+something that gives ×2. The two new Safeguard/Withdraw nodes were written as
+`2` so at least their labels are honest.
+
+Not fixed, because either repair is a balance change:
+1. **Read the field.** Labels become true; Growth's capstone gets a real buff
+   (2 → 3) and its opener a real nerf (2 → 1.6).
+2. **Drop `multiplier` from the type** and let the flat constant be the rule.
+   Nothing changes in play; three node descriptions get rewritten.
+
+I'd take 1 — an advertised number that does nothing is the same class of
+defect as unreachable content — but it moves real numbers, so it is yours.
