@@ -262,8 +262,13 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
       if (!t || t.terrain !== "floor") continue;
       const roll = rng();
       if (roll < 0.55) setTile(world, L, x, y, "sunbeam", t.elevation);
-      else if (roll < 0.67) setTile(world, L, x, y, "food", t.elevation);
-      else if (roll < 0.77) setTile(world, L, x, y, "flora", t.elevation);
+      else if (roll < 0.67) {
+        setTile(world, L, x, y, "food", t.elevation);
+        // Ruling: "I want gathering on layer 1." About a third of the
+        // chamber's patches are herbs — the poultice's input — so M5's
+        // crafting cut is makeable without leaving the layer.
+        if (roll < 0.59) tileAt(world, L, x, y)!.flavor = "herbs";
+      } else if (roll < 0.77) setTile(world, L, x, y, "flora", t.elevation);
     }
   }
 

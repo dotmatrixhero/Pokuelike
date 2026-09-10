@@ -61,7 +61,11 @@ export function harvestableAt(world: World, layer: Layer, pos: Vec2): MaterialId
   if (ground) {
     if (layer === "underground" && anyWithin(world, layer, pos, LICHEN_WATER_RANGE, (t) => t.terrain === "water")) out.push("lichen");
     if (anyWithin(world, layer, pos, DEADWOOD_SUNBEAM_RANGE, (t) => t.terrain === "sunbeam")) out.push("deadwood");
-    if (tile.groundType === "rocky" || anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder")) out.push("flint");
+    // Ruling: "I want gathering on layer 1." Cave walls are rock, so floor
+    // beside a wall underground gives loose flint too — the reachability
+    // test found no rocky ground or boulders on any cave seed.
+    const rockNearby = tile.groundType === "rocky" || anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || (layer === "underground" && t.terrain === "wall"));
+    if (rockNearby) out.push("flint");
   }
   return out;
 }

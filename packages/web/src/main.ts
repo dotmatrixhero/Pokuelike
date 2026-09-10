@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -466,10 +466,16 @@ function renderPlayerHud(): void {
 /** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
 function renderPack(player: Agent): void {
   const items = (player.inventory ?? []).map((i) => {
-    const slot = player.equipment?.held === i.itemKey ? " (held)" : player.equipment?.worn === i.itemKey ? " (worn)" : "";
+    const held = player.equipment?.held === i.itemKey;
+    const fuel = held && world.items?.[i.itemKey]?.light && player.torchFuel !== undefined ? ` ${Math.round((100 * player.torchFuel) / TORCH_FUEL_TICKS)}%` : "";
+    const slot = held ? ` (held${fuel})` : player.equipment?.worn === i.itemKey ? " (worn)" : "";
     return `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}${slot}`;
   });
   hudPackEl.textContent = `Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
+  if (player.lastNotice) {
+    if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
+    player.lastNotice = undefined;
+  }
 }
 
 /** Plain sentences for what the last key did. If the verb failed, say what was missing. */

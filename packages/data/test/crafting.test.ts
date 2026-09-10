@@ -77,6 +77,9 @@ describe("crafting tables (ROADMAP M5)", () => {
       }
       expect(nearest.lichen, `seed ${seed}: no lichen within 60`).toBeDefined();
       expect(nearest.deadwood, `seed ${seed}: no deadwood within 60`).toBeDefined();
+      // Ruling: "I want gathering on layer 1." Every material the cut needs.
+      expect(nearest.flint, `seed ${seed}: no flint within 60`).toBeDefined();
+      expect(nearest.herbs, `seed ${seed}: no herbs within 60`).toBeDefined();
       console.log(`seed ${seed}: lichen ${nearest.lichen} steps, deadwood ${nearest.deadwood}, flint ${nearest.flint ?? "none"}, herbs ${nearest.herbs ?? "none"}, berries ${nearest.food ?? "none"}`);
     }
   });

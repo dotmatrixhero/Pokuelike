@@ -119,6 +119,8 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       if (!def?.slot || countOf(agent, action.itemKey) <= 0) return false;
       const eq = (agent.equipment ??= {});
       eq[def.slot] = action.itemKey;
+      // A fresh light gets a full burn; a torch put away and taken out again keeps what it had.
+      if (def.light && agent.torchFuel === undefined) agent.torchFuel = TORCH_FUEL_TICKS;
       return true;
     }
     case "stow": {
@@ -176,4 +178,24 @@ export function foodUnderfoot(world: World, agent: Agent): boolean {
 export function holdsLight(world: World, agent: Agent): boolean {
   const held = agent.equipment?.held;
   return !!held && world.items?.[held]?.light === true && countOf(agent, held) > 0;
+}
+
+/** Ruling: "1000 ticks torch." Roughly 250 keys of light per torch. */
+export const TORCH_FUEL_TICKS = 1000;
+
+/**
+ * One world tick of burn while a light is held. At 0 the torch is used up:
+ * one leaves the pack, the hand is empty, and `lastNotice` tells the HUD.
+ * Called from `tickWorld`'s player branch every tick, not per turn — a
+ * torch burns while the world moves, whether or not you are acting.
+ */
+export function tickTorch(world: World, agent: Agent): void {
+  if (!holdsLight(world, agent)) return;
+  agent.torchFuel = (agent.torchFuel ?? TORCH_FUEL_TICKS) - 1;
+  if (agent.torchFuel > 0) return;
+  const held = agent.equipment!.held!;
+  removeItem(agent, held, 1);
+  agent.equipment!.held = undefined;
+  agent.torchFuel = undefined;
+  agent.lastNotice = { kind: "torchBurnedOut", tick: world.tick };
 }

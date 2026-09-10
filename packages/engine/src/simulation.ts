@@ -19,7 +19,7 @@ import { statStageMultiplier } from "./combat.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
 import { recordDeathWitnesses } from "./witness.js";
-import { applyPlayerAction, findPlayer } from "./player.js";
+import { applyPlayerAction, findPlayer, tickTorch } from "./player.js";
 import { updatePlayerVision } from "./vision.js";
 import { tickHarvestRegrowth } from "./harvest.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -392,6 +392,7 @@ export function tickWorld(
     const beforeLayer = agent.layer;
     const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
     if (agent.controlledBy === "player") {
+      tickTorch(world, agent);
       // Input decides, not the behaviour tree — see player.ts. If nothing is
       // queued the turn is simply held: energy stays banked at threshold
       // (accumulateActionEnergy caps it), so the world is effectively paused

@@ -687,6 +687,10 @@ export interface Agent {
    * torch lights, a club is a threat). Two slots, per PLAYER_INVENTORY.md.
    */
   equipment?: { held?: string; worn?: string };
+  /** Ticks of burn left in the torch currently held. Ruling: 1000 per torch; at 0 the torch is used up. See player.ts `TORCH_FUEL_TICKS`. */
+  torchFuel?: number;
+  /** Something that happened to the player between actions (a torch burning out) — the HUD reads and clears it. */
+  lastNotice?: { kind: "torchBurnedOut"; tick: number };
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
   /**

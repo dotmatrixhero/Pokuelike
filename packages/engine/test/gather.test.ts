@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { advancePlayerTurn, tickWorld } from "../src/simulation.js";
-import { applyPlayerAction, findPlayer } from "../src/player.js";
+import { applyPlayerAction, findPlayer, TORCH_FUEL_TICKS } from "../src/player.js";
 import { addItem, carriedWeight, countOf, removeItem } from "../src/inventory.js";
 import { GATHER_TURNS, HARVEST_REGROW_TICKS, HARVEST_YIELD_PER_TILE, harvestableAt, harvestLeft } from "../src/harvest.js";
 import { updatePlayerVision } from "../src/vision.js";
@@ -183,6 +183,29 @@ describe("craft and equip (ROADMAP M5)", () => {
     addItem(me, "fiber", 1, 1);
     expect(applyPlayerAction(world, me, { kind: "equip", itemKey: "fiber" })).toBe(false);
     console.log(`torch: ${dark} tiles dark -> ${lit} lit`);
+  });
+
+  it("a held torch burns TORCH_FUEL_TICKS world ticks, then is used up and the hand is empty", () => {
+    const world = cave();
+    const me = human(15, 20);
+    world.agents.push(me);
+    addItem(me, "torch", 2, 2);
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
+    expect(me.torchFuel).toBe(TORCH_FUEL_TICKS);
+    while (me.equipment?.held === "torch" && world.tick < TORCH_FUEL_TICKS + 50) advancePlayerTurn(world, { kind: "wait" });
+    expect(world.tick).toBeGreaterThanOrEqual(TORCH_FUEL_TICKS);
+    expect(world.tick).toBeLessThan(TORCH_FUEL_TICKS + 10);
+    expect(countOf(me, "torch")).toBe(1);
+    expect(me.equipment?.held).toBeUndefined();
+    expect(me.lastNotice?.kind).toBe("torchBurnedOut");
+    // Stowing pauses the burn; the second torch starts fresh.
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
+    expect(me.torchFuel).toBe(TORCH_FUEL_TICKS);
+    advancePlayerTurn(world, { kind: "wait" });
+    const afterOne = me.torchFuel!;
+    applyPlayerAction(world, me, { kind: "stow" });
+    for (let i = 0; i < 5; i++) advancePlayerTurn(world, { kind: "wait" });
+    expect(me.torchFuel).toBe(afterOne);
   });
 
   it("the whole chain on foot: gather lichen, gather deadwood, craft fiber, craft torch, light it", () => {
