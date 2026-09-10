@@ -73,10 +73,18 @@ for (let i = 0; i < count; i++) {
   console.log(`  disposition ${dispStr}   |   ${points} points granted, ${chosen.length} nodes taken`);
   console.log("=".repeat(74));
 
+  // Where the points ACTUALLY went. `maybeAutoRespec` spends across every
+  // move the agent knows, not just the one being sampled, and it banks when
+  // it is one point short of something — so "bought nothing here" is usually
+  // "bought things elsewhere", and printing only the sampled move made the
+  // engine look broken when it was working.
+  const spread = Object.entries(agent.moveTreeChoices ?? {})
+    .map(([k, v]) => `${k.toLowerCase()} ${(v as string[]).length}`)
+    .join(", ");
+  console.log(`  points went to: ${spread || "nothing"}   |   still banked: ${agent.skillPoints?.[type] ?? 0} typed + ${agent.wildcardSkillPoints ?? 0} wildcard`);
+
   if (chosen.length === 0) {
-    // Not a bug worth hiding: the engine banks points toward nodes it can't
-    // afford yet, so a small grant on an expensive tree really can buy nothing.
-    console.log(`  (bought nothing — ${agent.skillPoints?.[type] ?? 0} typed + ${agent.wildcardSkillPoints ?? 0} wildcard still banked)\n`);
+    console.log(`  (nothing bought on ${move.name} itself — see the spread above)\n`);
     continue;
   }
 
