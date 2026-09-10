@@ -8335,3 +8335,45 @@ fields, so **24 of the 40 shipped nodes using one rendered blank**; and
 - Stale comment on `MoveSpec.accuracy` claims stages "are always passed as 0 —
   no agent carries stages yet." Both `predation.ts` and `herdConflict.ts` pass
   real stages now.
+
+## Finding: utility moves are unreachable for some species, not all
+
+Surfaced while building the status trees, confirmed against
+`validateUtilityMoves.ts` on a real run:
+
+| species | utility uses |
+|---|---|
+| ivysaur | growth 68, leech_seed 44 |
+| bulbasaur | growth 13, leech_seed 6 |
+| pidgeot | roost 3 |
+| fearow | agility 1 |
+| squirtle | withdraw 1 |
+| **pidgeotto** | **0** |
+| **chansey** | **0** |
+
+Not a balance spread — a structural one. There are exactly two ways a utility
+move ever fires, and a species can miss both:
+
+1. **Out of combat** (`needs.ts`) requires `chooseBehavior(needs) === "idle"`
+   and then a 15% roll. A grazer idles constantly; a bird measured `idle` on
+   **30 of 33,597 alive-ticks (0.09%)**.
+2. **In combat** (`predation.ts:1303`) is called with the ATTACKER only, then
+   rolls 20%. A species that does not initiate fights never reaches it — a
+   DEFENDER cannot spend an action bracing, healing or warding, which is
+   precisely when a defensive status move is worth using.
+
+So Roost, Withdraw, Defense Curl and Safeguard can be fully specced and
+almost never fire on the species that learn them. That is the
+unreachable-content rule, and it is worth deciding on rather than tuning
+quietly. Options, in order of how much they change:
+
+1. **Let the defender use one too.** The narrowest fix and the one that most
+   matches what these moves are FOR — bracing is a defensive act. One extra
+   call site.
+2. **Loosen the out-of-combat gate** from strict `idle` to "no urgent need",
+   so a bird between errands can preen.
+3. **Raise the rolls** (15% / 20%). Cheapest, least targeted, and does nothing
+   for a species that reaches neither gate.
+
+Not acted on — the shape of the fix changes how these species behave, which
+is a design call.
