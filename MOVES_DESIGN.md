@@ -5475,6 +5475,237 @@ describing: `applyFireDamage` clamps it at 1 and it touches nothing but
 standing in a fire tile, which is precisely what a creature inside its own
 ring is doing. Fifth user of `fireproof` in the roster.
 
+### Leech Seed converted to v4 (Shipped) — "the thing that never had to be there"
+
+31 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Checker
+findings for this tree: **7 → 0**. It is one of only two STATUS moves with a
+real tree, and it runs on a completely different engine path from every damage
+move — which is the whole story of this conversion.
+
+**The fantasy, written before any node:**
+
+> Leech Seed never hits anything. A seed goes in, roots take hold under the
+> skin, and from then on the victim is working for somebody else: the berries
+> it walked all morning to find end up in a bulb across the clearing. There is
+> no wound to point at and nothing to fight back against — the host simply gets
+> hungrier than its day can explain, and it keeps getting hungrier after the
+> plant that did it has wandered off. What it costs the seeder is honesty. A
+> bulb that eats this way has stopped making its own food, and it only works on
+> somebody who has something worth taking: plant it in an empty field and it is
+> a plant standing in an empty field.
+
+#### The lever set is small because most of the roster's levers are DEAD here
+
+`pickBestMove` (combat.ts:275) excludes every `utilityMove` from hostile
+selection, so Leech Seed never reaches `resolveHit`. Read off the call sites,
+that kills `power`, `hits`, `range`, `shape`, `critRateStage`,
+`defensePenetration`, `forcedMovement`, `rallyCall`, `statusChance`,
+`statusSeverity`, `lockTicks`, `selfCostPerUse`, `jamCooldownTicks`,
+`weightScaling`, `bonusVsType`, `resistanceBreaker`, `terrainBurn`,
+`excludesAllies`, `allyEffectOnAttack` and `lifestealFraction` — all of them
+resolve in predation.ts. `gatherBurst` is dead too for a second reason: its two
+call sites (needs.ts:1695, 1707) require a `power > 0 && category !== "status"`
+move or a `burrow` move, and Leech Seed is neither.
+
+What is left, and where each one runs:
+
+| path | fields it reads |
+|---|---|
+| `maybeUseUtilityMove` (idle tick) | `drainNeeds`, `selfHeal`, `fertilityBoost`, self `statChangeOnHit`, `statusImmunityAura`, `spawnsRain`, `matingRadiusBoost` |
+| `maybeUseUtilityMoveInCombat` | **only** `selfHeal` (under 60% HP), a positive self `statChangeOnHit` (under 2 stacked stages), `statusImmunityAura` (against an opponent that can inflict one) |
+| `applySupportMove` (support.ts) | `targetsAlly` + `allyEffect` — independent of `utilityMove` entirely |
+| always | `grantsPassive` / `grantsPassives` |
+
+**That middle row is the design constraint that mattered most.** Status moves
+were only just made usable in a fight, and `maybeUseUtilityMoveInCombat`
+decides **by effect field**, not by move id. So a status tree that spends all
+its budget on `drainNeeds` and `fertilityBoost` is a tree that can never fire
+in combat, no matter how deep it is. Each branch therefore owns exactly one of
+the three fields that can: **Aggression's Attack stage, Boldness's status
+filter, and the Sociability↔Aggression bridge's self-heal.** Verified by
+running `maybeUseUtilityMoveInCombat` on real builds:
+
+| build | fires in a fight? | what happened |
+|---|---|---|
+| base move, no tree | **no** | — |
+| Aggression lane B (`first_taste`) | **yes** | +1 attack stage, 15 ticks |
+| Boldness lane B (`filter_roots`) | **yes** | 40 ticks status immunity |
+| S↔A bridge (`feeding_ground`), full HP | no | not worth an action yet |
+| S↔A bridge (`feeding_ground`), 30% HP | **yes** | hp 12 → 13.6 |
+| Sociability lane A (`feed_the_soil`) | **no** | fertility has nothing to say mid-fight |
+
+The last row is the control: it proves the gate is the effect field, not "did
+you buy any node".
+
+#### Lanes, and how they differ in kind
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Nothing Grows Here** (agg) | **the haul** — how much comes out and out of what: `drainNeeds` 0.25→0.35→0.5, ending in the preserved hunger/thirst fork | **the surplus** — what a body does with food it didn't work for: a self Attack stage whose axis is DURATION (15t → 45t → 80t), not magnitude | *Feeding Frenzy* — two stages at once, exactly `COMBAT_MAX_SELF_BUFF_STAGES` | ***Gorged Bloom*** |
+| **You Have To Come To It** (bold) | **the stalk** — the body absorbs (`damageReductionFlat`, `defenseBoost`) | **what reaches it** — nothing lands cleanly and nothing sticks (`damageReduction`, `statusImmunityAura`, and its own new fork) | *Set Too Deep* — `unshaken` | ***Rain From the Root*** |
+| **What the Roots Take, the Grove Gets** (soc) | **the ground** — the stolen bulk goes into the soil the herd grazes, slow and world-facing (`fertilityBoost` 0.2/r1 → 0.5/r3) | **the body** — it goes straight into a herd-mate, now (`targetsAlly`/`allyEffect`) | *One Mouth* — the ally heal also braces | ***Roots That Feed the Grove*** |
+
+Lane A vs lane B in Sociability is the clearest "different in kind, not degree"
+in the tree: same theft, two completely different timescales, and two different
+things changed — a tile that is still enriched next season against a herd-mate
+that is alive right now.
+
+#### Two capstones the roster does not already have
+
+***Gorged Bloom*** (Aggression) is `matingRadiusBoost`. Sweet Scent is the only
+other user of that primitive anywhere, and nothing in the roster has ever used
+it as a capstone: it is the only node in the game whose payoff is measured in
+descendants rather than damage. It also rhymes with the move — the thing that
+plants seeds in other animals ends by planting them in the valley.
+
+***Rain From the Root*** (Boldness) is `spawnsRain`, second user after Rain
+Dance. It is the reason that branch is Boldness rather than more armour: a
+taproot set deep enough reaches water no surface root does and pushes it back
+up until it falls out of the sky. Drought is a mechanic this sim actually runs,
+it dries the ponds and kills the berry patches this species eats, and nothing
+else in a Grass movepool answers it. Visible on the map rather than hidden in a
+meter, and it pays out for every animal standing in it — including the ones
+being robbed.
+
+#### Preserving the last pass's work, with its lever corrected
+
+The previous round repurposed *Feeding Ground* and *Richer Ground* from two
+identical "+1.5 HP Regen" nodes into `lifestealFraction`, because "a tree
+literally named for draining used no lifesteal anywhere." **The reasoning was
+right and is kept whole. The lever was not.** `lifestealFraction` is read at
+exactly one site — predation.ts:1095, inside `resolveHit` — which this move
+provably cannot reach, so both nodes were paying a skill point for nothing.
+
+The same bridge now carries `selfHeal`, which IS this engine path's lifesteal:
+`maybeUseUtilityMove` applies the drain and then *falls through* to `selfHeal`
+in the same use, so the HP genuinely comes out of the same theft. And unlike
+`lifestealFraction` it is one of the three fields that makes the move worth a
+fight action. Measured live, one use, tree vs. base as control:
+
+| | with the tree | control (base move) |
+|---|---|---|
+| victim's hunger | 0.90 → **0.65** | 0.90 → 0.75 |
+| caster's HP | 20 → **23.6** | 20 → 20 |
+| tile fertility | 0.10 → **0.60** | 0.10 → 0.10 |
+| rain cells in world | 0 → **1** | 0 |
+| mate-search boost ticks | **300** | none |
+
+#### The `drainNeeds` overwrite collision the checker could not see
+
+`applyMoveTree` OVERWRITES `drainNeeds` (moves.ts:786), and the shipped v2 tree
+had two independently-takeable setters: Boldness's *Twin Taproot* (thirst) and
+Aggression's *Insatiable* (hunger). A build with both got whichever the engine
+reached last, so the tree's best fork — the resource switch, which the file's
+own comment called the real highlight — silently evaporated. Nothing caught it,
+because the checker's OVERWRITE list only carried the hit-pipeline fields.
+
+Two fixes: the fork is relocated onto the tail of the Aggression lane that owns
+the drain, so it is the last word on the field and nothing downstream touches
+it; and `check-proposed-trees.ts` now lists the five `utilityMove` overwrite
+fields (`drainNeeds`, `selfHeal`, `fertilityBoost`, `statusImmunityAura`,
+`matingRadiusBoost`) alongside the others, with its own failing case in
+`--selftest`. Adding them flagged **no** other shipped tree; leech_seed is the
+only user of any of them today.
+
+#### Which fork survived, which one did not, and why
+
+Three `excludes` forks, three preserved as forks — but not the same three.
+
+- **Preserved and promoted:** *Bountiful Roots* | *Twin Taproot* (hunger, wide
+  vs. thirst, close), moved from Boldness to the Aggression drain lane's tail
+  for the overwrite reason above. It is a better fork where it now sits: the
+  lane is about what you take, and the fork is the last word on it.
+- **Preserved in place:** *Deepening Calm* | *Watchful Roots*.
+- **Dissolved, deliberately:** *Insatiable* | *Sharpened Hunger*. Both nodes
+  survive with their exact mechanics — they are now the two Aggression lane
+  notables. The exclusion could not: a lane notable that excludes the other
+  lane's notable makes the deep notable's convergence unreachable, so that
+  specific fork is structurally incompatible with v4's two-lane shape. The
+  decision it expressed ("take more" vs. "convert it") is exactly what the two
+  lanes now express, with skill-point scarcity doing the excluding.
+- **New:** *Sealed Sap* | *Shared Filter* — duration for yourself against reach
+  for the herd, on the same `statusImmunityAura`. Fork count stays at 6.
+
+#### Passive discipline: one new kind, chosen because it CANNOT stack
+
+The bulbasaur line is the roster's worst case — 65% thorns, 27% damage
+reduction — and leech_seed was recently pulled back to the healing cap. So
+every existing passive total in this tree is **unchanged to the decimal**:
+
+| kind | before | after | how |
+|---|---|---|---|
+| `defenseBoost` | 0.20 | 0.20 | same five nodes |
+| `damageReductionFlat` | 1.00 | 1.00 | split 0.5/0.5 across Thick Bark and Ancient Roots |
+| `damageReduction` | 0.06 | 0.06 | moved from Ironroot to Bitter Sap |
+| `regen` | 0.045 | 0.045 | moved from Ancient Roots to Gorged Bloom |
+| `regenFlat` | 1.50 | 1.50 | split 1.0/0.5 across Watchful Roots and One Root System |
+| `healAura` | 0.008 | 0.008 | — |
+| `calmingPresence` | 0.60 | 0.60 | same five nodes |
+| `thorns` | **0** | **0** | — |
+| `unshaken` | 0 | **1** | new |
+
+Healing still reads **8.8%/tick** against the 10% per-move ceiling; damage
+reduction 6% against 20%; thorns 0.
+
+`unshaken` was chosen over another point of `damageReduction` specifically
+because predation.ts:1242 gates it on `> 0` rather than summing, so it is
+structurally incapable of stacking into invulnerability across a movepool. It
+is the only passive kind on the board with that property, which makes it the
+right one to hand the species that already has the two worst uncapped totals.
+
+`passive-exposure.ts`, before and after: the only line that moved is
+bulbasaur/ivysaur/venusaur gaining `unshaken 1.00`. Every regen, thorns,
+damage-reduction and calming figure is byte-identical.
+
+#### Two dead-content findings, reported not fixed
+
+1. **`calmingPresence` in this tree already overshoots its own floor.**
+   `calmingMultiplier` (herdConflict.ts) is `max(0.5, 1 − total)`, so anything
+   past 0.50 buys nothing. leech_seed grants 0.60 on the *Deepening Calm* fork
+   side, and it is the bulbasaur line's ONLY source of the passive — so the
+   last 0.10 is provably dead. Trimming it to 0.50 would be a no-op in effect
+   today. Left alone because it is a balance number.
+2. **PP is data-only.** `ppCost` and `maxPPBonus` have zero call sites in the
+   engine; the checker has rules for them and nothing spends them. Leech Seed's
+   10-PP pool is real canon and nothing reads it. No PP node was added here for
+   that reason.
+
+#### The finding that is bigger than this tree: purchase order decides every OVERWRITE field
+
+Driving the real `maybeAutoRespec` on a fully-pointed Bulbasaur, the finished
+Leech Seed came out with `drainNeeds` set to *Wider Reach*'s 0.35/r5 rather
+than the deeper *Insatiable*'s 0.5/r6. Root cause: `maybeAutoRespec` appends
+each bought node to `moveTreeChoices` in **purchase order** and
+`applyMoveTree` applies them in exactly that order, last-writer-wins. Because
+`insatiable` is reachable through the `ironroot` bridge shortcut, an agent can
+buy the deep node first and the shallow one later — and the shallow one wins.
+The checker's "ancestrally related ⇒ safe" test does not catch this, because
+the ancestry runs through `prerequisitesAnyOf`, which is a *route*, not a
+purchase-order guarantee.
+
+**This is not something the conversion introduced — it is roster-wide and
+pre-existing.** Measured across every shipped tree, three rng seeds each,
+comparing the auto-respec result against the same node set applied in depth
+order:
+
+| tree | field that drifts | bought-order result | depth-order result |
+|---|---|---|---|
+| tackle | `situationalBonus` | flanking ×1.7 | concealed ×1.5 |
+| tackle | `statChangeOnHit` | self attack +2 | self defense +1 |
+| ember | `shape` | ring r2 | line len2 |
+| earthquake | `forcedMovement` | attacker, closer, 2 | defender, away, 1 |
+| water_gun | `allyEffect` | buff only | heal 0.25 + buff |
+| solar_beam | `allyEffect` | heal 0.25 | heal 0.25 + buff |
+| wing_attack | `forcedMovement` | defender, away, 2 | attacker, away, 1 |
+| leech_seed | `drainNeeds` | hunger 0.35 r5 | hunger 0.5 r6 |
+
+Every tree with an overwrite field drifts, at every seed. **The fix belongs in
+the engine, not in one tree's shape** — sorting `chosenNodeIds` by depth inside
+`applyMoveTree` (or in `maybeAutoRespec` before applying) would make every
+build deterministic and always land on the deepest node a build actually
+bought. That changes every tree's outcome, so it is written down here as a
+decision to make rather than made.
+
 #### Balance, with the roster as control
 
 | | before | after | roster median |
@@ -5673,3 +5904,64 @@ result Rock Slide's conversion produced. Note the same caveat: in a plain
 demo run the tree is inert, because three seeds × 2,000 ticks produced **zero
 living Rock Throw learners**. That is the population problem already logged
 against Rock Slide, not a tree problem.
+
+| nodes | 31 | **45** | 45 |
+| distinct levers | 14 * | **18** | 24 |
+| colour-pie flavours | 8 | **7** | 10 |
+| tempo | 1.41x (cap 2.82) | **1.94x** | 2.00x |
+| cheapest capstone | 7 pts | **10 pts** | 10 pts |
+| checker problems | **7** | **0** | — |
+| `*` = flagged >35% off the median | | | |
+
+Nothing is flagged any more. Two numbers deserve explaining rather than
+celebrating:
+
+- **Flavours went DOWN, 8 → 7, and that is the honest number.** The 8th was
+  "raw damage", contributed solely by the dead `lifestealFraction`. Seven is
+  the hard ceiling for this move: "stealth", "piercing", "wider aoe",
+  "reposition others", "aggressive movement", "rallying" and "no friendly
+  fire" are every one of them hit-pipeline flavours, and this move has no hit
+  pipeline. Every remaining flavour it can reach — resource economy, healing,
+  planted/duration, calming, defence, environment, ally buffing — is in the
+  tree.
+- **Tempo moved 1.41x → 1.94x, and that is a tuning decision, not a conversion
+  one.** The extra nodes brought six more `-1 Cooldown` fillers, landing the
+  move on a 15-tick cooldown against a base of 30 — the roster median, and well
+  inside the 2.82x cap. Reverting any of those six to another lever is a
+  one-line change each; the six are `bitter_sap`, `set_too_deep`,
+  `settled_stance`, `rain_from_the_root`, `one_mouth`, `one_root_system`.
+
+#### Verified by running it, not by reading it
+
+Driving the engine's own `maybeAutoRespec` on a real Bulbasaur with points to
+spend, once per disposition: **42 of 45 nodes bought in each case** (the three
+missing are the excluded fork sides), **all three capstones reached from every
+disposition**, and every new lever present on the resulting spec — `selfHeal`
+0.09, `statusImmunityAura`, `spawnsRain`, `matingRadiusBoost` ×2,
+`statChangeOnHit` attack +2/80t, `fertilityBoost` 0.5/r3, `allyEffect` heal
+0.18 + defense buff.
+
+Both fork sides walked through the real `applyMoveTree`: the hunger side ends
+on `drainNeeds hunger 0.25 r9` and 120t/r0 immunity, the thirst side on
+`drainNeeds thirst 0.5 r5` and 50t/r3 — the two forks genuinely diverge in the
+finished spec.
+
+`applySupportMove` on a real herd: *Rooted Calm* heals an ally 10 → 14; the
+finished *One Mouth* heals 10 → 17.2 **and** applies a real +1 defense stage.
+
+**And a limit stated plainly.** `maybeUseUtilityMove` is gated behind
+`chooseBehavior(agent.needs) === "idle"` (needs.ts:1544), and `chooseBehavior`
+returns `seekFood` the moment hunger drops below 0.70 — measured directly:
+hunger 0.75 → `idle`, hunger 0.69 → `seekFood`. **So the parasite can only
+feed when it is not hungry**, and `agent.needs[need] = min(1, …)` caps what it
+gains at whatever headroom is left. In practice `drainNeeds` is a weapon —
+it makes the other thing starve — far more than it is sustenance, and the tree
+is written to that reading. Whether that gate is intended is an engine
+question, not a tree one; it is untouched here.
+
+Separately, `maybeUseUtilityMoveInCombat` applies `selfHeal`,
+`statChangeOnHit` and `statusImmunityAura` but **not** `drainNeeds` — so a
+Leech Seed spent on a fight action buffs and heals but does not actually drain
+the thing it is fighting. That reads like a real gap rather than a decision,
+and it is the single highest-value follow-up for this move. Also untouched
+here: it would change what every `drainNeeds` node is worth.

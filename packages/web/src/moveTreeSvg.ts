@@ -350,6 +350,9 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("drainNeeds")) lines.push(`Steals ${Math.round(delta.drainNeeds.amount * 100)}% ${delta.drainNeeds.need} from the nearest non-herd agent within ${delta.drainNeeds.radius} tiles, and gains it.`);
   if (has("fertilityBoost")) lines.push(`Enriches the soil (+${Math.round(delta.fertilityBoost.amount * 100)}% fertility) ${delta.fertilityBoost.radius === 0 ? "on the user's own tile." : `within ${delta.fertilityBoost.radius} tiles.`}`);
   if (has("matingRadiusBoost")) lines.push(`×${delta.matingRadiusBoost.multiplier} mate-search radius for ${delta.matingRadiusBoost.ticks} ticks.`);
+  if (has("selfHeal")) lines.push(`Heals the user ${Math.round(delta.selfHeal.fraction * 100)}% of its own max HP on use${delta.selfHeal.sunbeamBonus ? `, +${Math.round(delta.selfHeal.sunbeamBonus * 100)}% more near a sunbeam` : ""}.`);
+  if (has("statusImmunityAura")) lines.push(`Grants ${delta.statusImmunityAura.radius === 0 ? "the user" : `the user and every herd-mate within ${delta.statusImmunityAura.radius} tiles`} ${delta.statusImmunityAura.ticks} ticks of immunity to new status effects.`);
+  if (has("spawnsRain") && delta.spawnsRain) lines.push("Pulls a real rain cell down over the user's own position.");
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
@@ -378,7 +381,7 @@ const ADDITIVE_FIELDS = [
   "critRateStage", "lifestealFraction", "recoilFraction", "jamCooldownTicks", "positionSwapPull", "gatherBurst",
 ] as const;
 /** OR-merge boolean fields — once any chosen node turns one on, it stays on for the whole build. */
-const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset"] as const;
+const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset", "spawnsRain"] as const;
 
 /**
  * Merges every chosen node's `delta` into one net combined delta, using the

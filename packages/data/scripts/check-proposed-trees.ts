@@ -397,7 +397,17 @@ function problems(move: ProposedMove): string[] {
     for (const pre of [...(t[id]?.prerequisites ?? []), ...(t[id]?.prerequisitesAnyOf ?? []).flat()]) ancestorsOf(pre, seen);
     return seen;
   };
-  const OVERWRITE = ["shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition"];
+  // The last five are the `utilityMove` effect fields. They overwrite in
+  // `applyMoveTree` exactly like the hit-pipeline ones above and were simply
+  // missing from this list, so nothing checked them — and the shipped
+  // leech_seed had a live instance: Boldness's *Twin Taproot* (drainNeeds on
+  // thirst) and Aggression's *Insatiable* (drainNeeds on hunger) were
+  // independently takeable, so a build with both got whichever the engine
+  // reached last and the fork's whole point evaporated.
+  const OVERWRITE = [
+    "shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition",
+    "drainNeeds", "selfHeal", "fertilityBoost", "statusImmunityAura", "matingRadiusBoost",
+  ];
   const excl = new Map(nodes.map((n) => [n.id, new Set(n.excludes ?? [])]));
   for (const field of OVERWRITE) {
     const setters = nodes.filter((n) => (n.delta as any)?.[field] !== undefined);
@@ -522,10 +532,14 @@ if (selftest) {
       // Passive ceilings: 35% DR (cap 20) and 14%/tick healing (cap 10).
       { id: "p1", name: "P1", cost: 1, leaning: "boldness", delta: {}, grantsPassive: { kind: "damageReduction", value: 0.35 } },
       { id: "p2", name: "P2", cost: 1, leaning: "boldness", delta: {}, grantsPassives: [{ kind: "regen", value: 0.08 }, { kind: "healAura", value: 0.06 }] },
+      // Two independently-takeable `drainNeeds` setters — the OVERWRITE rule's
+      // failing case for the utility-move fields added to that list.
+      { id: "d1", name: "D1", cost: 1, leaning: "boldness", delta: { drainNeeds: { need: "hunger", amount: 0.3, radius: 4 } } },
+      { id: "d2", name: "D2", cost: 1, leaning: "boldness", delta: { drainNeeds: { need: "thirst", amount: 0.3, radius: 4 } } },
     ]),
   };
   const found = problems(broken);
-  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch", "damage reduction totals", "healing totals"];
+  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch", "damage reduction totals", "healing totals", "\"drainNeeds\" is an OVERWRITE field"];
   const missed = expect.filter((e) => !found.some((f) => f.includes(e)));
   console.log(`selftest: ${found.length} problems found on a deliberately broken tree`);
   found.forEach((f) => console.log(`  - ${f}`));

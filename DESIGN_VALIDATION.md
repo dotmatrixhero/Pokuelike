@@ -54,6 +54,20 @@ When adding a rule, add its failing case to the selftest in the same commit.
 | **Principle 17** — one signature lever must not answer a whole branch | ≤60% of identity nodes; shipped roster tops out at 50% | "twin needle just fuckin does the same shit the entire branch for sociable" |
 | **Colour-pie coverage** — a branch draws on ≥3 flavours | shipped averages 3.8 | "Branches need to have multiple Flavors to it, not a linear path" |
 | **Principle 4** — no pure-downside node | benefit and cost in the *same* node | A node that cost a skill point for `recoilFraction` alone |
+| **OVERWRITE collision** now covers the `utilityMove` fields too | two co-takeable nodes setting `drainNeeds`/`selfHeal`/`fertilityBoost`/`statusImmunityAura`/`matingRadiusBoost` | Shipped leech_seed: *Twin Taproot* (thirst) and *Insatiable* (hunger) were independently takeable, so a build with both silently got whichever the engine reached last and the fork's whole point evaporated. The list only ever carried the hit-pipeline fields |
+
+**Known hole in the OVERWRITE rule, measured and not yet fixed.** The check
+treats two setters as safe when one is an *ancestor* of the other — but
+ancestry through `prerequisitesAnyOf` is a route, not a purchase order.
+`maybeAutoRespec` appends nodes in the order it buys them and `applyMoveTree`
+applies them in exactly that order, so a bridge shortcut lets an agent buy the
+deep node first and the shallow one later, and the shallow one wins. Measured
+across every shipped tree at three rng seeds, **every tree with an overwrite
+field drifts** (ember's `shape`, earthquake's `forcedMovement`, tackle's
+`situationalBonus`, leech_seed's `drainNeeds`, …). The fix is in the engine —
+apply `chosenNodeIds` in depth order — and it changes every tree's outcome, so
+it is a decision, not a cleanup. See MOVES_DESIGN.md's Leech Seed v4 section
+for the table.
 
 Two refinements worth recording, because both were flaws in the *measurement*
 rather than the design:

@@ -622,6 +622,22 @@ export interface MoveTreeNode {
      * to ever fire — a plain attack move setting this would be dead weight.
      */
     fertilityBoost?: { amount: number; radius: number };
+    /**
+     * Overwrite, like `shape`. Restate the whole object.
+     *
+     * These next three are the only `MoveSpec` fields
+     * `maybeUseUtilityMoveInCombat` (utilityMoves.ts) will spend a FIGHT
+     * action on — it decides by effect field, not by move id — so without
+     * them a status move's tree could deepen the move everywhere except
+     * where it matters most, and no node on such a tree could ever fire
+     * mid-fight. Leech Seed's v4 tree is the first to use them, one per
+     * branch. All three require `utilityMove` to do anything.
+     */
+    selfHeal?: { fraction: number; sunbeamBonus?: number };
+    /** Overwrite, like `shape` — see `selfHeal` above. */
+    statusImmunityAura?: { ticks: number; radius: number };
+    /** OR-merge, like a boolean flag being turned on for good once any node sets it — see `selfHeal` above. */
+    spawnsRain?: boolean;
     /** Additive, like `power` — see `MoveSpec.gatherBurst`. Real on any move that already qualifies for one of the gather paths (a `burrow` move for digging, a damage move for canopy harvest). */
     gatherBurst?: number;
   };
@@ -786,6 +802,9 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       drainNeeds: delta.drainNeeds ?? result.drainNeeds,
       matingRadiusBoost: delta.matingRadiusBoost ?? result.matingRadiusBoost,
       fertilityBoost: delta.fertilityBoost ?? result.fertilityBoost,
+      selfHeal: delta.selfHeal ?? result.selfHeal,
+      statusImmunityAura: delta.statusImmunityAura ?? result.statusImmunityAura,
+      spawnsRain: delta.spawnsRain ?? result.spawnsRain,
       gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
   }

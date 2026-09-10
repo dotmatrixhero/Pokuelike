@@ -9523,22 +9523,82 @@ export const MOVES: Record<string, MoveSpec> = {
     // than a sustained drain (this sim has no per-turn "planted seed"
     // concept to tick down).
     drainNeeds: { need: "hunger", amount: 0.15, radius: 4 },
-    // v2 (MOVES_DESIGN.md's own template), honestly scoped like Dig's tree
-    // — Leech Seed is `utilityMove`-flagged, so `pickBestMove` (combat.ts)
-    // excludes it from hostile selection same as `burrow` moves: it's never
-    // resolved as an actual hit. Every damage-facing lever this template
-    // usually leans on is dead weight here too. Built instead from the
-    // levers that ARE real: `drainNeeds` itself (need/amount/radius — see
-    // the new delta field's own doc comment, moves.ts), `cooldownTicks`,
-    // `statChangeOnHit` (self, already real for a `utilityMove` — see
-    // `maybeUseUtilityMove`, utilityMoves.ts), and `grantsPassive`. Real
-    // fork highlight: Boldness's *Twin Taproot* switches `drainNeeds.need`
-    // from `"hunger"` to `"thirst"` entirely — a genuinely different
-    // resource, not just a bigger number. Bulbasaur/Ivysaur/Venusaur only.
+    // v4 (the two-lane standard) — rebuilt from the fantasy first, per
+    // MOVES_DESIGN.md's "Skill-tree template v4" and principle 1.
+    //
+    // THE FANTASY. Leech Seed never hits anything. A seed goes in, roots
+    // take hold under the skin, and from then on the victim is working for
+    // somebody else: the berries it walked all morning to find end up in a
+    // bulb across the clearing. There is no wound to point at and nothing
+    // to fight back against — the host simply gets hungrier than its day
+    // can explain, and it keeps getting hungrier after the plant that did
+    // it has wandered off. What it costs the seeder is honesty. A bulb that
+    // eats this way has stopped making its own food, and it only works on
+    // somebody who has something worth taking: plant it in an empty field
+    // and it is a plant standing in an empty field.
+    //
+    // WHICH LEVERS ARE REAL HERE, read off the call sites rather than the
+    // field list. Leech Seed is `utilityMove`-flagged, so `pickBestMove`
+    // (combat.ts:275) excludes it from hostile selection: it NEVER reaches
+    // `resolveHit`. Every hit-pipeline lever is therefore dead weight on
+    // this tree — power, hits, range, shape, crit, defensePenetration,
+    // forcedMovement, rallyCall, statusChance, lockTicks, selfCostPerUse,
+    // jamCooldownTicks and `lifestealFraction` all resolve in predation.ts
+    // and can never fire from here. The move runs on three other paths, and
+    // only the fields those paths read do anything:
+    //
+    //   * `maybeUseUtilityMove` (utilityMoves.ts, idle tick) — `drainNeeds`,
+    //     `selfHeal`, `fertilityBoost`, `statChangeOnHit` (self),
+    //     `statusImmunityAura`, `spawnsRain`, `matingRadiusBoost`.
+    //   * `maybeUseUtilityMoveInCombat` (utilityMoves.ts) — status moves
+    //     became usable in a fight, and that function decides BY EFFECT
+    //     FIELD: only `selfHeal` (under 60% HP), a positive self
+    //     `statChangeOnHit` (under 2 stacked stages) and
+    //     `statusImmunityAura` (against an opponent that can inflict one)
+    //     are worth an action, and only those three are applied. So those
+    //     are the only fields on this whole tree that can ever fire mid-
+    //     fight, and each branch deliberately owns one of them:
+    //     Aggression's Attack stage, Boldness's status filter, and the
+    //     Sociability<->Aggression bridge's self-heal.
+    //   * `applySupportMove` (support.ts) — `targetsAlly` + `allyEffect`,
+    //     independent of the `utilityMove` flag entirely.
+    //
+    //   ...plus `grantsPassive`/`grantsPassives`, which change the AGENT and
+    //   are live no matter which path the move takes.
+    //
+    // PRESERVED, WITH ITS LEVER CORRECTED. The last pass on this file
+    // repurposed *Feeding Ground* and *Richer Ground* from two identical
+    // "+1.5 HP Regen" nodes into `lifestealFraction`, on the reasoning that
+    // a tree literally named for draining used no lifesteal anywhere — a
+    // real gap — and that the recovery should be taken FROM something
+    // rather than accruing on its own. That reasoning is right and it is
+    // kept whole. The lever was not: `lifestealFraction` is read at exactly
+    // one site (predation.ts:1095, inside `resolveHit`) which this move
+    // cannot reach, so both nodes were paying a skill point for nothing.
+    // The same bridge now carries `selfHeal` instead, which IS this engine
+    // path's lifesteal: `maybeUseUtilityMove` applies the drain and then
+    // falls through to `selfHeal` in the same use, so the HP genuinely comes
+    // out of the same theft — and it is also the field that lets the move be
+    // spent on an action mid-fight at all.
+    //
+    // ALL DRAIN SETTERS SIT ON ONE ANCESTRAL CHAIN. `applyMoveTree`
+    // OVERWRITES `drainNeeds` (moves.ts:786), so two co-takeable nodes
+    // setting it hand the build whichever the engine reaches last. The
+    // shipped v2 tree had exactly that: Boldness's *Twin Taproot* (thirst)
+    // and Aggression's *Insatiable* (hunger) were independently takeable.
+    // The hunger/thirst switch — this tree's best fork, and the one the old
+    // comment called the real highlight — is therefore relocated onto the
+    // tail of the Aggression lane that owns the drain, where it is the last
+    // word on it and nothing downstream overwrites the choice.
     tree: {
-      // --- Aggression: "Ravenous Roots" — takes more, and the surplus
-      // sharpens its own other attacks (a real cross-move Attack stage,
-      // not something Leech Seed itself ever swings with).
+      // === AGGRESSION: "Nothing Grows Here" ===
+      // The bulb that stopped photosynthesising. Aggression on a move with
+      // no damage is not force, it is deprivation: taking more, from
+      // further, out of somebody who has to go and earn it again. Lane A is
+      // THE HAUL (how much comes out, and out of what). Lane B is THE
+      // SURPLUS (what a body does with food it did not have to work for) —
+      // different in kind, not degree: one changes the theft, the other
+      // changes the thief.
       ravenous_bite: {
         id: "ravenous_bite",
         name: "Ravenous Bite",
@@ -9546,73 +9606,442 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { drainNeeds: { need: "hunger", amount: 0.25, radius: 4 } },
       },
-      quicker_seeding: {
-        id: "quicker_seeding",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisites: ["ravenous_bite"],
-        leaning: "aggression",
-        delta: { cooldownTicks: -1 },
-      },
-      spreading_roots: {
-        id: "spreading_roots",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["quicker_seeding"], ["grounded_hunger"], ["feeding_ground"]],
-        leaning: "aggression",
-        delta: { cooldownTicks: -1 },
-      },
+      // --- Lane A: the haul ---
       wider_reach: {
         id: "wider_reach",
         name: "Wider Reach",
         cost: 1,
-        prerequisites: ["spreading_roots"],
+        prerequisites: ["ravenous_bite"],
         leaning: "aggression",
         // Restates the full drainNeeds object — overwrite, not a merge.
         delta: { drainNeeds: { need: "hunger", amount: 0.35, radius: 5 } },
       },
-      hungrier_roots: {
-        id: "hungrier_roots",
+      quicker_seeding: {
+        id: "quicker_seeding",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["wider_reach"], ["ironroot"], ["endless_bounty"]],
+        prerequisites: ["wider_reach"],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
       },
       insatiable: {
         id: "insatiable",
         name: "Insatiable",
-        cost: 1,
-        prerequisites: ["hungrier_roots"],
-        excludes: ["sharpened_hunger"],
+        cost: 2,
+        prerequisitesAnyOf: [["quicker_seeding"], ["ironroot"]],
         leaning: "aggression",
-        delta: { drainNeeds: { need: "hunger", amount: 0.5, radius: 5 } },
+        delta: { drainNeeds: { need: "hunger", amount: 0.5, radius: 6 } },
+      },
+      bountiful_roots: {
+        id: "bountiful_roots",
+        name: "Bountiful Roots",
+        cost: 1,
+        prerequisites: ["insatiable"],
+        excludes: ["twin_taproot"],
+        leaning: "aggression",
+        // Gentler per victim, but the seeds are everywhere — a whole
+        // neighbourhood a little hungrier rather than one animal robbed.
+        delta: { drainNeeds: { need: "hunger", amount: 0.25, radius: 9 } },
+      },
+      twin_taproot: {
+        id: "twin_taproot",
+        name: "Twin Taproot",
+        cost: 1,
+        prerequisites: ["insatiable"],
+        excludes: ["bountiful_roots"],
+        leaning: "aggression",
+        // Draws moisture instead — a genuinely different resource, not just
+        // a bigger number on the same one, and a far worse thing to lose in
+        // a drought. Relocated here from Boldness so it is the LAST node to
+        // set `drainNeeds` on its own chain; downstream of it nothing
+        // touches the field, so the choice survives to a finished build.
+        delta: { drainNeeds: { need: "thirst", amount: 0.5, radius: 5 } },
+      },
+      // --- Lane B: the surplus ---
+      first_taste: {
+        id: "first_taste",
+        name: "First Taste",
+        cost: 1,
+        prerequisites: ["ravenous_bite"],
+        leaning: "aggression",
+        // The one field on this branch that `maybeUseUtilityMoveInCombat`
+        // will spend a fight action on — a positive self stat stage. Leech
+        // Seed itself never swings; this is vigour taken off someone else
+        // and put behind whatever the animal DOES swing with.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 15 } },
       },
       sharpened_hunger: {
         id: "sharpened_hunger",
         name: "Sharpened Hunger",
-        cost: 1,
-        prerequisites: ["hungrier_roots"],
-        excludes: ["insatiable"],
+        cost: 2,
+        prerequisitesAnyOf: [["first_taste"], ["endless_bounty"]],
         leaning: "aggression",
-        // Keeps Wider Reach's drain, but the vigor it takes sharpens this
-        // agent's OWN Attack stage — a real, felt boost to whatever it
-        // actually fights with, since Leech Seed itself never lands a hit.
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 20 } },
+        // Same stage, three times as long — duration is this lane's axis,
+        // not magnitude. A stolen meal that keeps paying out is the whole
+        // difference between a mugging and a parasite.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 45 } },
+      },
+      spreading_roots: {
+        id: "spreading_roots",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["sharpened_hunger"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
       },
       feeding_frenzy: {
         id: "feeding_frenzy",
         name: "Feeding Frenzy",
         cost: 2,
-        prerequisitesAnyOf: [["insatiable"], ["sharpened_hunger"]],
+        prerequisitesAnyOf: [["spreading_roots"], ["bountiful_roots"], ["twin_taproot"]],
         leaning: "aggression",
-        // A real escalation regardless of which fork got here — a bigger,
-        // wider theft than either path alone reaches, not a flat passive
-        // standing in for "the branch is now finished."
-        delta: { drainNeeds: { need: "hunger", amount: 0.6, radius: 6 }, cooldownTicks: -1 },
+        // Where the two lanes meet: a haul big enough that the surplus stops
+        // being a trickle. Two stages is also exactly
+        // `COMBAT_MAX_SELF_BUFF_STAGES`, so it fills the in-combat budget in
+        // one action instead of spending two of them on setup.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 45 }, cooldownTicks: -1 },
       },
-      // Crosslink: Aggression <-> Boldness — the hunger it takes goes
-      // straight into a hardier stalk, not just a bigger haul.
+      hungrier_roots: {
+        id: "hungrier_roots",
+        name: "Lingering Hunger",
+        cost: 1,
+        prerequisites: ["feeding_frenzy"],
+        leaning: "aggression",
+        // Was a second "-1 Cooldown" filler. Duration again, not size.
+        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 80 } },
+      },
+      gorged_bloom: {
+        id: "gorged_bloom",
+        name: "Gorged Bloom",
+        cost: 2,
+        prerequisites: ["hungrier_roots"],
+        leaning: "aggression",
+        // CAPSTONE. The point of eating is to seed. A bulb that has spent
+        // its life taking other animals' meals finally flowers, and it
+        // broadcasts: `matingRadiusBoost` multiplies `MATE_SEARCH_RADIUS`
+        // (reproduction.ts) for a long while afterwards. Second user of that
+        // primitive in the whole roster after Sweet Scent, and the first
+        // anywhere as a capstone — the roster has no other node whose payoff
+        // is measured in descendants rather than damage. It rhymes with the
+        // move itself on purpose: the thing that plants seeds in other
+        // animals ends by planting them in the valley.
+        grantsPassive: { kind: "regen", value: 0.025 },
+        delta: { matingRadiusBoost: { multiplier: 2, ticks: 300 } },
+      },
+
+      // === BOLDNESS: "You Have To Come To It" ===
+      // Leech Seed's own precondition is standing near something worth
+      // robbing, off cooldown, for as long as it takes. Boldness is not
+      // "takes less damage" here — it is making that spot survivable and
+      // making it unpleasant to share. Lane A is THE STALK (the body gets
+      // harder). Lane B is WHAT REACHES IT (nothing lands cleanly, nothing
+      // sticks) — different in kind: one absorbs, the other refuses.
+      steady_roots: {
+        id: "steady_roots",
+        name: "Steady Roots",
+        cost: 1,
+        leaning: "boldness",
+        // Was "+1.5 HP Regen". "Steady" is a stance, not a heal — and this
+        // branch's own flavour is defence. Physical-only by construction
+        // (calculateDamage only reads the defense stage for a physical move),
+        // which is the honest version of what a root system does.
+        grantsPassive: { kind: "defenseBoost", value: 0.04 },
+        delta: {},
+      },
+      // --- Lane A: the stalk ---
+      thick_bark: {
+        id: "thick_bark",
+        name: "Thick Bark",
+        cost: 1,
+        prerequisites: ["steady_roots"],
+        grantsPassive: { kind: "damageReductionFlat", value: 0.5 },
+        leaning: "boldness",
+        delta: {},
+      },
+      patient_taproot: {
+        id: "patient_taproot",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["thick_bark"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      ancient_roots: {
+        id: "ancient_roots",
+        name: "Ancient Roots",
+        cost: 2,
+        prerequisitesAnyOf: [["patient_taproot"], ["one_root_system"]],
+        leaning: "boldness",
+        // The other half of Thick Bark's flat mitigation, not a new budget:
+        // the tree's `damageReductionFlat` total is unchanged at 1.0, split
+        // across the lane's opener and its notable so the notable is not a
+        // bare repeat of the node three steps above it.
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 0.5 },
+          { kind: "defenseBoost", value: 0.04 },
+        ],
+        delta: {},
+      },
+      resilient_growth: {
+        id: "resilient_growth",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["ancient_roots"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      // --- Lane B: what reaches it ---
+      filter_roots: {
+        id: "filter_roots",
+        name: "Filter Roots",
+        cost: 1,
+        prerequisites: ["steady_roots"],
+        leaning: "boldness",
+        // A metabolism running on someone else's body is a hard thing to
+        // poison. `statusImmunityAura` is also the third and last field
+        // `maybeUseUtilityMoveInCombat` will spend an action on, and it is
+        // the only one gated on the OPPONENT (it fires only against
+        // something that actually carries a `statusChance` move) — so this
+        // branch's combat use is reactive by construction, which is what
+        // Boldness should mean on a move that cannot attack.
+        delta: { statusImmunityAura: { ticks: 40, radius: 0 } },
+      },
+      bitter_sap: {
+        id: "bitter_sap",
+        name: "Bitter Sap",
+        cost: 2,
+        prerequisitesAnyOf: [["filter_roots"], ["ironroot"]],
+        leaning: "boldness",
+        // Relocated from Ironroot, not added: the tree's `damageReduction`
+        // total is unchanged at 6%, well inside the 20% per-move ceiling and
+        // deliberately left there — the bulbasaur line is already the
+        // roster's worst case for stacked mitigation and thorns.
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: { cooldownTicks: -1 },
+      },
+      sealed_sap: {
+        id: "sealed_sap",
+        name: "Sealed Sap",
+        cost: 1,
+        prerequisites: ["bitter_sap"],
+        excludes: ["shared_filter"],
+        leaning: "boldness",
+        // Three times the duration, nobody else covered.
+        delta: { statusImmunityAura: { ticks: 120, radius: 0 } },
+      },
+      shared_filter: {
+        id: "shared_filter",
+        name: "Shared Filter",
+        cost: 1,
+        prerequisites: ["bitter_sap"],
+        excludes: ["sealed_sap"],
+        leaning: "boldness",
+        // Shorter, but every herd-mate within three tiles is under it too.
+        // A real fork, not two values of one number: duration for yourself
+        // against reach for the herd.
+        delta: { statusImmunityAura: { ticks: 50, radius: 3 } },
+      },
+      set_too_deep: {
+        id: "set_too_deep",
+        name: "Set Too Deep",
+        cost: 2,
+        prerequisitesAnyOf: [["resilient_growth"], ["sealed_sap"], ["shared_filter"]],
+        leaning: "boldness",
+        // Where the lanes meet. `unshaken` fully negates the next hit and
+        // then recharges (predation.ts:1242) — deliberately chosen over
+        // another point of `damageReduction`, because it is gated on `> 0`
+        // rather than summed, so it CANNOT stack into invulnerability the
+        // way this species' 27% mitigation and 65% thorns already do. The
+        // only new passive kind this conversion adds, and the only one that
+        // is structurally incapable of making the cross-tree exposure
+        // problem worse.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: { cooldownTicks: -1 },
+      },
+      settled_stance: {
+        id: "settled_stance",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["set_too_deep"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      rain_from_the_root: {
+        id: "rain_from_the_root",
+        name: "Rain From the Root",
+        cost: 2,
+        prerequisites: ["settled_stance"],
+        leaning: "boldness",
+        // CAPSTONE, and the reason this branch is Boldness rather than more
+        // armour: a taproot set this deep reaches water no surface root
+        // does, and pushes it back up until it falls out of the sky.
+        // `spawnsRain` puts a real weather cell (weather.ts) on the map —
+        // second user in the roster after Rain Dance, and the only answer
+        // anywhere in a Grass movepool to a drought, which is a mechanic
+        // this sim actually runs and which dries the ponds and kills the
+        // berry patches this species eats. Visible on the map rather than
+        // hidden in a meter, and it pays out for every animal standing in
+        // it, including the ones being robbed.
+        delta: { spawnsRain: true, cooldownTicks: -1 },
+      },
+
+      // === SOCIABILITY: "What the Roots Take, the Grove Gets" ===
+      // The branch that answers the move's ugliest fact: a parasite is a net
+      // loss to everything around it. Here it is not. Lane A is THE GROUND
+      // (the stolen bulk goes back into the soil the herd grazes — slow,
+      // world-facing, still there next season). Lane B is THE BODY (it goes
+      // straight into a herd-mate, now). Same theft, two completely
+      // different timescales and two different things changed.
+      gentle_roots: {
+        id: "gentle_roots",
+        name: "Gentle Roots",
+        cost: 1,
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      // --- Lane A: the ground ---
+      feed_the_soil: {
+        id: "feed_the_soil",
+        name: "Feed the Soil",
+        cost: 1,
+        prerequisites: ["gentle_roots"],
+        leaning: "sociability",
+        // The fix for this branch's sharpest self-criticism: "Shared
+        // Harvest" never actually shared anything it stole. Now what the
+        // roots take goes straight back into the ground the herd grazes
+        // (flora.ts's real fertility mechanic, the same one Growth/Grassy
+        // Terrain use) — a literal, visible ecosystem payoff instead of
+        // another passive aura. Required a real engine fix to work at all:
+        // `drainNeeds` used to early-return in `maybeUseUtilityMove`,
+        // silently killing every other utility field on the same move.
+        delta: { fertilityBoost: { amount: 0.2, radius: 1 } },
+      },
+      settled_growth: {
+        id: "settled_growth",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["feed_the_soil"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      grove_mind: {
+        id: "grove_mind",
+        name: "Grove Mind",
+        cost: 2,
+        prerequisitesAnyOf: [["settled_growth"], ["endless_bounty"]],
+        leaning: "sociability",
+        // The shared root system enriches a whole patch of ground, not just
+        // the tile underfoot — a real escalation of Feed the Soil's own
+        // lever. Promoted from a bridge notable to this lane's own notable,
+        // which is where it always belonged: it is the lane's subject.
+        delta: { fertilityBoost: { amount: 0.35, radius: 2 } },
+      },
+      long_season: {
+        id: "long_season",
+        name: "Long Season",
+        cost: 1,
+        prerequisites: ["grove_mind"],
+        leaning: "sociability",
+        delta: { fertilityBoost: { amount: 0.4, radius: 2 } },
+      },
+      // --- Lane B: the body ---
+      rooted_calm: {
+        id: "rooted_calm",
+        name: "Rooted Calm",
+        cost: 1,
+        prerequisites: ["gentle_roots"],
+        leaning: "sociability",
+        // A real ally-facing effect — fires through the separate
+        // targetsAlly/allyEffect path (support.ts's applySupportMove),
+        // independent of this move's own drainNeeds/utilityMove path. Not
+        // literally wired to the stolen resource itself (no mechanism for
+        // that yet), but a genuine "pass some of it on" gesture instead of
+        // another self-buff.
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.1 } },
+      },
+      share_the_haul: {
+        id: "share_the_haul",
+        name: "Share the Haul",
+        cost: 2,
+        prerequisitesAnyOf: [["rooted_calm"], ["one_root_system"]],
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.18 } },
+      },
+      deepening_calm: {
+        id: "deepening_calm",
+        name: "Deepening Calm",
+        cost: 1,
+        prerequisites: ["share_the_haul"],
+        excludes: ["watchful_roots"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      watchful_roots: {
+        id: "watchful_roots",
+        name: "Watchful Roots",
+        cost: 1,
+        prerequisites: ["share_the_haul"],
+        excludes: ["deepening_calm"],
+        leaning: "sociability",
+        // Kept as healing. 1.5 -> 1.0, with the other 0.5 moved onto the
+        // Boldness<->Sociability bridge's notable: the tree's `regenFlat`
+        // total is unchanged, and the per-move healing budget still reads
+        // 8.8%/tick against the 10% ceiling.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      one_mouth: {
+        id: "one_mouth",
+        name: "One Mouth",
+        cost: 2,
+        prerequisitesAnyOf: [["long_season"], ["deepening_calm"], ["watchful_roots"]],
+        leaning: "sociability",
+        // Where the lanes meet. The heal stops being the whole gesture: a
+        // herd-mate fed off the shared root system also braces, because what
+        // it just ate came out of something that was trying to eat it.
+        delta: {
+          targetsAlly: true,
+          allyEffect: { healFraction: 0.18, buff: { stat: "defense", stage: 1, ticks: 60 } },
+          cooldownTicks: -1,
+        },
+      },
+      slow_bounty: {
+        id: "slow_bounty",
+        name: "Slow Bounty",
+        cost: 1,
+        prerequisites: ["one_mouth"],
+        leaning: "sociability",
+        delta: { fertilityBoost: { amount: 0.45, radius: 2 } },
+      },
+      roots_that_feed_the_grove: {
+        id: "roots_that_feed_the_grove",
+        name: "Roots That Feed the Grove",
+        cost: 2,
+        prerequisites: ["slow_bounty"],
+        leaning: "sociability",
+        // CAPSTONE. What the roots take, the grove gets back — and at this
+        // depth it is the ground itself, three tiles out, not the tile
+        // underfoot. A herd that keeps one of these alive is farming, which
+        // is a strange and specific thing for a parasite to end up doing and
+        // is the whole argument of the branch.
+        //
+        // healAura 0.012 -> 0.008: group healing pays out to every herd-mate
+        // in radius every tick, so it is held to a stricter standard than
+        // self-healing.
+        grantsPassives: [
+          { kind: "healAura", value: 0.008 },
+          { kind: "calmingPresence", value: 0.1 },
+        ],
+        delta: { fertilityBoost: { amount: 0.5, radius: 3 } },
+      },
+
+      // === BRIDGE 1: Aggression <-> Boldness ===
+      // The hunger it takes goes straight into a hardier stalk, not a bigger
+      // haul. Shortcuts into Insatiable (Aggression's haul notable) and
+      // Bitter Sap (Boldness's refusal notable) — one lane notable per
+      // branch it connects, neither of them a fork node.
       grounded_hunger: {
         id: "grounded_hunger",
         name: "Grounded Hunger",
@@ -9638,91 +10067,17 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["thickened_stalk"],
         leaning: "aggression",
-        // Everything it takes goes into the stalk.
-        grantsPassives: [
-          { kind: "defenseBoost", value: 0.04 },
-          { kind: "damageReduction", value: 0.06 },
-        ],
-        delta: {},
-      },
-      // --- Boldness: "Deep Taproot" — a slower, safer, more sustainable
-      // draw, not a bigger single theft.
-      steady_roots: {
-        id: "steady_roots",
-        name: "Steady Roots",
-        cost: 1,
-        leaning: "boldness",
-        // Was "+1.5 HP Regen". "Steady" is a stance, not a heal — and this
-        // branch's own flavour is defence. Physical-only by construction
-        // (calculateDamage only reads the defense stage for a physical move),
-        // which is the honest version of what a root system does.
+        // Everything it takes goes into the stalk. Its 6% `damageReduction`
+        // moved down to Bitter Sap so the bridge escalates the one lever its
+        // own crosslink introduced instead of reaching for a second kind.
         grantsPassive: { kind: "defenseBoost", value: 0.04 },
-        delta: {},
-      },
-      thick_bark: {
-        id: "thick_bark",
-        name: "Thick Bark",
-        cost: 1,
-        prerequisites: ["steady_roots"],
-        grantsPassive: { kind: "damageReductionFlat", value: 1 },
-        leaning: "boldness",
-        delta: {},
-      },
-      patient_taproot: {
-        id: "patient_taproot",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["thick_bark"], ["grounded_hunger"], ["communal_taproot"]],
-        leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
-      resilient_growth: {
-        id: "resilient_growth",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["patient_taproot"], ["ironroot"], ["grove_mind"]],
-        leaning: "boldness",
-        delta: { cooldownTicks: -1 },
-      },
-      bountiful_roots: {
-        id: "bountiful_roots",
-        name: "Bountiful Roots",
-        cost: 1,
-        prerequisites: ["resilient_growth"],
-        excludes: ["twin_taproot"],
-        leaning: "boldness",
-        // Gentler per-cast, but reaches further and lands more reliably.
-        delta: { drainNeeds: { need: "hunger", amount: 0.2, radius: 6 } },
-      },
-      twin_taproot: {
-        id: "twin_taproot",
-        name: "Twin Taproot",
-        cost: 1,
-        prerequisites: ["resilient_growth"],
-        excludes: ["bountiful_roots"],
-        leaning: "boldness",
-        // Draws moisture instead — a genuinely different resource, not
-        // just a bigger number on the same one.
-        delta: { drainNeeds: { need: "thirst", amount: 0.2, radius: 4 } },
-      },
-      ancient_roots: {
-        id: "ancient_roots",
-        name: "Ancient Roots",
-        cost: 2,
-        prerequisitesAnyOf: [["bountiful_roots"], ["twin_taproot"]],
-        leaning: "boldness",
-        // Distinct from Sturdy Return/Steady Roots below it, not the same
-        // two values re-granted a second time — a genuinely deeper root
-        // system, not a bigger number on the same two levers. 0.04 -> 0.025
-        // against the per-move healing budget.
-        grantsPassives: [
-          { kind: "regen", value: 0.025 },
-          { kind: "defenseBoost", value: 0.04 },
-        ],
-        delta: {},
-      },
-      // Crosslink: Boldness <-> Sociability — a taproot deep enough to
-      // share.
+
+      // === BRIDGE 2: Boldness <-> Sociability ===
+      // A taproot deep enough to share. Shortcuts into Ancient Roots
+      // (Boldness's stalk notable) and Share the Haul (Sociability's body
+      // notable).
       communal_taproot: {
         id: "communal_taproot",
         name: "Communal Taproot",
@@ -9742,120 +10097,35 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "calmingPresence", value: 0.1 },
         delta: {},
       },
-      grove_mind: {
-        id: "grove_mind",
-        name: "Grove Mind",
+      one_root_system: {
+        id: "one_root_system",
+        name: "One Root System",
         cost: 2,
         prerequisites: ["spreading_taproot"],
         leaning: "boldness",
-        // The shared root system enriches a whole patch of ground, not just
-        // the tile underfoot — a real escalation of Feed the Soil's own lever.
-        delta: { fertilityBoost: { amount: 0.25, radius: 2 } },
-      },
-      // --- Sociability: "Shared Harvest" — what the roots take doesn't
-      // stay with the caster. Real follow-up on a self-critique: the first
-      // draft never actually shared anything it stole, just re-ran Vine
-      // Whip's own nurturing template under a different name.
-      gentle_roots: {
-        id: "gentle_roots",
-        name: "Gentle Roots",
-        cost: 1,
-        leaning: "sociability",
-        grantsPassive: { kind: "calmingPresence", value: 0.15 },
-        delta: {},
-      },
-      rooted_calm: {
-        id: "rooted_calm",
-        name: "Rooted Calm",
-        cost: 1,
-        prerequisites: ["gentle_roots"],
-        leaning: "sociability",
-        // A real ally-facing effect at last — fires through the separate
-        // targetsAlly/allyEffect path (support.ts's applySupportMove),
-        // independent of this move's own drainNeeds/utilityMove path. Not
-        // literally wired to the stolen resource itself (no mechanism for
-        // that yet), but a genuine "pass some of it on" gesture instead of
-        // another self-buff.
-        delta: { targetsAlly: true, allyEffect: { healFraction: 0.1 } },
-      },
-      feed_the_soil: {
-        id: "feed_the_soil",
-        name: "Feed the Soil",
-        cost: 1,
-        prerequisitesAnyOf: [["rooted_calm"], ["communal_taproot"], ["feeding_ground"]],
-        leaning: "sociability",
-        // SKILL_TREE_GUIDE.md step 2, and the fix for this branch's
-        // sharpest self-criticism: "Shared Harvest" never actually shared
-        // anything it stole. Now what the roots take goes straight back
-        // into the ground the herd grazes (flora.ts's real fertility
-        // mechanic, the same one Growth/Grassy Terrain use) — a literal,
-        // visible ecosystem payoff instead of another passive aura.
-        // Required a real engine fix to work at all: `drainNeeds` used to
-        // early-return in `maybeUseUtilityMove`, silently killing every
-        // other utility field on the same move. Also replaces one of two
-        // identical "-1 Cooldown" fillers this branch was padded with.
-        delta: { fertilityBoost: { amount: 0.2, radius: 1 } },
-      },
-      settled_growth: {
-        id: "settled_growth",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["feed_the_soil"], ["grove_mind"], ["endless_bounty"]],
-        leaning: "sociability",
+        // Everything plugged into the same taproot keeps ticking back up.
+        // The 0.5 `regenFlat` here is Watchful Roots' other half, not new
+        // healing budget — see that node.
+        grantsPassive: { kind: "regenFlat", value: 0.5 },
         delta: { cooldownTicks: -1 },
       },
-      deepening_calm: {
-        id: "deepening_calm",
-        name: "Deepening Calm",
-        cost: 1,
-        prerequisites: ["settled_growth"],
-        excludes: ["watchful_roots"],
-        leaning: "sociability",
-        grantsPassive: { kind: "calmingPresence", value: 0.15 },
-        delta: {},
-      },
-      watchful_roots: {
-        id: "watchful_roots",
-        name: "Watchful Roots",
-        cost: 1,
-        prerequisites: ["settled_growth"],
-        excludes: ["deepening_calm"],
-        leaning: "sociability",
-        // Kept as healing, 2.25 -> 1.5 against the per-move budget.
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
-        delta: {},
-      },
-      roots_that_feed_the_grove: {
-        id: "roots_that_feed_the_grove",
-        name: "Roots That Feed the Grove",
-        cost: 2,
-        prerequisitesAnyOf: [["deepening_calm"], ["watchful_roots"]],
-        leaning: "sociability",
-        // What the roots take, the grove gets back — a slow herd-wide heal
-        // paired with the branch's own calm, not a bare aura on its own.
-        //
-        // 0.012 -> 0.008. Group healing pays out to every herd-mate in radius
-        // every tick, so it is held to a stricter standard than self-healing.
-        grantsPassives: [
-          { kind: "healAura", value: 0.008 },
-          { kind: "calmingPresence", value: 0.1 },
-        ],
-        delta: {},
-      },
-      // Crosslink: Sociability <-> Aggression — even a shared harvest
-      // takes what it needs.
+
+      // === BRIDGE 3: Sociability <-> Aggression ===
+      // Even a shared harvest takes what it needs. Shortcuts into Sharpened
+      // Hunger (Aggression's surplus notable) and Grove Mind (Sociability's
+      // ground notable). This is the tree's lifesteal, on the field that
+      // actually fires — see the note at the top of the tree.
       feeding_ground: {
         id: "feeding_ground",
         name: "Feeding Ground",
         cost: 1,
         prerequisites: ["gentle_roots", "ravenous_bite"],
         leaning: "aggression",
-        // Was "+1.5 HP Regen". This crosslink sits behind Ravenous Bite on a
-        // move literally named for draining, and the tree used no
-        // `lifestealFraction` anywhere — a real gap, not a rebalance. The
-        // recovery is now taken FROM something rather than accruing on its
-        // own, which is the whole fantasy of the move.
-        delta: { cooldownTicks: -1, lifestealFraction: 0.08 },
+        // The recovery is taken FROM something rather than accruing on its
+        // own, which is the whole fantasy of the move: the same
+        // `maybeUseUtilityMove` call drains the target's hunger and then
+        // falls through to this heal, so the HP comes out of the theft.
+        delta: { cooldownTicks: -1, selfHeal: { fraction: 0.04 } },
       },
       richer_ground: {
         id: "richer_ground",
@@ -9863,11 +10133,10 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["feeding_ground"],
         leaning: "aggression",
-        // Bridge filler — deepens Feeding Ground's own lever, which is now
-        // the drain rather than a second identical "+1.5 HP Regen". The old
-        // pair was the clearest case in the roster of a filler that just
-        // repeated the node above it.
-        delta: { lifestealFraction: 0.06 },
+        // Bridge filler — deepens Feeding Ground's own lever rather than
+        // repeating the node above it, which is what the old identical
+        // "+1.5 HP Regen" pair did.
+        delta: { selfHeal: { fraction: 0.06 } },
       },
       endless_bounty: {
         id: "endless_bounty",
@@ -9875,10 +10144,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["richer_ground"],
         leaning: "sociability",
-        // Never quite empty, and never waiting long. 0.03 -> 0.02 against the
-        // per-move healing budget.
+        // Never quite empty, and never waiting long. The self-heal is also
+        // what makes Leech Seed worth a fight action below 60% HP
+        // (`worthAnActionInCombat`), so this bridge is the one route by
+        // which a Sociability build gets the move into combat at all.
         grantsPassive: { kind: "regen", value: 0.02 },
-        delta: { cooldownTicks: -1 },
+        delta: { selfHeal: { fraction: 0.09 }, cooldownTicks: -1 },
       },
     },
   },
