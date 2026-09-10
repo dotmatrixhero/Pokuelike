@@ -510,6 +510,23 @@ staying near a sleeping creature earns its trust — from tells alone — the
 premise holds. If they cannot, the premise is wrong and everything after
 this changes. There is no way to know earlier than this milestone.
 
+**Pulled forward from M7, built ahead of schedule: command your bonded
+partner.** Direct ask: *"even before m7... under the attack option a sub
+menu show up to select your bonded pokemon if its within the same zone as
+you, and you can select a move and target a space with it - it then uses
+its own pathfinding to get to the right position and use it."* Attack now
+opens a chooser when a bonded follower is in zone; picking one of its real
+moves arms a targeting mode, and the next tile clicked is the order — the
+partner paths there on its own action ticks and resolves the move, same
+turn-cost shape as `applyFollowing`. Full writeup, including the two live
+verifications (Playwright against the real dev server, and a direct-engine
+run against real curated data), in TODO.md's "Built: command your bonded
+partner" section. The dispersal-offer Build item just above is still the
+one unstarted piece — its own required measurement gate was run
+(TODO.md's "Measured: the dispersal offer's..." section) and the doc's
+core assumption did not hold; the three options that measurement raised
+are still an open ruling, not resolved by this.
+
 ### M7 — Climb
 
 Layers 2–5 and the exit.

@@ -8868,3 +8868,421 @@ Not fixed, because either repair is a balance change:
 
 I'd take 1 — an advertised number that does nothing is the same class of
 defect as unreachable content — but it moves real numbers, so it is yours.
+
+## Measured: the dispersal offer's "the sim already correlates the two" claim — false in practice
+
+CAMPAIGN_DESIGN.md's dispersal-offer section (the two doors: "the
+disperser" and "the follower," both gated at Bonded/0.5, explicitly
+"Status: not decided") names its own required gate before building
+anything: *"How many dispersal events actually fire in a layer-1-sized
+region over a layer-1-length run (~400 turns), across several seeds? If
+the answer is near zero, this path never fires in a real run."*
+`runner/validateDispersalOffer.ts` is that measurement.
+
+**Part A — baseline dispersal frequency, no player, 8 seeds, 6000
+ticks each, tracking a 4-member herd:** 23 dispersal events total, so
+`maybeTriggerDispersal` fires plenty on its own — not the near-zero
+case the doc worried about.
+
+**Part B — the actual question: does a herd member ever disperse WHILE
+holding real trust toward the player, using `validateBond.ts`'s own
+real courting bot** (gather berries, approach, crouch, offer, repeat;
+tracks every herd member's `rapportScore`/`trustStage` every tick, not
+just the current courting target): 6 of 8 seeds reached Bonded (0.5)
+trust — the same threshold both doors fire at — via ordinary courting
+play. But in every seed where a dispersal event was also observed, the
+disperser was a **different, low-trust individual** (0.00–0.31 trust)
+from whichever herd member the player had actually bonded with. The
+doc's own reasoning — "the sim already correlates the two" — does not
+hold: dispersal and bonding are independent processes over the same
+herd, not the same event.
+
+Three options were on the table (ship the follower door only and defer
+the disperser door; redesign the disperser trigger so it doesn't require
+the bonded individual specifically; build both, firing on whichever
+individual disperses regardless of trust). Not explicitly ruled on — the
+conversation moved to the "command your bonded partner" feature (below)
+instead of picking one, so this is genuinely still open, not a decision
+made by default. See the next section for what actually shipped instead.
+
+## Built: command your bonded partner — a real move, aimed at a real tile
+
+Direct ask, after seeing "no_eligible_mates" in the dispersal-offer
+report above and worrying a player-mating mechanic had been built (it
+hadn't — that vocabulary is the wild herd's own natal-dispersal system,
+unrelated to the player): *"ok you shouldnt be uh mating/laying eggs
+with the pokemon btw. just like, when they bonded to you the follow you
+around and you can tell them what to do."* Followed immediately by the
+concrete ask, ahead of M7: *"under the attack option a sub menu show up
+to select your bonded pokemon if its within the same zone as you, and
+you can select a move and target a space with it - it then uses its own
+pathfinding to get to the right position and use it."*
+
+**Engine** (`packages/engine/src`):
+- `types.ts`: `PlayerAction`'s `"command"` case (`agentId`, `moveId`,
+  `target`); `Agent.commandedAction?: { moveId, target }`.
+- `predation.ts`: `resolveHit` gained an optional `explicitMove` param —
+  a commanded partner's chosen move goes through the exact same
+  damage/status/ally-effect/charge-attack pipeline any auto-picked
+  attack does, just without `pickBestMove` substituting a different
+  move. New exported `applyTerrainEffectAt`, consolidating the
+  terrain-effect logic (axe fells a tree, etc.) that used to live
+  inlined only in `player.ts`'s own `attack` case — now shared by both.
+- `needs.ts`: new `applyCommandedAction`, hooked into `tickAgentAction`
+  right after `applyPredationInstincts` (self-preservation still wins)
+  and ahead of `applyTreatSeeking`/`applyFollowing` (a direct order
+  outranks passive following). Steps toward the target with the same
+  `stepToward` primitive dispersal/following/hunting already use;
+  resolves the move once in range (`resolveHit` against a living
+  defender, or `applyTerrainEffectAt` against bare terrain) and clears
+  the order. An urgent need (hunger/thirst) pauses the order rather than
+  discarding it — same as `applyFollowing` already yields to needs. A
+  move no longer known (e.g. evolved out of it) clears the order without
+  acting.
+- `player.ts`: new `"command"` case (only succeeds against a real
+  follower — `Agent.followingId === this player's id` — that knows the
+  named move); the existing `"attack"` case's terrain branch now calls
+  `applyTerrainEffectAt` instead of its own inlined copy.
+- 10 new unit tests (`test/commandedAction.test.ts`): issuing sets the
+  order; out-of-range paths toward the target and switches to `"fight"`
+  behavior; in-range-and-off-cooldown resolves against a living target
+  and clears; terrain-effect resolves and grants no item (the follower
+  isn't the player — `applyTerrainEffectAt`'s `yields` gate is
+  `controlledBy === "player"`); an urgent need pauses without discarding;
+  an unknown move clears without acting; on-cooldown-but-in-range stands
+  without double-resolving. Full engine suite: 1453/1453.
+
+**Web** (`packages/web/src`, `index.html`): a new `#command-menu` modal
+(reusing the Pack menu's own `.pack-card`/`.pack-row` visual pattern) —
+Attack now opens it instead of swinging instantly whenever a bonded
+follower is in the player's own zone (`bondedPartnersInZone`), listing
+"You" (the old instant swing) plus each partner's real known moves.
+Picking a move arms a `targeting` state; the next canvas click (tile or
+agent, intercepted ahead of the ordinary select/tap-to-walk handling)
+becomes the order's target and fires `playerAct({kind: "command", ...})`
+— the same turn-costing path every other verb goes through. Escape, or
+pressing Attack again, cancels targeting. `outcomeText`'s exhaustive
+switch over `PlayerAction` (CLAUDE.md's documented risk class — the
+same shape as the `SimEvent`-switch lesson) needed its own new
+`"command"` case; caught immediately by `tsc` during the web build, not
+missed.
+
+**Live-verified**, two ways:
+1. Playwright against the real dev server (`?player=1&seed=42`,
+   `window.__pokuelike.world` — the existing dev-only debug hook,
+   `main.ts`'s own doc comment: "lets a Playwright check read the real
+   world... not shipped in the production build"): tapping Attack with
+   a bonded partner in zone opens the menu showing the real partner
+   (Bulbasaur) and its real moves (Tackle, Vine Whip); picking Tackle
+   arms targeting and updates the HUD message; clicking a map tile fires
+   the order, sets `commandedAction` correctly, and shows "You signal
+   Bulbasaur."
+2. Direct engine calls (`tsx`) against the same real curated scenario
+   (`createPlayerDemoWorld(42)`), to watch the partner's own action
+   ticks run past what the browser round-trip conveniently covered: a
+   commanded Bulbasaur closed real distance over several ticks (greedy
+   `stepToward`, not full pathfinding — same primitive every other
+   AI behavior in this game already uses, so it can get stuck same as
+   any of them if the straight line is blocked, e.g. water — confirmed
+   directly: the first target picked landed in open water and the
+   partner correctly refused to enter it, not a bug), landed a real
+   Tackle on a real wild agent (19 → 15 HP), cleared the order, and
+   resumed following the player afterward.
+
+Not yet built: the disperser-door decision above is still open, and
+Rescue/Fight-alongside against real M7-layer predators are unexercised
+by this feature (layer 1 has none) — this only proves the mechanism
+against layer-1 wildlife.
+
+## Playtest report and fixes: drop, distinct crop items, attack's own move list
+
+Direct report, a rapid-fire list: *"need tier 1 crafting. Can't craft. can't
+drop items or use or equip them? can't gather crop or potato. can't rescue.
+attacking does not bring up move list. It just says nothing to attack."*
+
+Live-tested all five on real master (`?player=cave`, real key presses, real
+UI — not code-reading): craft, gather, and equip/stow all worked cleanly
+(gathered lichen → pack menu → Fiber → "You make fiber."; 'g' → "You gather
+lichen."; equip/stow both round-tripped `Agent.moves`). Rescue is a real,
+confirmed gap — ROADMAP.md's own M6 Build list explicitly defers Fight-
+alongside/Rescue to M7 ("need danger; layer 1 has none"), not a bug. Drop
+was a real, confirmed gap — grepped the whole `PlayerAction` union, no
+`"drop"` case existed anywhere. The attack move-list mismatch turned out to
+be the real, load-bearing finding underneath the report: *"Attack should
+move list should work when you have a weapon, or tackle if you don't. The
+player has moves too, even if it's just tackle."* — the just-shipped
+command-partner menu (previous section) only opened when a bonded follower
+was in zone, which is rare in real, unassisted play (TODO.md's own bond
+numbers); with none, Attack silently fell back to the old instant auto-pick
+swing, which reads as "no move list at all" exactly as reported. And the
+"can't gather crop/potato" report, followed up with *"We need distinct
+crop. Need to add to inventory as it's own thing,"* pointed at a real design
+gap: `harvestableAt` collapsed every crop flavor but herbs into one generic
+`"food"` material (Berries) — potato, apple, wheat, all 15 real crops in
+`crops.ts`'s own registry, indistinguishable in the pack.
+
+**Built, all three:**
+- **Drop** (`types.ts`'s new `{kind: "drop"; itemKey}`, `player.ts`'s new
+  case): discards one of a carried item, freeing its weight; clears the
+  held/worn slot (and resyncs moves) if it was the last one. Discard-only —
+  no ground-item/pickup system exists yet, so nothing is left retrievable;
+  flagged as a real, separate, bigger feature if wanted later, not silently
+  built in.
+- **Distinct crop items** (`harvest.ts`): `MaterialId` now includes every
+  real `CropId` (crops.ts's own 15-crop registry, herbs among them);
+  `MATERIALS`' names are sourced straight from `FOOD_CROPS[...].name` (one
+  source of truth, no duplicated string table); `harvestableAt` hands back
+  the tile's real flavor instead of collapsing it. New `FOOD_MATERIAL_IDS`/
+  `foodNutritionMultiplierOf` exports so `eat`/`offer` recognize ANY food
+  material as "a berry in the pack," not just the literal string `"food"`
+  — `offer`'s placed tile now carries the specific crop's flavor through to
+  the ground too (a Potato offered leaves a `flavor: "potato"` tile, not a
+  blank one).
+- **Attack's own move list** (`types.ts`'s `attack` case gained an optional
+  `moveId`, `player.ts`'s case validates and passes it through to
+  `resolveHit`'s `explicitMove`/the terrain branch): Attack now always
+  opens the chooser (`openCommandMenu`, previous section) — a "You" section
+  listing the player's own real `Agent.moves` (bare-handed Tackle, plus
+  whatever a held item grants), each move tapping straight into the
+  existing directional swing with that specific move, alongside the
+  bonded-partner section when one's in zone.
+
+**A real bug found and fixed along the way, live-testing the fix itself**:
+tapping a specific item's Eat/Offer button in the pack menu was silently
+acting on a DIFFERENT carried food than the one tapped — `eat`/`offer` had
+no way to say *which* food material to consume, just "the first one found"
+in a fixed priority order. With only one possible food item ("food") this
+was invisible; the moment two distinct crops sit in the same pack (this
+session's own new feature), tapping "Potato → Eat" silently ate an Apple
+instead. Caught live (Playwright: gave the player Potato + Apple, tapped
+Potato's Eat button, watched the Apple disappear instead), not from reading
+the diff. Fixed: `eat`/`offer` both gained an optional `itemKey`; the pack
+menu's row buttons now pass their own item's key explicitly; the 'e' key/
+HUD button (no specific row to name) keeps the old first-found behavior.
+Re-verified live after the fix: tapping Potato's own Eat button now eats
+the Potato.
+
+21 new unit tests (`test/inventoryActions.test.ts`, `test/playerCombat.test.ts`
+additions) plus the live Playwright/engine verification above. Full suite:
+engine 1474/1474, data 387/387.
+
+## Trust gates predation against the player, torch grants Ember, human player XP
+
+Direct report, after the user pasted their own death log — a Charmeleon's
+`dragon_breath` killing "Human (player)" for 56 damage: *"i'm okay with
+this, but uh... i dont know why the charmeleon killed me."* Investigated
+live (not guessed): Charmeleon is a real `isPredator: true` species, and
+`predation.ts`'s hunt-candidate filter (`isPreyOf`) has no
+`controlledBy === "player"` exclusion at all — a hungry predator treats the
+player exactly like any other eligible prey, and human is one of the
+weakest base stat blocks in the roster. Not retaliation (that mechanic
+explicitly excludes predators), not territorial defense (a separate
+same-species mechanic). Dragon Breath's 56 damage checked out as real,
+intended math (power 60 special move, a leveled Charmeleon vs. a low-level
+human's weak special defense, plus a crit) — not a bug.
+
+Follow-up: *"i think it killing me is fine... i think it's kinda
+surprising cuz i had good rapport with it... just the vibe."* Genuine
+design tension, not a bug: `NARRATIVE_PILLARS.md`'s Pillar 4 — "Pokémon
+roles come from instinct/typing" — argues predation should stay trust-
+blind, but the game's own precedent cuts the other way: a bonded PREY
+animal already stops fleeing the player once trust clears Bonded
+(`trust.ts`'s `trustFleeFactor`), so instinct already bends to earned,
+individual trust in one direction. Offered three options (leave it and fix
+only the narration; reduce predation odds by trust; block it outright at
+Bonded). Ruling: *"i think both 2 and 3."*
+
+**Built** (`predation.ts`): new `eligibleDespitePlayerTrust(world, predator,
+candidate, rng)`, scoped to `candidate.controlledBy === "player"` only —
+wild-on-wild predation is completely untouched, keeping the one part of
+the original mechanic the user was explicitly fine with. Reuses
+`threat.ts`'s own `trustStage`/`trustFleeFactor` ladder (the same wary/
+tolerant/curious/bonded stages and 1/0.5/0.25/0 multipliers the flee-radius
+mechanic already established) in the opposite direction: at Bonded, the
+player is excluded from the hunt-candidate list outright, every tick,
+regardless of rng; below that, `rng() < trustFleeFactor(stage)` gives
+tolerant/curious a real, reduced (not zero) chance of still being hunted.
+Wired into both the solo and pack hunt-candidate filters. 5 new unit tests
+(`test/predation.test.ts`) — including a real gotcha caught mid-build: the
+first attempt at these tests used adjacent positions and neutral
+disposition, and tripped a completely separate, pre-existing mechanic
+(any creature, predator or not, can independently decide to flee a nearby
+"threatening" human via `threat.ts`'s `playerFleeRadius`) — fixed by giving
+the test fixtures max boldness and real hunt-range distance, isolating what
+was actually under test. Full engine suite: 1479/1479.
+
+Two more direct asks, same round: *"also i want to gain xp as a human
+player too. the held torch should give me access to ember (1 range) as a
+move."*
+
+- **Torch grants Ember**: `crafting.ts`'s `torch` `ItemDef` gained
+  `grantsMoves: [MOVES.ember]` — the exact same pattern the knife/club/axe/
+  machete grants already use, range 1 already on the base move. The torch
+  keeps being a light source too (additive, not a replacement).
+- **Player XP**: investigated live and found the real gap — `species.ts`'s
+  `human` entry is deliberately "not in the dex" (no Pokédex number, no
+  catch rate — it's a literal `SpeciesDef`, not `speciesFromDex`), which
+  meant `LEVELING_CONTEXT.getProfile("human")` always returned `undefined`.
+  `grantExp`'s entire level-up loop silently no-ops without a real profile
+  — `Agent.exp` was already climbing (`EXP_ON_CONSUME` on eat/drink), it
+  just had nowhere to go: no level-ups, no stat growth, nothing visible.
+  Fixed with one synthetic `LevelingProfile` (`leveling.ts`'s new
+  `HUMAN_LEVELING_PROFILE`, built from `SPECIES.human`'s own stats, not a
+  fake dex entry) — `levelMoves: []` deliberately, since the player's real
+  moveset comes from held items (`syncPlayerMoves`), not level-gated
+  learning, so this doesn't create a second, conflicting source of
+  `Agent.moves` mutations. Everything downstream (exp accumulation, real
+  level-ups, `calculateStats`-driven stat growth, `leveledUp` events, skill
+  points) is the ordinary generic pipeline every other agent already goes
+  through — no parallel player-only system. Free side effect, same gap from
+  the other direction: whatever kills the player now actually earns real
+  kill exp for it too (`grantKillExp` reads the DEFENDER's profile).
+
+Live-verified (Playwright, real dev server, `?player=cave`): holding a
+torch adds `"ember"` to the player's real move list alongside `"tackle"`.
+60 real 'e' (eat) key presses took the player from level 5 (exp 4) to
+level 8 (exp 693), with `maxHp` growing from 19 to 25 and every other stat
+scaling with it — the actual bundled game code, not a synthetic harness.
+4 new unit tests (`test/leveling.test.ts`, data package). Full suite:
+engine 1479/1479, data 392/392.
+
+## Juicy crops relieve thirst; an early craftable capacity backpack
+
+Two direct asks, same message as the cooking-system pitch below (see that
+section): *"can you make berries and tomatoes and apples help thirst too"*
+and *"i also want to craft a backpack eather early on if possible, if only
+a small one, that increases your capacity."*
+
+**Thirst-relieving crops**: new `FoodCropDef.thirstRelief` (crops.ts), set
+on all four berries (oran/pecha/sitrus/cheri, 0.35), tomato (0.5 — the
+juiciest crop in the registry), and apple (0.3). Same units as
+`nutritionMultiplier`: a multiplier against `CONSUME_RATE`'s flat
+`seekWater` restore amount, applied via a second, smaller `consume()` call
+alongside the ordinary hunger relief. New `flora.ts` `thirstReliefFactor`
+(tile-based) and `harvest.ts` `thirstReliefOf` (carried-item-based) mirror
+the existing `foodNutritionFactor`/`foodNutritionMultiplierOf` pair
+exactly. Wired into both of `player.ts`'s `eat` branches (tile-underfoot
+and pack) and `needs.ts`'s wild-agent `seekFood` consumption — any eater,
+not just the player, per "the player is just another agent to the sim."
+
+**Early backpack**: investigated first and found real dead data —
+`ItemDef.capacity` ("extra carry capacity while carried") already existed,
+already sat on `foragePouch`, and was never read anywhere; `carryCapacityOf`
+only ever computed `maxHp * CARRY_CAPACITY_PER_MAXHP`. Wired it in: sums
+every carried item's own `capacity`, honoring the doc comment's own "while
+carried" (not "while worn/held" — no slot requirement, matches the pouch
+having no `slot` at all). Required threading `world` into
+`carryCapacityOf`'s signature (it needs `world.items` to look up each
+itemKey's `ItemDef`) — a small ripple across `support.ts`'s own two
+internal callers, `player.ts`'s two call sites, and `main.ts`'s two HUD/
+pack-menu renders. Then flipped `foragePouch`'s `knownAtStart` from
+`false` to `true` — its recipe (cordage + fiber, both already
+`knownAtStart` on their own) was already reachable from nothing; the flag
+was the only thing keeping it out of an early run.
+
+Live-verified (Playwright, real dev server): eating a Tomato moved both
+hunger (0.3 → 0.78) and thirst (0.3 → 0.50) in one action; crafting a
+Forage pouch from cordage + fiber (both already in a fresh pack) through
+the real multi-turn craft-activity UI bumped displayed capacity from
+28.5 to 36.5 — the pouch's own +8 landing exactly. 7 new unit tests
+(`test/inventoryActions.test.ts`, `test/support.test.ts`, data's
+`test/crafting.test.ts`). Full suite: engine 1485/1485, data 393/393.
+
+## Cooking: pitched, not yet built — scoping questions before starting
+
+Direct ask, same message as the above two (already built): *"you know im
+gonna have to add cooking lol. building a fire you can deploy (ex. torch +
+2x wood or something) to cook, and while near you can craft with combos of
+crops and berries. cooked food gets you more rapport when offered. heals as
+well as satisfies hunger."*
+
+Investigated before writing anything: this is genuinely the largest of the
+three asks, and touches real, expensive-to-reverse architecture decisions,
+unlike the two above (which were "wire up dead/half-built plumbing").
+Confirmed via grep: no "cooked"/"cooking" concept exists anywhere yet.
+What's already there to build on: a real `"fire"` terrain kind and burn-tick
+system (`fire.ts`'s `igniteTile`/`FIRE_BURN_TICKS`/`tickFires`) — but every
+existing ignition path is combat-only (a move's `terrainBurn` effect); there
+is no player action that deliberately lights a fire. `RecipeDef.inputs`
+(crafting's own recipe shape) is a fixed, exact list of `{itemKey, count}`
+pairs — no "any item from a category" support exists, so "combos of crops
+and berries" as an open combiner would be new recipe-input machinery, not a
+data-only addition. `craft` has no "must be near X terrain" precondition
+anywhere. Cooked-food healing would be new too — `eat` only ever calls
+`consume`, never touches `hp`.
+
+Asked (not yet answered) rather than guessed on, since getting either wrong
+means redoing real engine plumbing: (1) fixed named cooked dishes (Roasted
+Apple, Berry Stew, ...) each with their own exact ingredients, or one
+flexible recipe that accepts any two food-type items? (2) does the deployed
+fire have real fuel/burn out (reusing `FIRE_BURN_TICKS`), or is it a
+permanent placed structure once lit?
+
+## Cooking: built, tested, live-verified
+
+Answers to the two scoping questions above: *"Fixed named dishes
+(Recommended)"* — each dish keeps its own exact ingredient list, not a
+flexible any-two-foods combiner. Fire lifetime, a custom answer rather than
+either of my two presets: *"burns out but you can feed it more wood to
+increase fuel"* — real additive fuel, not a simple relight/refresh.
+
+**Lighting a fire.** New `PlayerAction` case `{ kind: "lightFire", dx, dy }`
+(`player.ts`). Requires a held torch (the tool) plus 2 carried deadwood (the
+fuel, consumed — the torch is not); ignites the targeted adjacent tile. If
+that tile is already burning, ADDS `FIRE_BURN_TICKS` to its remaining fuel
+rather than resetting it — the literal "feed it more wood to increase
+fuel" ask, deliberately diverging from `fire.ts`'s own `igniteTile` (which
+only refreshes an already-burning tile, fine for its existing combat-only
+callers, wrong for this one). Deliberately bypasses `fire.ts`'s
+`FLAMMABLE_TERRAIN` gate — a torch-lit campfire is fueled by the wood you're
+carrying, not by the ground catching, so it lights on bare floor; it still
+refuses water, wall, or any other non-walkable tile.
+
+**Cooking near a fire.** New `RecipeDef.requiresNearFire` flag, checked by a
+new `nearFire(world, agent)` export (`player.ts`, radius 2, mirroring the
+existing radius-1 `waterWithinReach`) inside the `"craft"` case. All 4 new
+dishes below carry it; nothing else does.
+
+**Four fixed named dishes** (`data/crafting.ts`): Roasted Apple (1 apple),
+Berry Stew (oran + pecha), Potato Mash (2 potato), Vegetable Stew (tomato +
+corn) — each a real `ItemDef` with its own `cooked: { healFraction,
+rapportMultiplier }` (0.15–0.2 heal, 2–2.5x rapport), each `knownAtStart:
+false` (discovered later, same as the game's other non-trivial recipes).
+
+**"Heals as well as satisfies hunger."** New `support.ts` export
+`healFromCookedFood(world, agent, itemOrFlavorKey)` — heals `maxHp *
+healFraction` if the key resolves to a cooked `ItemDef`. Wired into both of
+`player.ts`'s `eat` branches (carried item, and tile-underfoot) and into
+`needs.ts`'s wild-agent tile-consumption path, so any eater benefits, same
+"the player is just another agent" precedent as the thirst-crops round.
+`resolveFoodItem`/`isFoodItem` (`player.ts`) widened to recognize cooked
+`ItemDef`s, not just raw crop materials.
+
+**"Cooked food gets you more rapport when offered."** `needs.ts`'s
+`applyPlayerFeedingBonus` gained an optional `rapportMultiplier` param,
+computed from `world.items?.[tile.flavor]?.cooked?.rapportMultiplier ?? 1`
+at both of its real call sites — a cooked dish offered to a wild creature
+lands a proportionally bigger rapport gain than a raw berry would.
+
+**Bug found and fixed along the way, via live browser testing, not code
+review**: after building the whole engine/data side and unit-testing it (12
+new tests, `test/cooking.test.ts`, all passing), a live Playwright run —
+light a real fire, craft a real Roasted Apple through the real multi-turn
+craft UI — hit a dead end: the pack menu showed the Roasted Apple row with
+only a "Drop" button, no "Eat"/"Offer". Root cause: `web/main.ts`'s
+pack-menu row-rendering gated Eat/Offer on `FOOD_MATERIAL_IDS.includes(...)`
+alone, and was never updated to also recognize a cooked `ItemDef` the way
+the engine's own `isFoodItem` had been. Fixed with one added clause
+(`|| world.items?.[item.itemKey]?.cooked !== undefined`). Re-ran the same
+live scenario after the fix: Eat/Offer both now appear on Roasted Apple;
+captured hp immediately before the Eat click (16.08) and after (19, capped
+at maxHp) — a real ~2.9 hp gain from that one click, consistent with the
+dish's 0.15 healFraction × 19 maxHp ≈ 2.85, not incidental background regen
+from the craft activity's own ticking (the earlier, pre-fix run had wrongly
+looked like healing worked because hp rose during the multi-turn craft —
+it hadn't; the eat click never fired that time, confirmed via `ate: false`
+and the missing button).
+
+Full suite after the fix: engine 1497/1497 (12 new in `cooking.test.ts`),
+data 393/393, web build clean (`tsc --noEmit && vite build`), runner
+typecheck clean.

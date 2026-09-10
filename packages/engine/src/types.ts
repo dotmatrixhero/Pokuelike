@@ -584,8 +584,16 @@ export type BehaviorKind =
 export type PlayerAction =
   | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   | { kind: "wait" }
-  /** ROADMAP.md M3: eat from the food tile you stand on. Fails (and still costs the turn) on anything else. */
-  | { kind: "eat" }
+  /**
+   * ROADMAP.md M3: eat from the food tile you stand on. Fails (and still
+   * costs the turn) on anything else. `itemKey`, when given, names which
+   * carried food material to eat instead (the pack menu's per-row Eat
+   * button — distinct crop items, CLAUDE.md's "We need distinct crop" fix,
+   * made a bare "eat whatever's first" ambiguous the moment more than one
+   * kind sits in the pack); omitted keeps the old "first one found" pick
+   * (the 'e' key/HUD button, which has no specific row to name).
+   */
+  | { kind: "eat"; itemKey?: string }
   /** ROADMAP.md M3: drink from the water tile you stand on or beside. Fails (and still costs the turn) otherwise. */
   | { kind: "drink" }
   /** ROADMAP.md M5: start gathering from the tile you stand on (harvest.ts says what it yields). A time-spend — see `Activity`. */
@@ -601,8 +609,13 @@ export type PlayerAction =
   | { kind: "stow" }
   /** ROADMAP.md M6: toggle crouching. Halves your threat signature; a crouched step costs extra action energy. */
   | { kind: "crouch" }
-  /** ROADMAP.md M6: set one berry from your pack down on a free tile beside you, for whoever comes. */
-  | { kind: "offer" }
+  /**
+   * ROADMAP.md M6: set one berry from your pack down on a free tile beside
+   * you, for whoever comes. `itemKey`, when given, names which carried
+   * food material to offer — same "distinct crop items" reasoning as
+   * `eat`'s own `itemKey`; omitted keeps the old "first one found" pick.
+   */
+  | { kind: "offer"; itemKey?: string }
   /**
    * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Swings at
    * the adjacent tile in the given direction — a living agent there takes
@@ -613,8 +626,49 @@ export type PlayerAction =
    * a `tree`, a machete against a `bush`) fells/clears it instead. Fails
    * (still costs the turn) against a wall, water, or a tile nothing in the
    * current loadout can affect.
+   *
+   * Direct follow-up ask: "Attack should move list should work when you
+   * have a weapon, or tackle if you don't. The player has moves too, even
+   * if it's just tackle." `moveId`, when given, picks a specific one of
+   * the player's own real `Agent.moves` (bare-handed Tackle plus whatever
+   * a held item grants — the same list `syncPlayerMoves` keeps in sync)
+   * instead of letting `pickBestMove` auto-select one; omitted keeps the
+   * original auto-pick behavior (the plain 'f'-key/HUD-button swing).
    */
-  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
+  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; moveId?: string }
+  /**
+   * Direct ask: "even before m7... under the attack option a sub menu
+   * show up to select your bonded pokemon if its within the same zone as
+   * you, and you can select a move and target a space with it - it then
+   * uses its own pathfinding to get to the right position and use it."
+   * Orders `agentId` (must currently be following the player —
+   * `Agent.followingId === this player's id` — the bonded partner) to use
+   * `moveId` (one of its own real `Agent.moves`) at `target`. Costs the
+   * PLAYER's turn to issue; the partner then spends its own, separate
+   * action ticks closing distance and acting — see `needs.ts`'s
+   * `applyCommandedAction`. Fails if there is no such follower, or it
+   * doesn't know that move.
+   */
+  | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
+  | { kind: "drop"; itemKey: string }
+  /**
+   * Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
+   * something) to cook, and while near you can craft with combos of crops
+   * and berries" — and the scoping follow-up on how it burns: "burns out
+   * but you can feed it more wood to increase fuel." Requires a held torch
+   * and 2 carried deadwood (consumed — the torch itself stays equipped, as
+   * the tool, not the fuel); ignites the adjacent tile in the given
+   * direction, or — if that tile is already burning — adds another
+   * `FIRE_BURN_TICKS` worth of fuel to it rather than requiring it to burn
+   * out first. Unlike combat's own `terrainBurn`/`igniteNear` (fire.ts),
+   * this deliberately does NOT require the target tile's own terrain to be
+   * flammable: a torch-lit campfire is fueled by the wood you're carrying,
+   * not by the ground catching, so it can be lit on bare floor. Still
+   * fails against a wall, water, or anything else not walkable. Fails
+   * (still costs the turn) without a held torch or without 2 deadwood.
+   */
+  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -662,6 +716,15 @@ export interface RecipeDef {
   turns: number;
   /** "You are a human. These need no discovery." — CRAFTABLES_V1.md */
   knownAtStart: boolean;
+  /**
+   * Direct ask: "building a fire you can deploy... and while near you can
+   * craft with combos of crops and berries" — a cooking recipe needs a real
+   * "fire" tile within a few steps to start, checked by `player.ts`'s
+   * `craft` case (a small radius scan) alongside the ordinary
+   * `knowsRecipe`/`hasAll` checks. Absent/false for every non-cooking
+   * recipe, unchanged.
+   */
+  requiresNearFire?: boolean;
 }
 
 /** An item that can be carried, and maybe held or worn. Effects are read by the engine (a `light` lights you; `threat` feeds M6). */
@@ -688,6 +751,21 @@ export interface ItemDef {
   grantsMoves?: MoveSpec[];
   /** Extra carry capacity while carried (pouch, pack). */
   capacity?: number;
+  /**
+   * Direct ask: "cooked food gets you more rapport when offered. heals as
+   * well as satisfies hunger" — marks a crafted food item as a cooked dish
+   * (made near a deployed fire, see `RecipeDef.requiresNearFire`).
+   * `healFraction` restores that fraction of max HP on top of the ordinary
+   * hunger relief every food item already gives (`player.ts`'s `eat` case,
+   * both the carried-item and eat-off-a-tile branches). `rapportMultiplier`
+   * scales the rapport bonus a wild creature gets for eating one you set
+   * down (`needs.ts`'s `applyPlayerFeedingBonus`) — on top of, not instead
+   * of, that item's own `FOOD_CROPS` nutrition if any (cooked dishes are
+   * crafted items, not raw crops, so they carry no `nutritionMultiplier` of
+   * their own; this is the entire bonus). Absent for every raw/uncooked
+   * food item.
+   */
+  cooked?: { healFraction: number; rapportMultiplier: number };
 }
 
 /**
@@ -775,6 +853,22 @@ export interface Agent {
   followingId?: string;
   /** ROADMAP.md M6: the dispersal offer's refusal is permanent per individual (CAMPAIGN_DESIGN.md). Not yet used; reserved. */
   refusedFollow?: boolean;
+  /**
+   * Direct ask: "select your bonded pokemon... select a move and target a
+   * space with it - it then uses its own pathfinding to get to the right
+   * position and use it." Set by `player.ts`'s `command` case on the
+   * player's bonded follower; read every action tick by `needs.ts`'s
+   * `applyCommandedAction`, which steps the agent toward `target` until it
+   * is within `moveId`'s own range, then resolves the move there — against
+   * a living defender via `predation.ts`'s `resolveHit` (its own
+   * `explicitMove` param), or against terrain via `predation.ts`'s
+   * `applyTerrainEffectAt` — and clears this. An urgent need
+   * (hunger/thirst) still wins — the order simply waits, same as
+   * `applyFollowing` already yields to needs. Cleared without acting if
+   * the named move is no longer in `Agent.moves` (e.g. the order was
+   * queued, then something changed what this agent knows).
+   */
+  commandedAction?: { moveId: string; target: Vec2 };
   /**
    * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
    * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's

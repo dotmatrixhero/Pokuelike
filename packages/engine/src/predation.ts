@@ -13,10 +13,14 @@ import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 import { maybeUseUtilityMoveInCombat } from "./utilityMoves.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
+import { trustFleeFactor, trustStage } from "./trust.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
+import { addItem } from "./inventory.js";
+import { MATERIALS, type MaterialId } from "./harvest.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
 import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
 import { foulTile } from "./sludge.js";
@@ -1568,7 +1572,16 @@ export function resolveHit(
    * every pre-existing caller of `resolveHit` (mob-fighting's defensive
    * fights, the guardian branch), so none of them need updating.
    */
-  accuracyBonusMultiplier = 1
+  accuracyBonusMultiplier = 1,
+  /**
+   * A specific move to use instead of auto-picking one — needs.ts's
+   * `applyCommandedAction`, resolving a player's order to a bonded partner
+   * ("select a move and target a space with it"), already knows exactly
+   * which of the partner's own moves the player chose and must not let
+   * `pickBestMove` substitute a different one. Undefined for every
+   * pre-existing caller, which keeps auto-picking exactly as before.
+   */
+  explicitMove?: MoveSpec
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
@@ -1579,7 +1592,7 @@ export function resolveHit(
   // right above it, so this picks consistently with what was just validated
   // as reachable, rather than re-deriving its own (possibly different, now
   // that scoring is tempo-weighted too) answer independently.
-  const move = pickBestMove(attacker, defender.types ?? [], distance, world.tick);
+  const move = explicitMove ?? pickBestMove(attacker, defender.types ?? [], distance, world.tick);
   if (!move) return false; // every move on cooldown, or none reach from here, this tick
 
   useMove(attacker, move, world.tick);
@@ -1632,6 +1645,36 @@ export function resolveHit(
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
   return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true, rng, accuracyBonusMultiplier);
+}
+
+/**
+ * MOVES_AND_TOOLS.md's generalised `terrainEffect` (axe against a tree,
+ * machete against a bush), applied directly at a tile with no living
+ * defender involved — the same logic player.ts's own `attack` case used to
+ * inline, now shared with needs.ts's `applyCommandedAction` so a commanded
+ * partner's swing against terrain goes through the identical path a
+ * player's own swing does. Returns what changed, or undefined if `move` has
+ * no `terrainEffect` or the tile doesn't qualify (no tile there, or the
+ * tile's terrain isn't in `terrainEffect.from` when that's set).
+ */
+export function applyTerrainEffectAt(
+  world: World,
+  attacker: Agent,
+  layer: Layer,
+  pos: Vec2,
+  move: MoveSpec
+): { from: TerrainKind; to: TerrainKind; yields?: MaterialId } | undefined {
+  if (!move.terrainEffect) return undefined;
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile) return undefined;
+  if (move.terrainEffect.from && !move.terrainEffect.from.includes(tile.terrain)) return undefined;
+  useMove(attacker, move, world.tick);
+  const { to, yields } = move.terrainEffect;
+  const from = tile.terrain;
+  setTile(world, layer, pos.x, pos.y, to);
+  if (yields && attacker.controlledBy === "player") addItem(attacker, yields, 1, MATERIALS[yields].weight);
+  invalidateResourceIndex(world);
+  return { from, to, yields };
 }
 
 /**
@@ -1895,6 +1938,29 @@ function applyFightOrFlight(
   return true;
 }
 
+/**
+ * Direct report, after the player was killed by a Charmeleon they had fed
+ * twice: "i think kinda surprising cuz i had good rapport with it." Direct
+ * follow-up ruling on the fix, given three options (leave predation
+ * trust-blind and just narrate it; reduce the odds; block it outright at
+ * Bonded): "i think both 2 and 3." Scoped to the player specifically — this
+ * mirrors `threat.ts`'s existing player-trust mechanic (a wary/tolerant/
+ * curious/bonded creature already scales how close the player can come
+ * before it flees, via this same `trustFleeFactor` ladder) in the opposite
+ * direction: instead of the PREY trusting the player enough to stop
+ * fleeing, this is the PREDATOR trusting the player enough to reconsider
+ * hunting them. Non-player prey are completely unaffected — wild-on-wild
+ * predation keeps its existing trust-blind "Pokémon are what they are"
+ * behavior (NARRATIVE_PILLARS.md's Pillar 4), which is the one part of the
+ * original report the user was explicitly fine with keeping.
+ */
+export function eligibleDespitePlayerTrust(world: World, predator: Agent, candidate: Agent, rng: () => number): boolean {
+  if (candidate.controlledBy !== "player") return true;
+  const stage = trustStage(world, predator, candidate.id);
+  if (stage === "bonded") return false; // never prey, full stop — not just unlikely
+  return rng() < trustFleeFactor(stage); // wary: always eligible; tolerant/curious: reduced odds
+}
+
 export function applyPredationInstincts(
   world: World,
   agent: Agent,
@@ -2149,7 +2215,8 @@ export function applyPredationInstincts(
           (other) =>
             isPreyOf(rules, agent, other) &&
             !isProtectedByMob(world, other) &&
-            isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+            isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS) &&
+            eligibleDespitePlayerTrust(world, agent, other, rng)
         );
     let target = preferMarked(agent, soloCandidates);
 
@@ -2166,7 +2233,8 @@ export function applyPredationInstincts(
         (other) =>
           isPackPreyOf(rules, agent, other) &&
           !isProtectedByMob(world, other) &&
-          isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+          isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS) &&
+          eligibleDespitePlayerTrust(world, agent, other, rng)
       );
       const packTarget = preferMarked(agent, packCandidates);
       if (packTarget && nearbySameSpeciesConspecifics(world, agent, packTarget.pos, PACK_MUSTER_RADIUS).length >= MIN_PACK_ALLIES) {

@@ -126,10 +126,40 @@ export function bodyWeightOf(agent: Agent): number {
   return agent.maxHp ?? FALLBACK_MAX_HP;
 }
 
-/** How much an agent can carry — items plus, if it's currently carrying a fainted ally, that ally's body weight. */
-export function carryCapacityOf(agent: Agent): number {
-  if (agent.maxHp === undefined) return FALLBACK_CARRY_CAPACITY;
-  return agent.maxHp * CARRY_CAPACITY_PER_MAXHP;
+/**
+ * How much an agent can carry — items plus, if it's currently carrying a
+ * fainted ally, that ally's body weight.
+ *
+ * Direct ask: "i also want to craft a backpack eather early on... that
+ * increases your capacity" — `ItemDef.capacity` ("extra carry capacity
+ * while carried") already existed as a documented field on `foragePouch`
+ * but was never actually read anywhere; this is that wiring. Sums every
+ * carried item's own `capacity` bonus, same as the doc comment always
+ * said: "while carried," not "while worn/held" — a pouch adds capacity
+ * just by being in the pack, no equip step required (real bags don't stop
+ * holding more just because you're not gripping the strap).
+ */
+export function carryCapacityOf(world: World, agent: Agent): number {
+  const base = agent.maxHp === undefined ? FALLBACK_CARRY_CAPACITY : agent.maxHp * CARRY_CAPACITY_PER_MAXHP;
+  const bonus = (agent.inventory ?? []).reduce((sum, item) => sum + (world.items?.[item.itemKey]?.capacity ?? 0), 0);
+  return base + bonus;
+}
+
+/**
+ * Direct ask: "cooked food... heals as well as satisfies hunger." Shared by
+ * `player.ts`'s own `eat` (both branches) and `needs.ts`'s wild-agent tile
+ * consumption, since either kind of eater can end up eating a cooked dish
+ * (the player directly, or a wild creature eating one the player offered).
+ * `itemOrFlavorKey` is whatever the eaten thing's real item key was — a
+ * carried item's own key, or an offered tile's `flavor` (which, for a
+ * cooked dish, is set to that same key by `player.ts`'s `offer` case). A
+ * no-op for anything that isn't a real `ItemDef` with `cooked` set (every
+ * raw crop, and any tile with no flavor at all).
+ */
+export function healFromCookedFood(world: World, agent: Agent, itemOrFlavorKey: string | undefined): void {
+  const healFraction = itemOrFlavorKey ? world.items?.[itemOrFlavorKey]?.cooked?.healFraction : undefined;
+  if (!healFraction || agent.maxHp === undefined) return;
+  agent.hp = Math.min(agent.maxHp, (agent.hp ?? agent.maxHp) + agent.maxHp * healFraction);
 }
 
 function inventoryWeight(agent: Agent): number {
@@ -147,7 +177,7 @@ export function usedCarryWeight(world: World, agent: Agent): number {
 }
 
 function remainingCarryCapacity(world: World, agent: Agent): number {
-  return carryCapacityOf(agent) - usedCarryWeight(world, agent);
+  return carryCapacityOf(world, agent) - usedCarryWeight(world, agent);
 }
 
 // --- Injury -> effective Speed ---
@@ -402,7 +432,7 @@ export function maybeRecoverFromFaint(agent: Agent, world: World, log?: EventLog
  * caller can treat it as this tick's action.
  */
 export function applyLooting(world: World, agent: Agent, log?: EventLog): boolean {
-  const capacity = carryCapacityOf(agent);
+  const capacity = carryCapacityOf(world, agent);
   const used = usedCarryWeight(world, agent);
 
   const lootable = world.agents.filter(

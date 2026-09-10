@@ -287,7 +287,40 @@ function profileFromDexEntry(speciesId: string): LevelingProfile | undefined {
   return profile;
 }
 
+/**
+ * Direct ask: "i want to gain xp as a human player too." The player's own
+ * species is deliberately NOT in the dex (species.ts's own `human` entry:
+ * "Not in the dex, so a literal rather than `speciesFromDex`") — human
+ * isn't a real Pokémon with a Pokédex number or catch rate, so it was never
+ * given a fake dex entry. But `grantExp`'s entire level-up loop (exp
+ * accumulation, real level-ups, stat growth via `calculateStats`, skill
+ * points) needs a real `LevelingProfile` from `getProfile` to do anything
+ * at all — without one it silently no-ops forever (`agent.exp` climbs,
+ * nothing else ever happens), which is exactly what was happening: the
+ * player already earns real exp (eating, drinking, `EXP_ON_CONSUME`), it
+ * just had nowhere to go. This is the one synthetic profile needed, built
+ * straight from `SPECIES.human`'s own stats — everything downstream of it
+ * (leveling, stat growth, `leveledUp` events) is the ordinary generic
+ * pipeline every other agent already goes through, not a parallel
+ * player-only system. `levelMoves: []` is deliberate: the player's real
+ * moveset comes from held items (MOVES_AND_TOOLS.md's `syncPlayerMoves`),
+ * not level-gated learning, so this doesn't feed a second, conflicting
+ * source of `Agent.moves` mutations. A side effect, also correct: whatever
+ * kills the player now actually earns real kill exp for it too
+ * (`grantKillExp` reads the DEFENDER's profile) — previously silently
+ * zero, the same "human has no profile" gap from the other direction.
+ */
+const HUMAN_LEVELING_PROFILE: LevelingProfile = {
+  growthRate: "MEDIUM_FAST",
+  baseStats: SPECIES.human.baseStats,
+  types: SPECIES.human.types,
+  baseExp: 64,
+  levelMoves: [],
+  evolutions: [],
+};
+
 function computeProfileFromDexEntry(speciesId: string): LevelingProfile | undefined {
+  if (speciesId.toLowerCase() === "human") return HUMAN_LEVELING_PROFILE;
   const entry = SPECIES_DEX_BY_KEY[speciesId.toUpperCase()];
   if (!entry) return undefined;
   return {

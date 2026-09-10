@@ -65,6 +65,11 @@ describe("crafting tables (ROADMAP M5)", () => {
     }
   });
 
+  it('direct ask: "i also want to craft a backpack eather early on if possible" — the forage pouch is known at start', () => {
+    expect(KNOWN_AT_START).toContain("foragePouch");
+    expect(ITEMS.foragePouch!.capacity).toBeGreaterThan(0);
+  });
+
   it("in the real cave, lichen and deadwood are gatherable within 60 walked steps of spawn on every seed", () => {
     for (const seed of [20260903, 11, 202, 3003, 40404]) {
       const world = createCaveScenario(seed);
@@ -112,6 +117,17 @@ describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
     // Direct correction, mid-build: "Club should not be body slam... Maybe
     // pound?" — Body Slam is gone from the club's grant entirely.
     expect(ITEMS.club!.grantsMoves!.some((m) => m.id === "body_slam")).toBe(false);
+  });
+
+  it('direct ask: "the held torch should give me access to ember (1 range) as a move" — a real, vanilla Ember, range 1', () => {
+    const granted = ITEMS.torch!.grantsMoves!;
+    expect(granted.map((m) => m.id)).toContain("ember");
+    const move = granted.find((m) => m.id === "ember")!;
+    expect(move.power).toBe(MOVES.ember!.power);
+    expect(move.cooldownTicks).toBe(MOVES.ember!.cooldownTicks);
+    expect(move.range).toEqual({ min: 0, max: 1 });
+    // The torch keeps being a light source too — the grant is additive.
+    expect(ITEMS.torch!.light).toBe(true);
   });
 
   it("axe fells trees only; machete clears brush and grants a real, vanilla Slash — the slice rule, and no tool gets all of Cut", () => {

@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -139,6 +139,9 @@ const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
 const packMenuEl = document.getElementById("pack-menu") as HTMLElement;
 const packMenuBodyEl = document.getElementById("pack-menu-body") as HTMLElement;
 const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButtonElement;
+const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
+const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
+const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -191,6 +194,14 @@ let lastLoggedEventCount = 0;
  * concept of player facing at all.
  */
 let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
+/**
+ * Direct ask: "select your bonded pokemon... select a move and target a
+ * space with it." Set once a move is picked from the command menu; the next
+ * canvas click (any tile — living target or bare terrain) becomes that
+ * order's `target` instead of the ordinary select/travel-to click. Cleared
+ * on firing, on Escape, or on pressing Attack again.
+ */
+let targeting: { agentId: string; moveId: string } | undefined;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -503,7 +514,7 @@ function renderPack(player: Agent): void {
     const slot = held ? ` (held${fuel})` : player.equipment?.worn === i.itemKey ? " (worn)" : "";
     return `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}${slot}`;
   });
-  hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
+  hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(world, player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
   if (player.lastNotice) {
     if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
     player.lastNotice = undefined;
@@ -548,7 +559,7 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       return ok ? "You crouch. You move slowly and read as less of a threat." : "You stand up.";
     case "offer":
       if (ok) return "You set a berry down beside you.";
-      return countOf(player, "food") > 0 ? "No free ground beside you." : "You have no berries. Gather some from a patch.";
+      return FOOD_MATERIAL_IDS.some((id) => countOf(player, id) > 0) ? "No free ground beside you." : "You have no food. Gather some from a patch.";
     case "attack": {
       if (!ok) return "Nothing there to hit.";
       if (outcome.attackedId) {
@@ -559,6 +570,19 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
         return outcome.felled.yields ? `You fell it, and gather ${itemName(outcome.felled.yields).toLowerCase()}.` : "You clear it away.";
       }
       return "";
+    }
+    case "command": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      return ok ? `You signal ${name}.` : `${name} won't take that order.`;
+    }
+    case "drop":
+      return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
+    case "lightFire": {
+      if (ok) return "You build up a fire.";
+      if (player.equipment?.held !== "torch") return "You need a torch in hand.";
+      if (countOf(player, "deadwood") < 2) return "Not enough deadwood — you need 2.";
+      return "Nowhere to put it there.";
     }
   }
 }
@@ -645,23 +669,41 @@ function openPackMenu(): void {
     }
     return el;
   };
-  packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(me)}`));
+  packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(world, me)}`));
   if (!me.inventory?.length) packMenuBodyEl.appendChild(rowEl("Nothing yet. Stand on lichen or deadwood and gather."));
+  // Direct report: "can't drop items." Every row gets a real Drop action
+  // now, alongside whatever else it does — the same actions-row pattern
+  // "food" already used for Eat/Offer, extended to every item instead of
+  // one row keeping the single-whole-row-tap shape and the rest not.
   for (const item of me.inventory ?? []) {
     const def = world.items?.[item.itemKey];
     const held = me.equipment?.held === item.itemKey;
     const worn = me.equipment?.worn === item.itemKey;
-    const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}`;
-    if (item.itemKey === "food") {
-      packMenuBodyEl.appendChild(
-        actionsRowEl(label, [
-          { label: "Eat", onTap: () => playerAct({ kind: "eat" }) },
-          { label: "Offer", onTap: () => playerAct({ kind: "offer" }) },
-        ])
-      );
-    } else if (def?.slot === "held") packMenuBodyEl.appendChild(rowEl(label, held ? "in hand · tap to put away" : "tap to hold", () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey })));
-    else if (def?.slot === "worn") packMenuBodyEl.appendChild(rowEl(label, worn ? "worn" : "tap to wear", worn ? undefined : () => playerAct({ kind: "equip", itemKey: item.itemKey })));
-    else packMenuBodyEl.appendChild(rowEl(label));
+    const state = held ? " (in hand)" : worn ? " (worn)" : "";
+    const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}${state}`;
+    const actions: { label: string; onTap: () => void }[] = [];
+    // Direct report: "we need distinct crop... add to inventory as its own
+    // thing" — gathering now hands back the specific crop (Potato, Apple,
+    // ...), not just the old generic "food" — `FOOD_MATERIAL_IDS` (not a
+    // bare `itemKey === "food"` check) is what still recognizes any of
+    // them as "a berry in the pack" for Eat/Offer. A cooked dish (e.g.
+    // Roasted Apple) isn't in that material list at all — it's an
+    // `ItemDef` with a `cooked` marker — so it needs its own check here too,
+    // mirroring the engine's own `isFoodItem` (player.ts).
+    if ((FOOD_MATERIAL_IDS as readonly string[]).includes(item.itemKey) || world.items?.[item.itemKey]?.cooked !== undefined) {
+      // Names the specific stack this row is for — with more than one kind
+      // of food in the pack now (distinct crop items), a bare `{kind:
+      // "eat"}` would silently eat whichever material happens to sort
+      // first, not necessarily the one this row's button was tapped on.
+      actions.push({ label: "Eat", onTap: () => playerAct({ kind: "eat", itemKey: item.itemKey }) });
+      actions.push({ label: "Offer", onTap: () => playerAct({ kind: "offer", itemKey: item.itemKey }) });
+    } else if (def?.slot === "held") {
+      actions.push({ label: held ? "Put away" : "Hold", onTap: () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey }) });
+    } else if (def?.slot === "worn" && !worn) {
+      actions.push({ label: "Wear", onTap: () => playerAct({ kind: "equip", itemKey: item.itemKey }) });
+    }
+    actions.push({ label: "Drop", onTap: () => playerAct({ kind: "drop", itemKey: item.itemKey }) });
+    packMenuBodyEl.appendChild(actionsRowEl(label, actions));
   }
   packMenuBodyEl.appendChild(h("Make"));
   const known = (me.knownRecipes ?? []).map((id) => world.recipes?.[id]).filter((r): r is NonNullable<typeof r> => !!r);
@@ -669,7 +711,12 @@ function openPackMenu(): void {
   for (const r of known) {
     const missing = r.inputs.filter((i) => countOf(me, i.itemKey) < i.count).map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`);
     const inputs = r.inputs.map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`).join(" + ");
-    if (missing.length === 0) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · ${r.turns} turns · tap to make`, () => { playerAct({ kind: "craft", recipeId: r.id }); runActivity(); }));
+    // Direct ask: "while near you can craft with combos of crops and
+    // berries" — a cooking recipe also needs a real deployed fire nearby;
+    // says so in the same "here's what's missing" style as ingredients.
+    const needsFire = r.requiresNearFire && !nearFire(world, me);
+    if (missing.length === 0 && !needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · ${r.turns} turns · tap to make`, () => { playerAct({ kind: "craft", recipeId: r.id }); runActivity(); }));
+    else if (missing.length === 0 && needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · needs a fire nearby`));
     else packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · you have no ${missing.join(", ")}`));
   }
   packMenuEl.hidden = false;
@@ -679,6 +726,93 @@ function closePackMenu(): void {
   packMenuEl.hidden = true;
 }
 packMenuCloseBtn.addEventListener("click", closePackMenu);
+
+/** Bonded followers (ROADMAP M6's follower door) standing in the player's own zone right now — the pool the command menu offers. */
+function bondedPartnersInZone(me: Agent): Agent[] {
+  return world.agents.filter((a) => a.followingId === me.id && a.alive !== false && a.layer === me.layer);
+}
+
+/**
+ * Direct asks: "under the attack option a sub menu show up to select your
+ * bonded pokemon if its within the same zone as you, and you can select a
+ * move and target a space with it - it then uses its own pathfinding to get
+ * to the right position and use it" and the follow-up, "Attack should move
+ * list should work when you have a weapon, or tackle if you don't. The
+ * player has moves too, even if it's just tackle." Attack always opens
+ * this now: a "You" section lists the player's own real moves
+ * (bare-handed Tackle, plus whatever a held item grants — `Agent.moves`,
+ * kept in sync by `syncPlayerMoves`), each firing the ordinary directional
+ * swing (`lastFacing`) with that specific move; a bonded-follower section
+ * per partner in zone, same as before, for the tile-targeted command.
+ */
+function openCommandMenu(): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  cancelTravel();
+  targeting = undefined;
+  commandMenuBodyEl.replaceChildren();
+  const row = (text: string, sub: string | undefined, onTap: () => void) => {
+    const el = document.createElement("button");
+    el.className = "pack-row tappable";
+    el.textContent = text;
+    if (sub) {
+      const s = document.createElement("span");
+      s.className = "pack-sub";
+      s.textContent = sub;
+      el.appendChild(s);
+    }
+    el.addEventListener("click", onTap);
+    return el;
+  };
+  const heading = (text: string) => {
+    const el = document.createElement("div");
+    el.className = "pack-heading";
+    el.textContent = text;
+    return el;
+  };
+  commandMenuBodyEl.appendChild(heading("You"));
+  const myMoves = me.moves ?? [];
+  if (myMoves.length === 0) commandMenuBodyEl.appendChild(row("No moves.", undefined, () => {}));
+  for (const move of myMoves) {
+    const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
+    commandMenuBodyEl.appendChild(
+      row(move.name, onCooldown ? "on cooldown" : "tap to swing in the direction you last moved", () => {
+        if (onCooldown) return;
+        closeCommandMenu();
+        playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId: move.id });
+      })
+    );
+  }
+  for (const partner of bondedPartnersInZone(me)) {
+    const name = SPECIES[partner.species]?.name ?? partner.species;
+    commandMenuBodyEl.appendChild(heading(name));
+    const moves = partner.moves ?? [];
+    if (moves.length === 0) commandMenuBodyEl.appendChild(row("Knows no moves.", undefined, () => {}));
+    for (const move of moves) {
+      const onCooldown = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
+      commandMenuBodyEl.appendChild(
+        row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
+          if (onCooldown) return;
+          closeCommandMenu();
+          targeting = { agentId: partner.id, moveId: move.id };
+          hudMessageEl.textContent = `Targeting for ${name}'s ${move.name} — tap a tile. Esc to cancel.`;
+        })
+      );
+    }
+  }
+  commandMenuEl.hidden = false;
+}
+
+function closeCommandMenu(): void {
+  commandMenuEl.hidden = true;
+}
+commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
+
+function cancelTargeting(): void {
+  if (!targeting) return;
+  targeting = undefined;
+  hudMessageEl.textContent = "";
+}
 
 /**
  * The death screen. The cause is the last logged event that names the
@@ -742,11 +876,29 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
   z: { kind: "crouch" },
 };
 
+/**
+ * Direct asks: "under the attack option a sub menu show up to select your
+ * bonded pokemon" and the follow-up, "Attack should move list should work
+ * when you have a weapon, or tackle if you don't. The player has moves
+ * too, even if it's just tackle." Attack always opens the chooser now — a
+ * "You" section for the player's own real moves, plus a section per
+ * bonded follower in zone. Pressing Attack again while already targeting
+ * cancels the order rather than reopening the menu — the one mobile-
+ * friendly way to back out besides Escape.
+ */
+function attemptAttack(): void {
+  if (targeting) {
+    cancelTargeting();
+    return;
+  }
+  if (!findPlayer(world)) return;
+  openCommandMenu();
+}
+
 window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
-  cancelTravel();
   if (playerDead) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
@@ -754,6 +906,15 @@ window.addEventListener("keydown", (e) => {
     }
     return;
   }
+  if (!commandMenuEl.hidden) {
+    if (e.key === "Escape") closeCommandMenu();
+    return;
+  }
+  if (targeting) {
+    if (e.key === "Escape") cancelTargeting();
+    return;
+  }
+  cancelTravel();
   if (!packMenuEl.hidden) {
     if (e.key === "Escape" || e.key === "i") closePackMenu();
     return;
@@ -771,7 +932,12 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "f") {
     e.preventDefault();
-    playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    attemptAttack();
+    return;
+  }
+  if (e.key === "v") {
+    e.preventDefault();
+    playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1090,14 +1256,16 @@ function travelTo(target: Vec2): void {
 document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (!playerMode || playerDead) return;
-    cancelTravel();
     const act = btn.dataset.act;
+    if (targeting && act !== "attack") return; // a target tile is the only thing that should land next
+    cancelTravel();
     if (act === "look") examineNext();
     else if (act === "gather") {
       playerAct({ kind: "gather" });
       runActivity();
     } else if (act === "pack") openPackMenu();
-    else if (act === "attack") playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    else if (act === "attack") attemptAttack();
+    else if (act === "lightFire") playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });
@@ -1265,6 +1433,20 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
   const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  // Direct ask: "select a move and target a space with it." Any tile —
+  // whether or not something's standing on it — becomes the order's target,
+  // ahead of the ordinary agent-select/tap-to-walk handling right below, the
+  // same way a real target-a-tile UI would consume the next click outright.
+  if (targeting) {
+    const target = { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+    const { agentId, moveId } = targeting;
+    targeting = undefined;
+    // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
+    // the player's own turn to spend, same as every other verb; the HUD
+    // message comes from `outcomeText`'s own "command" case.
+    playerAct({ kind: "command", agentId, moveId, target });
+    return;
+  }
   // Direct follow-up ask: "I should be able to click specific units in the
   // box to inspect them, right now click focuses the fight." A real agent
   // hit now wins outright — checked BEFORE the engagement-box hit test

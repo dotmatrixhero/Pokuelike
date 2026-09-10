@@ -2,7 +2,17 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, V
 import { otherLayers, setTile, tileAt } from "./world.js";
 import { canStepTo, stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
-import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
+import {
+  agentsWithin,
+  applyEggEating,
+  applyPredationInstincts,
+  applyTerrainEffectAt,
+  hasAwakeHerdmateNearby,
+  hasNearbyThreat,
+  manhattan,
+  resolveChargedAttack,
+  resolveHit,
+} from "./predation.js";
 import {
   RAPPORT_SLEPT_NEAR_DELTA,
   RAPPORT_OFFERED_FOOD_DELTA,
@@ -13,8 +23,8 @@ import {
   strengthenRapportMutual,
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil } from "./flora.js";
-import { tickCooldowns, useMove } from "./combat.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
+import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -42,7 +52,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
+import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -1380,12 +1390,16 @@ export const TREAT_SPILLOVER_FRACTION = 0.3;
  * offering was the nearest food. Levers 3/5/6 all live here so neither
  * path can drift out of sync with the other.
  */
-export function applyPlayerFeedingBonus(world: World, eater: Agent, giver: Agent, rng: () => number): void {
+export function applyPlayerFeedingBonus(world: World, eater: Agent, giver: Agent, rng: () => number, rapportMultiplier = 1): void {
   const priorTreats = eater.timesFedByPlayer ?? 0;
   const gapTicks = world.tick - (eater.lastTreatTick ?? -Infinity);
   const habituation = 1 + TREAT_HABITUATION_STEP * Math.min(priorTreats, TREAT_HABITUATION_CAP);
   const visit = gapTicks < TREAT_SAME_SITTING_TICKS ? TREAT_SAME_SITTING_MULTIPLIER : gapTicks > TREAT_RETURN_VISIT_TICKS ? TREAT_RETURN_VISIT_MULTIPLIER : 1;
-  const delta = RAPPORT_OFFERED_FOOD_DELTA * habituation * visit;
+  // Direct ask: "cooked food gets you more rapport when offered" —
+  // `rapportMultiplier` (default 1, unchanged) is a cooked dish's own
+  // `ItemDef.cooked.rapportMultiplier`, read by both real call sites below
+  // off whatever tile flavor the eater actually ate.
+  const delta = RAPPORT_OFFERED_FOOD_DELTA * habituation * visit * rapportMultiplier;
 
   strengthenRapportMutual(world, eater, giver, delta, "receivedFood", "gaveFood", rng);
   eater.timesFedByPlayer = priorTreats + 1;
@@ -1406,10 +1420,15 @@ export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rn
   if (best.d === 0) {
     const tile = tileAt(world, agent.layer, best.x, best.y)!;
     consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+    // Direct ask: "cooked food... heals as well as satisfies hunger" —
+    // whatever this treat's flavor names, a cooked dish's own healFraction.
+    healFromCookedFood(world, agent, tile.flavor);
     tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
     recordGrazing(tile);
     const giver = world.agents.find((a) => a.id === tile.offeredBy);
-    if (giver) applyPlayerFeedingBonus(world, agent, giver, rng);
+    // "cooked food gets you more rapport when offered" — the same tile
+    // flavor's own cooked.rapportMultiplier, 1 (unchanged) for anything else.
+    if (giver) applyPlayerFeedingBonus(world, agent, giver, rng, tile.flavor ? (world.items?.[tile.flavor]?.cooked?.rapportMultiplier ?? 1) : 1);
     tile.offeredBy = undefined;
     log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
     return true;
@@ -1475,6 +1494,60 @@ export function applyFollowing(world: World, agent: Agent, log?: EventLog): bool
   return true;
 }
 
+/**
+ * Direct ask: "under the attack option a sub menu show up to select your
+ * bonded pokemon if its within the same zone as you, and you can select a
+ * move and target a space with it - it then uses its own pathfinding to get
+ * to the right position and use it." `player.ts`'s `command` case sets
+ * `Agent.commandedAction` on the bonded follower; this is what actually
+ * spends the follower's OWN action ticks carrying the order out, same as
+ * `applyFollowing`/`applyTreatSeeking` spend a follower's ticks on their own
+ * behaviors — the player only ever paid for the single turn it took to
+ * issue the order.
+ *
+ * Steps toward `target` (reusing `movement.ts`'s `stepToward`, the same
+ * per-tick pathing primitive dispersal/following/predation all already use)
+ * until in the move's own range, then resolves it once — against a living
+ * defender at that exact tile via `resolveHit`'s new `explicitMove` param
+ * (the full existing damage/status/ally-effect pipeline, just with a
+ * specific move instead of an auto-pick), or against terrain via
+ * `applyTerrainEffectAt` when there's no one standing there. Yields to an
+ * urgent need first — same as `applyFollowing` already does — the order
+ * simply waits rather than marching a thirsty partner past water. A move no
+ * longer in `Agent.moves` (e.g. evolved out of it since the order was
+ * queued) clears the order without acting rather than throwing.
+ */
+export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const cmd = agent.commandedAction;
+  if (!cmd) return false;
+  if (hasUrgentNeed(agent.needs)) return false;
+  const move = agent.moves?.find((m) => m.id === cmd.moveId);
+  if (!move) {
+    agent.commandedAction = undefined;
+    return false;
+  }
+  const distance = manhattan(agent.pos, cmd.target);
+  if (!withinMoveRange(move, distance)) {
+    if (agent.behavior !== "fight") {
+      logBehaviorChange(log, world, agent, "fight");
+      agent.behavior = "fight";
+    }
+    agent.pos = stepToward(world, agent.layer, agent.pos, cmd.target, agent, agent);
+    return true;
+  }
+  if (agent.moveCooldowns?.[move.id]) return true; // in range, waiting out the move's own cooldown — the order stands
+  const defender = world.agents.find(
+    (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
+  );
+  if (defender) {
+    resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, move);
+  } else {
+    applyTerrainEffectAt(world, agent, agent.layer, cmd.target, move);
+  }
+  agent.commandedAction = undefined;
+  return true;
+}
+
 export function tickAgentAction(
   world: World,
   agent: Agent,
@@ -1525,6 +1598,10 @@ export function tickAgentAction(
   // without a single drink and died of thirst mid-search.
   const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // A standing player order outranks passive following/treat-seeking (the
+  // player deliberately spent a turn issuing it) but never self-
+  // preservation above — see `applyCommandedAction`'s own doc comment.
+  if (applyCommandedAction(world, agent, log, ctx, rng)) return;
   // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
   // and fighting have had their say, before the needs tree, and only while
   // no need is urgent (a follower that starves is a bug).
@@ -1937,6 +2014,14 @@ export function tickAgentAction(
 
         consume(agent.needs, agent.behavior, agent.behavior === "seekFood" ? foodNutritionFactor(targetTile) : 1);
         if (agent.behavior === "seekFood") {
+          // Direct ask: "can you make berries and tomatoes and apples help
+          // thirst too" — any eater, not just the player (the player is
+          // just another agent to the sim). 0 for anything that doesn't
+          // set FoodCropDef.thirstRelief.
+          const thirstRelief = thirstReliefFactor(targetTile);
+          if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+          // Direct ask: "cooked food... heals as well as satisfies hunger."
+          healFromCookedFood(world, agent, targetTile?.flavor);
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
@@ -1951,7 +2036,12 @@ export function tickAgentAction(
             // creature notices it" case — a genuinely hungry agent that
             // happens onto an offered berry through ordinary seekFood is
             // still being fed by the player, levers 3/5/6 included.
-            if (giver && giver.id !== agent.id) applyPlayerFeedingBonus(world, agent, giver, rng);
+            // "cooked food gets you more rapport when offered" — same
+            // cooked.rapportMultiplier lookup as applyTreatSeeking's own.
+            if (giver && giver.id !== agent.id) {
+              const rapportMultiplier = targetTile?.flavor ? (world.items?.[targetTile.flavor]?.cooked?.rapportMultiplier ?? 1) : 1;
+              applyPlayerFeedingBonus(world, agent, giver, rng, rapportMultiplier);
+            }
             targetTile.offeredBy = undefined;
           }
           // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
