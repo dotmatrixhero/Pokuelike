@@ -5,6 +5,9 @@ import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
 import type { Agent, HuntRules } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
+import { DAY_LENGTH_TICKS } from "../src/daynight.js";
+import { situationalAccuracyPenalty } from "../src/predation.js";
+import { tileAt } from "../src/world.js";
 import { distanceAccuracyPenalty, rollAccuracy } from "../src/combat.js";
 
 /**
@@ -20,6 +23,7 @@ import { distanceAccuracyPenalty, rollAccuracy } from "../src/combat.js";
  */
 const RULES: HuntRules = { scyther: true };
 const SEED = 12345;
+const NOON = DAY_LENGTH_TICKS / 2;
 
 function moveOf(over: Partial<MoveSpec>): MoveSpec {
   return {
@@ -43,6 +47,10 @@ function fight(
   attackerStages: Partial<Record<"accuracy" | "evasion", number>> = {}
 ) {
   const world = createWorld(10, 10, SEED);
+  // NOON. Every world starts at tick 0, which is MIDNIGHT, and darkness now
+  // costs a non-nocturnal attacker 15 accuracy — which would silently sit
+  // underneath every assertion in this file about stages and distance.
+  world.tick = NOON;
   const attacker: Agent = {
     id: "bulbasaur-0", species: "bulbasaur", pos: { x: 5, y: 5 }, layer: "surface", homeLayer: "surface",
     needs: createNeeds(), behavior: "idle", moves: [move], maxHp: 10, herdId: "herd-a",
@@ -219,5 +227,76 @@ describe("accuracy falls off with distance", () => {
     // chance, so the assertion above is measuring the floor and not just
     // "big number means miss".
     expect(rollAccuracy({ accuracy: 100 }, 0, 0, () => 0, 1, 20)).toBe(true);
+  });
+});
+
+describe("accuracy penalties that are TRUE ON THE MAP, not held in a stat", () => {
+  // The design position, asserted. Raw evasion stages are a hidden meter —
+  // a defender at +4 looks identical to one at 0 and the chronicle can only
+  // say "it missed". Each term below is something a player can point at.
+  const world = () => {
+    const w = createWorld(10, 10, SEED);
+    w.tick = NOON;
+    return w;
+  };
+  const agentAt = (over: Partial<Agent> = {}): Agent =>
+    ({ id: "a", species: "scyther", pos: { x: 5, y: 5 }, layer: "surface", needs: createNeeds(), ...over } as unknown as Agent);
+
+  it("cover costs 20 — a bush makes you harder to HIT, not just harder to find", () => {
+    const w = world();
+    const attacker = agentAt();
+    const defender = agentAt({ id: "b", pos: { x: 6, y: 5 } });
+
+    expect(situationalAccuracyPenalty(w, attacker, defender)).toBe(0);
+
+    // The exact thing that already shrank detection radius, now defensive too.
+    const tile = tileAt(w, "surface", 6, 5)!;
+    tile.concealment = true;
+    expect(situationalAccuracyPenalty(w, attacker, defender)).toBe(20);
+  });
+
+  it("a burrowed defender counts as cover too — same isConcealed, no second rule", () => {
+    const w = world();
+    const attacker = agentAt();
+    const defender = agentAt({ id: "b", pos: { x: 6, y: 5 }, burrowedTicksRemaining: 3 } as Partial<Agent>);
+    expect(situationalAccuracyPenalty(w, attacker, defender)).toBe(20);
+  });
+
+  it("darkness costs 15, and a nocturnal hunter is exempt", () => {
+    const night = world();
+    night.tick = 0; // midnight, which is also where every fresh world starts
+    const defender = agentAt({ id: "b", pos: { x: 6, y: 5 } });
+
+    expect(situationalAccuracyPenalty(night, agentAt(), defender)).toBe(15);
+    // The sim's existing night-vision trait — no new flag invented for this.
+    expect(situationalAccuracyPenalty(night, agentAt({ activityPattern: "nocturnal" }), defender)).toBe(0);
+
+    // Control: the same nocturnal attacker gets no discount in daylight,
+    // so the exemption is about darkness and not a flat bonus.
+    expect(situationalAccuracyPenalty(world(), agentAt({ activityPattern: "nocturnal" }), defender)).toBe(0);
+  });
+
+  it("something running is harder to hit, and harder the longer it runs — capped", () => {
+    const w = world();
+    const attacker = agentAt();
+    const run = (actions: number) =>
+      situationalAccuracyPenalty(w, attacker, agentAt({ id: "b", pos: { x: 6, y: 5 }, consecutiveMoveActions: actions } as Partial<Agent>));
+
+    expect(run(0)).toBe(0);
+    expect(run(1)).toBe(5);
+    expect(run(4)).toBe(20);
+    // Capped, or a long chase becomes unwinnable rather than merely costly.
+    expect(run(10)).toBe(20);
+  });
+
+  it("they stack, because they are independent facts about the world", () => {
+    const w = world();
+    w.tick = 0; // dark
+    tileAt(w, "surface", 6, 5)!.concealment = true; // in cover
+    const defender = agentAt({ id: "b", pos: { x: 6, y: 5 }, consecutiveMoveActions: 4 } as Partial<Agent>);
+    // 20 cover + 15 dark + 20 sprint. A 100-accuracy move is a coin flip
+    // against a creature sprinting through scrub at night, which is the
+    // intended shape.
+    expect(situationalAccuracyPenalty(w, agentAt(), defender)).toBe(55);
   });
 });

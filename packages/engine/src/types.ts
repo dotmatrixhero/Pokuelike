@@ -1228,6 +1228,23 @@ export interface Agent {
    */
   activityPattern?: ActivityPattern;
 
+  /**
+   * How many of this agent's own ACTION ticks in a row it has moved on,
+   * reset to 0 the moment it acts without moving. Maintained in
+   * simulation.ts, in the same before/after position check
+   * `terrainSpeedFactor` already uses.
+   *
+   * Read by combat.ts's accuracy roll: something running is harder to hit,
+   * and harder the longer it has been running. Direct: "Definitely. I don't
+   * like how easy it is to chase down and kill things."
+   *
+   * Counted in the agent's OWN actions, not world ticks — a slow agent that
+   * moves every action is just as evasive as a fast one, which is the point:
+   * this rewards committing to running, not raw Speed, which already has its
+   * own advantages.
+   */
+  consecutiveMoveActions?: number;
+
   // --- Shelter-building (see DESIGN.md's "Shelter-building" section, shelter.ts) ---
 
   /**

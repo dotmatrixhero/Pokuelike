@@ -7182,15 +7182,46 @@ That is where evasion should live.
   choice: "things are hard to hit in the scrub" is learnable across many
   fights.
 
-## Open questions
+## Answered, and shipped
 
-Recorded rather than answered, because they change game feel.
+1. **Cover: yes, flat −20.** `isConcealed` (bush tile or burrowed) now costs
+   the attacker 20 accuracy. It already shrank detection radius; it does
+   something defensive at last.
+2. **A running target: yes.** *"Definitely. I don't like how easy it is to
+   chase down and kill things."* −5 per consecutive action the DEFENDER spent
+   moving, capped at 4 stacks (−20). Counted in the defender's own actions,
+   so committing to running is what earns it, not raw Speed. The streak
+   breaks the moment it does anything else, so it is paid for in actions not
+   spent fighting back.
+3. **Raw evasion nodes: allowed after all**, and my objection was too broad.
+   *"We can allow evasion nodes for sure. Esp as temporary boost or
+   conditional (ex. Upon moving multiple times in a row gain x for y turns,
+   or be more evasive the further you are away)."* The thing that is bad is
+   FLAT PERMANENT stacking — a number nobody can see, held forever. A
+   temporary or conditional stage keeps the cause visible and situational,
+   which was the actual point. Both examples given are already expressible:
+   the sprint streak is live in `Agent.consecutiveMoveActions`, and distance
+   is already in the roll.
+4. **Night: yes.** −15 for any attacker that is not `nocturnal` — the sim's
+   existing activity-pattern trait, no new flag invented.
 
-1. Should concealment reduce incoming accuracy, and by how much? A flat −20
-   is roughly "one and a half tiles of distance".
-2. Should a defender who has just moved be harder to hit? Diegetic and
-   visible, but it makes every chase slower to resolve.
-3. Do we ever allow a raw evasion node, as a deliberate exception on one
-   move whose whole fantasy is dodging?
-4. Night: currently only an attacker-side damage bonus. Should it also cost
-   accuracy for everyone without some night-vision trait?
+### The numbers, all flat points on the same scale as distance
+
+| cause | cost | visible as |
+|---|---|---|
+| distance | 0 for the first tile, then −5/tile | the map |
+| cover | −20 | a bush, or a burrow |
+| darkness | −15 (0 if the attacker is nocturnal) | the clock |
+| running | −5 per consecutive move action, max −20 | the thing running |
+
+They stack, because they are independent facts. A creature sprinting through
+scrub at night is −55: a 100-accuracy move is a coin flip against it. That is
+the intended shape.
+
+### The finding that came out of building it
+
+**Every world starts at tick 0, which is MIDNIGHT.** So the night penalty
+applies to the whole opening stretch of every run, and it broke nine existing
+tests at once — none of them wrong, all of them fighting in the dark at a
+fleeing target without knowing it. Worth remembering before reading any early
+combat numbers: the sim's default condition is night.

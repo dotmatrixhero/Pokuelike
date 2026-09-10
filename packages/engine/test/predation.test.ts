@@ -63,6 +63,19 @@ const SAFE_RNG = mulberry32(20260904);
 // is now power-based (see predation.ts's isPreyOf/PREY_POWER_RATIO), so prey/
 // predator/guardian need a real, deliberate power gap between them or nothing
 // would ever qualify as prey of anything.
+/**
+ * `accuracy: -1` (the can't-miss convention) so the many tests below that
+ * are about SOMETHING ELSE — reach, obstacles, fainting, wind-ups, crit
+ * cooldown resets — do not silently depend on the accuracy roll.
+ *
+ * They used to, at 100 accuracy, and nine of them broke at once when
+ * `situationalAccuracyPenalty` landed. Not because any of them were wrong:
+ * every world here starts at tick 0, which is MIDNIGHT, and most of them
+ * feature prey that is actively fleeing — so the fixtures were fighting in
+ * the dark at a running target and taking the full -20 for it. The tests
+ * that are genuinely about accuracy declare their own move (see
+ * PARTIAL_ACC_MOVE) or set the clock.
+ */
 const TEST_MOVE: MoveSpec = {
   id: "test-move",
   name: "Test Move",
@@ -70,9 +83,16 @@ const TEST_MOVE: MoveSpec = {
   type: "normal",
   category: "physical",
   power: 40,
-  accuracy: 100,
+  accuracy: -1,
   cooldownTicks: 0,
 };
+
+/**
+ * The counterpart to TEST_MOVE for the handful of tests that are genuinely
+ * ABOUT the accuracy roll — 100 accuracy, so a multiplier or a flat penalty
+ * has something to bite.
+ */
+const ACC_TEST_MOVE: MoveSpec = { ...TEST_MOVE, id: "acc-test-move", accuracy: 100 };
 
 const RANGED_MOVE: MoveSpec = {
   id: "ranged-move",
@@ -81,7 +101,9 @@ const RANGED_MOVE: MoveSpec = {
   type: "normal",
   category: "physical",
   power: 40,
-  accuracy: 100,
+  // Reach is what this move exists to test; see TEST_MOVE on why it must not
+  // also be rolling accuracy.
+  accuracy: -1,
   cooldownTicks: 0,
 };
 
@@ -338,8 +360,9 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const fixedRng = () => 0.7;
 
     const clearWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    clearWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     clearWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -347,15 +370,16 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const clearLog = new EventLog();
     tickWorld(clearWorld, clearLog, RULES, undefined, fixedRng);
     expect(clearLog.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
 
     const stormWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    stormWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     stormWorld.weatherCells = [
       { id: "s", type: "storm", center: { x: 5, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
     ];
     stormWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -364,7 +388,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     tickWorld(stormWorld, stormLog, RULES, undefined, fixedRng);
     expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
     expect(stormLog.events).toContainEqual(
-      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
   });
 
@@ -389,9 +413,10 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const fixedRng = () => 0.92;
 
     const levelWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    levelWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     for (const [x, y] of [[5, 5], [5, 6]]) setElevation(levelWorld, "surface", x!, y!, 100);
     levelWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -399,17 +424,18 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const levelLog = new EventLog();
     tickWorld(levelWorld, levelLog, RULES, undefined, fixedRng);
     expect(levelLog.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
 
     // Same fight, same seed, same roll — only the gap changes. The attacker
     // (bulbasaur-0, at 5,5) stays at 100; the defender it swings at (the
     // predator at 5,6) stands at 102.
     const upSlopeWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    upSlopeWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     setElevation(upSlopeWorld, "surface", 5, 5, 100);
     setElevation(upSlopeWorld, "surface", 5, 6, 102);
     upSlopeWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -420,7 +446,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" })
     );
     expect(upSlopeLog.events).toContainEqual(
-      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
   });
 });
@@ -2304,6 +2330,10 @@ describe("pack hunting", () => {
     // arithmetic below reasons about. The test's claim and its margins are
     // unchanged — only the input needed restating once the melee cost
     // existed.
+    // 65, and the worlds below run at NOON: the roll this test reasons about
+    // is 60, and the fixtures are adjacent with the predator mid-approach, so
+    // 5 goes to the sprint penalty. Daylight keeps the night term out of it —
+    // this test is about the PACK bonus, not about the dark.
     const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 65 };
     // 65 < 60 fails a solo roll; 65 < 60 * (1 + PACK_ACCURACY_BONUS_PER_ALLY) = 69 succeeds with exactly 1 committed packmate.
     const fixedRng = () => 0.65;
@@ -2313,6 +2343,7 @@ describe("pack hunting", () => {
     const target = prey({ x: 5, y: 5 });
 
     const soloWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    soloWorld.tick = NOON;
     const soloHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     soloWorld.agents.push(soloHunter, target);
     const soloLog = new EventLog();
@@ -2320,6 +2351,7 @@ describe("pack hunting", () => {
     expect(soloLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "scyther-0" }));
 
     const packWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    packWorld.tick = NOON;
     const packTarget = prey({ x: 5, y: 5 });
     const packHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     // Already committed to the same target — the real, positioning-driven

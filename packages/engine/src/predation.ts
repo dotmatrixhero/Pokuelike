@@ -859,6 +859,56 @@ function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: 
 }
 
 /** True if a "bush" tile is what `agent` is currently standing on — see `Tile.concealment`. */
+/**
+ * Accuracy a shot loses to things that are TRUE ON THE MAP — not to a stat
+ * anyone is holding.
+ *
+ * This is the whole design position, in one function. Direct ask on the
+ * alternative: raw evasion stages are a hidden meter, and *"mechanics should
+ * be visible on the map, not hidden in a meter."* A defender at +4 evasion
+ * looks exactly like one at 0 and the chronicle can only say "it missed".
+ * Every term below is instead something a player can point at: a bush, the
+ * dark, a creature running.
+ *
+ * Flat points, not multipliers, and on the same scale as distance
+ * (`ACCURACY_LOST_PER_TILE`), so they can be reasoned about together: cover
+ * is "about four tiles of distance".
+ */
+export function situationalAccuracyPenalty(world: World, attacker: Agent, defender: Agent): number {
+  let penalty = 0;
+
+  // COVER. `isConcealed` was already real and already shrank the radius at
+  // which this agent gets NOTICED — it just did nothing once a fight
+  // started, so standing in a bush made you harder to find and no harder to
+  // hit. Direct call on the number: "Yes. Flat 20."
+  if (isConcealed(world, defender)) penalty += CONCEALED_ACCURACY_PENALTY;
+
+  // DARKNESS, unless the attacker hunts by night. A nocturnal species is the
+  // sim's existing night-vision trait — no new flag invented for this.
+  if (isNight(world.tick) && (attacker.activityPattern ?? "cathemeral") !== "nocturnal") {
+    penalty += NIGHT_ACCURACY_PENALTY;
+  }
+
+  // A TARGET MID-SPRINT, harder the longer it has been running. Direct: "I
+  // don't like how easy it is to chase down and kill things." Capped, or a
+  // long chase would become unwinnable rather than merely costly — and the
+  // streak breaks the instant the target stops to do anything else, so this
+  // is paid for in actions not spent fighting back.
+  const streak = Math.min(defender.consecutiveMoveActions ?? 0, MAX_SPRINT_ACCURACY_STACKS);
+  penalty += streak * SPRINT_ACCURACY_PENALTY_PER_ACTION;
+
+  return penalty;
+}
+
+/** Flat accuracy lost shooting at something in cover — roughly four tiles of distance. */
+const CONCEALED_ACCURACY_PENALTY = 20;
+/** Flat accuracy lost shooting in the dark, unless the attacker is nocturnal. */
+const NIGHT_ACCURACY_PENALTY = 15;
+/** Flat accuracy lost per consecutive action the TARGET spent moving. */
+const SPRINT_ACCURACY_PENALTY_PER_ACTION = 5;
+/** Cap on the sprint stacks, so a long chase is costly rather than impossible. */
+const MAX_SPRINT_ACCURACY_STACKS = 4;
+
 function isConcealed(world: World, agent: Agent): boolean {
   if ((agent.burrowedTicksRemaining ?? 0) > 0) return true;
   return tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.concealment === true;
@@ -1290,7 +1340,8 @@ function resolveHitAgainstTarget(
         getStatStage(defender, "evasion"),
         rng,
         accuracyExtra,
-        manhattan(attacker.pos, defender.pos)
+        manhattan(attacker.pos, defender.pos),
+        situationalAccuracyPenalty(world, attacker, defender)
       )
     )
       continue;

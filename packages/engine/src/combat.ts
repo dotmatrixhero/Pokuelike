@@ -111,13 +111,21 @@ export function rollAccuracy(
   rng: () => number = Math.random,
   extraMultiplier = 1,
   /** Tiles between attacker and target — the first is free, each one past it costs `ACCURACY_LOST_PER_TILE`. Defaults to melee, which is free. */
-  distance = 1
+  distance = 1,
+  /**
+   * Any further flat accuracy the shot loses to things that are TRUE ON THE
+   * MAP rather than held in a stat — cover, darkness, a target mid-sprint.
+   * See predation.ts's `situationalAccuracyPenalty`, which is the only real
+   * source; kept as a plain number here so combat.ts stays ignorant of what
+   * caused it.
+   */
+  situationalPenalty = 0
 ): boolean {
   if (move.accuracy < 0) return true;
-  // The distance penalty comes off the base accuracy BEFORE the stage and
-  // weather multipliers scale it, so a storm makes a long shot worse
-  // proportionally rather than the two being independent flat cuts.
-  const base = Math.max(0, move.accuracy - distanceAccuracyPenalty(distance));
+  // Flat penalties come off the base accuracy BEFORE the stage and weather
+  // multipliers scale it, so a storm makes a long shot worse proportionally
+  // rather than the two being independent cuts.
+  const base = Math.max(0, move.accuracy - distanceAccuracyPenalty(distance) - situationalPenalty);
   const chance = base * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
   return rng() * 100 < chance;
 }
