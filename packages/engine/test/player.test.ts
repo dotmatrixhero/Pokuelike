@@ -183,7 +183,14 @@ describe("you can starve (ROADMAP M3)", () => {
     console.log(`starved from hunger 0.05 after ${turns} turns / ${ticksTotal} ticks`);
   });
 
-  it("from full, hunger and thirst each give roughly a couple of thousand ticks", () => {
+  it("from full, waiting the whole way is real rest — dying takes ~7x longer than standing needs-decay alone", () => {
+    // "Wait should recover [energy]" (direct ask): a player who only ever
+    // queues `wait` is asleep the entire run (player.ts's "wait" case), so
+    // hunger/thirst decay at needs.ts's SLEEP_NEEDS_DECAY_MULTIPLIER (0.15x)
+    // the whole time instead of the bare rate. This test used to bound
+    // ticksTotal under 5000 — that was the number for waiting as a pure
+    // no-op; asleep waiting is a deliberately more forgiving scenario, and
+    // 10431 is the real, deterministic result now, not noise.
     const world = createWorld(8, 8, 1);
     const me = human("me", 3, 3);
     world.agents.push(me);
@@ -193,8 +200,8 @@ describe("you can starve (ROADMAP M3)", () => {
     expect(findPlayer(world)).toBeUndefined();
     const death = log.events.find((e) => e.kind === "starved" && e.agentId === "me")!;
     expect(death).toBeDefined();
-    expect(ticksTotal).toBeGreaterThan(500);
-    expect(ticksTotal).toBeLessThan(5000);
+    expect(ticksTotal).toBeGreaterThan(8000);
+    expect(ticksTotal).toBeLessThan(13000);
     console.log(`from full: died of ${death.kind === "starved" ? death.cause : "?"} at tick ${world.tick}`);
   });
 });

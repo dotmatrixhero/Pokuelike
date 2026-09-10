@@ -61,6 +61,15 @@ export function applyPlayerAction(
   const outcome: PlayerActionOutcome = { action, ok: false, tick: world.tick };
   // Any action other than continuing the activity abandons it.
   if (agent.activity && action.kind !== "continue") agent.activity = undefined;
+  // Anything other than waiting wakes the player up — see the "wait" case
+  // below. Deliberately no `wokeUp` event/reason here: that union is
+  // `"urgentNeed" | "threatSpotted"` (events.ts), both NPC-only triggers;
+  // widening it for "player moved" would touch every exhaustive SimEvent
+  // switch (eventText.ts, format.ts) for a case with nothing to say.
+  if (agent.asleep && action.kind !== "wait") {
+    agent.asleep = false;
+    agent.sleepTicks = 0;
+  }
   outcome.ok = apply(world, agent, action, outcome, log, ctx, rng);
   agent.lastActionOutcome = outcome;
   return outcome.ok;
@@ -69,6 +78,17 @@ export function applyPlayerAction(
 function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActionOutcome, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   switch (action.kind) {
     case "wait":
+      // Direct ask: "wait should recover [energy]." The player is just
+      // another agent to the sim (this file's own doc comment) — reused
+      // needs.ts's existing sleep state rather than inventing a second,
+      // weaker rest mechanic (CLAUDE.md: "check whether it already exists
+      // before building it"). While `asleep`, `tickAgentNeeds` already
+      // gives ANY agent energy recovery instead of drain, slower hunger/
+      // thirst decay, and faster healing and cooldown recovery. A wait
+      // that keeps getting queued keeps it true; any other action wakes
+      // the player up (see applyPlayerAction above).
+      agent.asleep = true;
+      return false;
     case "cancel":
       return false;
     case "move": {
