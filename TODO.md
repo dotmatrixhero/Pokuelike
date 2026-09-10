@@ -8374,6 +8374,220 @@ gone from `packages/runner/tsconfig.json`. The real fix is to split
 wants. Extracting the describers into a shared module would let both callers
 import it by package name instead of by relative path. Not done mid-merge.
 
+## Tool-granted moves (MOVES_AND_TOOLS.md)
+
+Direct ask: *"I want tool granted moves. That will truly unlock gameplay
+as we know it."* MOVES_AND_TOOLS.md's direction was already decided
+("items and moves share one effect vocabulary... a tool is a slice of a
+move, never the whole move"); this is that architecture actually wired
+into the player.
+
+**Scope for this round**, confirmed via two numbered questions: combat
+*and* the generalised terrain effect together (not combat alone), and
+bare hands use a real Tackle — first drafted as a weakened Scratch,
+corrected mid-ask to *"Tackle\*"*.
+
+### Combat: a held item's real moveset
+
+- `ItemDef.grantsMoves?: MoveSpec[]` (types.ts) — a held item's actual,
+  already-weakened moves. `packages/data/src/crafting.ts`'s `toolMove(base,
+  powerMult=0.65, cooldownMult=1.75)` derives each one straight from the
+  real curated roster (`MOVES.scratch`, `MOVES.tackle`, `MOVES.body_slam`)
+  rather than inventing a parallel, hand-tuned set — MOVES_AND_TOOLS.md's
+  numeric rule (*"roughly 60-70% power... 1.5-2x cooldown... if a tool
+  ever matches the innate version, the slice rule has failed"*), applied
+  literally.
+- `World.playerBaseMoves?: MoveSpec[]` (types.ts) — same "scenario hands
+  it to the world, engine only reads" pattern as `items`/`recipes`.
+  `BARE_HANDS_MOVES = [toolMove(MOVES.tackle)]` (crafting.ts), set at
+  spawn in both `createCaveScenario` and `createPlayerDemoWorld`,
+  **replacing** the human species' own `moves: ["tackle"]` learnset
+  (full creature-strength Tackle) — the loadout is the moveset now, not
+  the species' default.
+- `player.ts`'s `syncPlayerMoves(world, agent)` recomputes `agent.moves`
+  as bare hands + the held item's grants, called after every
+  `equip`/`stow` and after `tickTorch`'s own auto-unequip. A worn item
+  grants nothing (MOVES_AND_TOOLS.md's worked table: worn slots are
+  passive-only).
+- A new `PlayerAction`, `{ kind: "attack"; dx; dy }` — swings at the
+  adjacent tile in that direction. A living agent there takes a REAL hit:
+  `predation.ts`'s `resolveHit` (previously module-private) is now
+  exported and called completely unmodified — same
+  `pickBestMove`/`useMove`/damage/crit/faint pipeline any wild agent's
+  own attack goes through, `faintKind: "defeated"` (not `"killed"` — the
+  player isn't hunting for food here, matching herd-rivalry/defensive
+  framing, not predation). A pre-check (`pickBestMove` called once before
+  committing) tells a real miss/hit apart from "nothing was off cooldown
+  or in range," since `resolveHit`'s own return value only ever means a
+  true kill.
+- Web: an `attack` PlayerAction needs a direction with no on-screen aim
+  cursor to supply it, so `main.ts` tracks `lastFacing` (UI-only state —
+  the engine has no facing concept) from the last move attempted,
+  successful or not (bumping a wall still points you at it). `f` key and
+  an Attack button swing that way. Outcome text: "You strike
+  {species}!" / "You fell it, and gather {material}." / "You clear it
+  away." / "Nothing there to hit."
+
+### Terrain: axe and machete
+
+- `MoveSpec.terrainEffect?: { from?: TerrainKind[]; to: TerrainKind;
+  yields?: MaterialId }` (moves.ts) — MOVES_AND_TOOLS.md's "generalise the
+  terrain effect" ask, additive alongside (not replacing) the existing
+  `terrainBurn`/`terrainFill` fields; migrating those onto the new shape
+  is real future cleanup, not done here.
+- `player.ts`'s `attack` case reaches a `terrainEffect` move directly
+  (scanning the player's own `agent.moves` for one whose `from` matches
+  the targeted tile) when there's no living defender there — bypassing
+  `pickBestMove` entirely, since these are flagged `utilityMove: true`
+  specifically so ordinary combat selection never offers them.
+- Two new craftable items (`crafting.ts`): **axe** (`boundHaft +
+  knappedFlint×2`, 14 turns) grants a fell-only move (`from: ["tree"], to:
+  "floor", yields: "deadwood"`); **machete** (`boundHaft + knappedFlint +
+  cordage`, 11 turns) grants a clear-only move (`from: ["bush", "flora",
+  "seedling"], to: "floor"`, no yield) plus a weakened Slash. Matches
+  MOVES_AND_TOOLS.md's worked table exactly: *"no tool gets all three"* —
+  the axe doesn't clear, the machete doesn't fell, neither does the
+  knife's damage slice. Both `knownAtStart: false` (learned later, same
+  as the flint knife). Recipe weights/turns are sim-original guesses (no
+  prior doc table to draw from, unlike the first-playable-cut items),
+  flagged for the user to judge same as everything else on that list.
+- Deliberately NOT built: a second, damage-slice grant for the axe
+  (MOVES_AND_TOOLS.md's table also gives it a Karate-Chop-flavoured hit) —
+  this roster has no `karate_chop` move to slice from, and inventing a
+  brand-new balanced move from scratch is its own pass, not part of this
+  one. An axe wielder who also wants to fight carries a knife too — the
+  same held-slot tradeoff Shield/Brace already enforces everywhere else.
+
+### Verified two ways
+
+**12 engine tests** (`playerCombat.test.ts`, new) against synthetic
+move/item fixtures — deliberately not the real curated roster, since this
+suite is testing the ENGINE mechanism (does a grant reach combat, does a
+terrain effect fire, does `from` gate correctly), not this project's
+specific balance numbers: equip/stow syncing `agent.moves` correctly
+(including switching items, worn-grants-nothing, idempotent re-sync),
+landing a real hit on an adjacent hostile bare-handed, cooldown blocking
+a second immediate swing, a weapon's granted move used and put on its
+own cooldown, an axe felling a tree and yielding deadwood, a machete
+clearing a bush but refusing a tree (the slice rule enforced by `from`),
+and bare hands unable to fell anything at all. **9 data-package tests**
+(`crafting.test.ts`) against the REAL roster: bare hands is really
+Tackle at 60-70% power (not Scratch — the mid-ask correction), flint
+knife/club really are weakened Scratch/Body Slam (never matching the
+creature-strength version), axe/machete's terrain grants match the slice
+rule exactly, and axe/machete are reachable from bare-hand materials
+(same reachability trace as the first-playable set, just not part of it
+— learned later).
+
+**Live, against real scenario data** — `runner/validatePlayerCombat.ts`
+(new), 5 seeds each:
+
+| | seed 20260903 | seed 11 | seed 202 | seed 3003 | seed 40404 |
+|---|---|---|---|---|---|
+| Axe fells a real tree | ✓ (10 keys, +1 deadwood) | ✓ (2 keys) | ✓ (2 keys) | ✓ (14 keys) | ✓ (7 keys) |
+| Bare-handed hit lands | ✓ (venusaur, -3 hp) | ✓ (charmander, -4 hp) | ✗ (chase lost) | ✓ (charmander, ~0 hp, already low) | ✗ (chase lost) |
+
+5/5 real fells, 3/5 real hits. The 2 misses aren't a bug: a wild agent
+moves every tick same as the player, and `accumulateActionEnergy` can
+take several ticks to charge before the player's own queued action
+actually fires — by then the target had often wandered off the exact
+adjacent tile it was standing on when the swing was planned. Same
+"chasing a moving target" shape `validateBond.ts`'s own doc comments
+already describe (*"the first bots walked to a stale position and never
+got closer than 12 tiles to a roaming chamber creature"*); the script's
+final version re-plans and re-swings every step rather than committing
+to one attempt, matching how a real player would actually chase
+something, and that's what got 3 of 5. Confirmed via direct debug (not
+kept in the script) that `pickBestMove` genuinely does find and select
+the weakened move whenever the player is truly adjacent — the two misses
+are chase failures, not resolution failures.
+
+Also live-confirmed in a real browser session (Playwright): the
+Inspector panel — pre-existing UI, untouched by this work — already
+rendered the new weakened Tackle correctly (`pwr 26`, exactly 65% of
+mainline Tackle's 40) the moment it reached `agent.moves`, and the
+Attack button/`f` key fire with no console errors. Landing a real hit
+against a wandering wild creature via blind keyboard navigation in that
+same live session was unreliable for the reason above; the deterministic
+runner script above is the real proof of the combat mechanism.
+
+### Open, not decided
+
+- No second combat move for the axe (see above) — Karate Chop or
+  equivalent is real future roster work, not blocking.
+- MOVES_AND_TOOLS.md's remaining open questions (does a tool-granted move
+  count as "known" for progression; can the partner use tools; throw
+  range for consumables; can tools teach permanently) are all untouched —
+  none of them gate what shipped here.
+- `terrainBurn`/`terrainFill` migrating onto the new generalised
+  `terrainEffect` field is real cleanup, explicitly deferred (see the
+  field's own doc comment in moves.ts).
+- The "reverse direction" (MOVES_AND_TOOLS.md: wild agents reshaping
+  terrain the same way — a Scyther clearing foliage where it hunts) is
+  not built. Only the player's own items grant `terrainEffect` moves
+  right now; no species' learnset carries one.
+
+### Revised almost immediately: no weakening, and club drops Body Slam
+
+Two direct corrections in the very next message: *"Club should not be
+body slam... Maybe pound?"* and *"If you have a tool, the move it
+grants, it should not be weakened. Just make it a normal vanilla
+move."*
+
+The second one overrules MOVES_AND_TOOLS.md's own numeric rule outright
+— that section of the doc is struck through and rewritten in place, not
+deleted, so the reversal is on the record. `crafting.ts`'s `toolMove`
+helper (the power/cooldown tax) is gone entirely; every grant is now the
+literal base `MoveSpec` a real Pokémon knows — `BARE_HANDS_MOVES` is
+full-power Tackle, the flint knife grants full Scratch, the machete's
+Slash grant is full Slash. The slice rule (which move, how much of its
+effect) is left standing as the entire balance lever, per the doc's own
+now-updated reasoning: a partial, worse copy of the same move on top of
+the slice restriction was protecting the same thing twice.
+
+Club's grant changed from Body Slam to **Pound** — a new, deliberately
+minimal entry in `moves.ts` (`moveCanon("POUND")`, no skill tree; that's
+the separate template-v4 conversion pass's work, not this one's, and
+nothing here needs a tree since the player never levels). Body Slam read
+as a full-body creature move; Pound is the "hit it with the thing in
+your hand" swing a human club actually is.
+
+Re-verified after both changes: full suite green (1435 engine / 387
+data tests), and `validatePlayerCombat.ts` re-run shows the same shape
+— 5/5 real tree fells, 3/5 real hits landed — now at full Tackle power
+(damage went from -3/-4/-0.5 hp to -3/-5/-0.5 hp on the three landed
+hits, consistent with 40 power instead of 26).
+
+## HUD decluttering: Eat and Offer move into the Pack menu
+
+Direct ask, mid-session: *"We're getting too many buttons I think. Let's
+make offer and eat only available from inventory after you gather."*
+
+`hud-pad` was at 9 buttons after Attack landed (Wait, Eat, Drink, Look,
+Gather, Pack, Crouch, Offer, Attack) — down to 7 now (Wait, Drink, Look,
+Gather, Pack, Crouch, Attack). Eat and Offer live as two small action
+buttons on the "food" row inside the Pack menu instead
+(`main.ts`'s `actionsRowEl`, new — a `pack-row` variant with its own
+inline buttons, for the one carried item that has more than one thing
+you'd do with it).
+
+This surfaced a real, pre-existing asymmetry: `offer` already consumed
+from the player's own inventory (a berry set down from the pack), but
+`eat` only ever worked standing on a live food tile — there was no way
+to eat a carried berry at all. Fixed rather than left as a trap for the
+new UI: `player.ts`'s `eat` case now falls back to a carried "food" item
+(`foodNutritionFactor(undefined)`, the function's own already-designed
+neutral-1x default for exactly this "no tile" case) whenever nothing
+edible is underfoot. Ground food is still preferred when both are
+available — eating a fresh berry patch doesn't spend your pack. 3 new
+unit tests (`player.test.ts`) cover all three cases (ground-first,
+inventory-fallback, neither-available-fails).
+
+The `e` key still eats directly (now strictly more capable — ground food
+or a carried berry, whichever applies) since it isn't a button and isn't
+part of the clutter complaint; `o` (offer) has no keyboard shortcut any
+more, Pack-menu only, matching "only available from inventory."
+
 ## Round seven: four damaging trees shipped, and what building them turned up
 
 `psybeam`, `surf`, `sludge`, `ice_beam` are live at 45 nodes each. That is

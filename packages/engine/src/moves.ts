@@ -1,6 +1,7 @@
 import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2 } from "./types.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
+import type { MaterialId } from "./harvest.js";
 
 /**
  * A move's area is described as a shape resolved against an origin + facing
@@ -435,6 +436,22 @@ export interface MoveSpec {
    * one of the fillable kinds. Absent = no terrain fill, the default.
    */
   terrainFill?: { terrain: TerrainKind };
+  /**
+   * MOVES_AND_TOOLS.md's "generalise the terrain effect" ask: a landed
+   * terrain-directed use converts the target tile's terrain, dropping one
+   * unit of `yields` for a player attacker to carry off if set. Distinct
+   * from — and NOT a replacement for — `terrainBurn`/`terrainFill` above
+   * (those still work exactly as before): this is the new, general field
+   * new tool-granted moves (axe/machete) use, applied by `player.ts`'s
+   * `attack` case directly against the tile in front of the player when no
+   * living defender is standing there, rather than through the ordinary
+   * agent-vs-agent hit pipeline `terrainBurn`/`terrainFill` go through.
+   * `from` restricts which terrain kinds this can act on (absent = any
+   * terrain qualifies, though in practice every real use sets it — an axe
+   * should not "fell" plain floor). Migrating `terrainBurn`/`terrainFill`
+   * onto this shape is real future cleanup, not done here — see TODO.md.
+   */
+  terrainEffect?: { from?: TerrainKind[]; to: TerrainKind; yields?: MaterialId };
   /**
    * Lets a fleeing agent burrow instead of taking its normal flee step —
    * see `Agent.burrowedTicksRemaining`'s own doc comment (types.ts) for the

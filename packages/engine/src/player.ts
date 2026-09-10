@@ -1,7 +1,7 @@
 import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js";
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
-import { tileAt } from "./world.js";
+import { setTile, tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
@@ -10,6 +10,8 @@ import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory
 import { carryCapacityOf } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
+import { resolveHit } from "./predation.js";
+import { pickBestMove, useMove } from "./combat.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -102,10 +104,21 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     }
     case "eat": {
       const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
-      if (!tile || tile.terrain !== "food" || (tile.stock ?? 0) <= 0) return false;
-      consume(agent.needs, "seekFood", foodNutritionFactor(tile));
-      tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
-      recordGrazing(tile);
+      if (tile?.terrain === "food" && (tile.stock ?? 0) > 0) {
+        consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+        tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+        recordGrazing(tile);
+        grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+        log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+        return true;
+      }
+      // Direct ask: "make offer and eat only available from inventory after
+      // you gather" — nothing underfoot, so eat a carried berry instead.
+      // `foodNutritionFactor(undefined)` is already the neutral (1x) default
+      // this function returns for exactly this "no tile" case.
+      if (countOf(agent, "food") <= 0) return false;
+      removeItem(agent, "food", 1);
+      consume(agent.needs, "seekFood", foodNutritionFactor(undefined));
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
       return true;
@@ -146,11 +159,53 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       eq[def.slot] = action.itemKey;
       // A fresh light gets a full burn; a torch put away and taken out again keeps what it had.
       if (def.light && agent.torchFuel === undefined) agent.torchFuel = TORCH_FUEL_TICKS;
+      syncPlayerMoves(world, agent);
       return true;
     }
     case "stow": {
       if (!agent.equipment?.held) return false;
       agent.equipment.held = undefined;
+      syncPlayerMoves(world, agent);
+      return true;
+    }
+    case "attack": {
+      const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      const defender = world.agents.find(
+        (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
+      );
+      if (defender) {
+        // `resolveHit`'s own return value only ever says whether this hit
+        // was a true KILL (see its doc comment) — a landed-but-nonlethal
+        // hit and "nothing was off cooldown or in range" both come back
+        // false, so it can't tell those two apart for `out.ok`. Checked
+        // here first, the same pre-check `canAttackFromHere` already does
+        // at every other real call site, to know whether a swing actually
+        // happened at all. Distance is always 1 by construction — dx/dy
+        // are each -1/0/1, comfortably within every move on the player's
+        // loadout (`range: {max: 1}`).
+        if (!pickBestMove(agent, defender.types ?? [], 1, world.tick)) return false;
+        resolveHit(world, agent, defender, log, "defeated", ctx, 1, rng);
+        out.attackedId = defender.id;
+        return true;
+      }
+      // No living target — a terrain-directed swing instead (axe against a
+      // tree, machete against a bush), MOVES_AND_TOOLS.md's generalised
+      // `terrainEffect`. `pickBestMove` never offers these (they're
+      // `utilityMove`-flagged, see `terrainMove`'s own doc comment in
+      // crafting.ts), so they're picked directly here rather than through
+      // the ordinary combat move-selection path.
+      const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
+      if (!tile) return false;
+      const move = (agent.moves ?? []).find(
+        (m) => m.terrainEffect && !agent.moveCooldowns?.[m.id] && (!m.terrainEffect.from || m.terrainEffect.from.includes(tile.terrain))
+      );
+      if (!move?.terrainEffect) return false;
+      useMove(agent, move, world.tick);
+      const { to, yields } = move.terrainEffect;
+      out.felled = { from: tile.terrain, to, yields };
+      setTile(world, agent.layer, targetPos.x, targetPos.y, to);
+      if (yields) addItem(agent, yields, 1, MATERIALS[yields].weight);
+      invalidateResourceIndex(world);
       return true;
     }
     case "crouch": {
@@ -227,6 +282,22 @@ export function knowsRecipe(agent: Agent, recipeId: string): boolean {
   return agent.knownRecipes?.includes(recipeId) ?? false;
 }
 
+/**
+ * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Recomputes
+ * `agent.moves` as `world.playerBaseMoves` (bare hands) plus whatever the
+ * currently held item grants — called after every equip/stow (and after
+ * `tickTorch`'s own auto-unequip), so `pickBestMove`/`resolveHit`
+ * (combat.ts/predation.ts) always see the real, current loadout without
+ * needing to know a player did anything special to get there. A worn item
+ * never grants moves (MOVES_AND_TOOLS.md's worked table: worn slots are
+ * passive-only), so only `equipment.held` is read here.
+ */
+export function syncPlayerMoves(world: World, agent: Agent): void {
+  const held = agent.equipment?.held;
+  const granted = (held ? world.items?.[held]?.grantsMoves : undefined) ?? [];
+  agent.moves = [...(world.playerBaseMoves ?? []), ...granted];
+}
+
 /** Water on the player's own tile or any of the eight around it — you kneel at the edge; you do not have to wade in. */
 export function waterWithinReach(world: World, agent: Agent): boolean {
   for (let dy = -1; dy <= 1; dy++) {
@@ -270,4 +341,5 @@ export function tickTorch(world: World, agent: Agent): void {
   agent.equipment!.held = undefined;
   agent.torchFuel = undefined;
   agent.lastNotice = { kind: "torchBurnedOut", tick: world.tick };
+  syncPlayerMoves(world, agent);
 }

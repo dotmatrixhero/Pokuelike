@@ -14,7 +14,7 @@ import {
 } from "@pokuelike/engine";
 import { spawnAgent } from "./spawn.js";
 import { SPECIES } from "./species.js";
-import { ITEMS, KNOWN_AT_START, RECIPES } from "./crafting.js";
+import { BARE_HANDS_MOVES, ITEMS, KNOWN_AT_START, RECIPES } from "./crafting.js";
 
 /**
  * ~90x60 (up from the old hand-authored 24x16) — DESIGN.md's "something like
@@ -173,6 +173,9 @@ export function createPlayerDemoWorld(seed: number = SCENARIO_SEED): World {
     sex: "female",
   };
   world.agents.push(player);
+  // MOVES_AND_TOOLS.md's weakened bare-hands baseline — see createCaveScenario's own comment on this same assignment.
+  world.playerBaseMoves = BARE_HANDS_MOVES;
+  player.moves = [...BARE_HANDS_MOVES];
   updatePlayerVision(world, player);
   return world;
 }
@@ -365,6 +368,13 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   world.recipes = RECIPES;
   world.items = ITEMS;
   player.knownRecipes = [...KNOWN_AT_START];
+  // MOVES_AND_TOOLS.md: "the player's loadout is their moveset" — replaces
+  // whatever `spawnAgent("human", ...)` resolved from the species' own
+  // `moves: ["tackle"]` learnset (full creature-strength Tackle) with the
+  // doc's weakened bare-hands baseline; a held item's own grants layer on
+  // top of this via `player.ts`'s `syncPlayerMoves`.
+  world.playerBaseMoves = BARE_HANDS_MOVES;
+  player.moves = [...BARE_HANDS_MOVES];
   // The first frame is honest: fog is already down before the first key.
   updatePlayerVision(world, player);
   return world;

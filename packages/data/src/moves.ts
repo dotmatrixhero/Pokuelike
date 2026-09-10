@@ -47,6 +47,20 @@ function statusMoveCanon(dexKey: string): Pick<MoveSpec, "type" | "category" | "
  * Ember: point -> ring, or +radius/-cooldown builds — nothing consumes that yet.
  */
 export const MOVES: Record<string, MoveSpec> = {
+  // Base only, deliberately no skill tree — added for `crafting.ts`'s
+  // club grant (MOVES_AND_TOOLS.md, direct ask: "Club should not be body
+  // slam... Maybe pound?"), not part of the ongoing template-v4 move-tree
+  // conversion pass (MOVES_DESIGN.md) that "tackle"/"scratch" below have
+  // already been through. A real skill tree for Pound, if this roster
+  // ever wants one, is that pass's work, not this one's.
+  pound: {
+    id: "pound",
+    name: "Pound",
+    shape: { kind: "point" },
+    ...moveCanon("POUND"),
+    cooldownTicks: 3,
+    range: { min: 0, max: 1 },
+  },
   tackle: {
     id: "tackle",
     name: "Tackle",

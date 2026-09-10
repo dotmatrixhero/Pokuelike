@@ -2,6 +2,7 @@ import type { MoveSpec } from "./moves.js";
 import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
 import type { Disposition, StatKey } from "./nature.js";
+import type { MaterialId } from "./harvest.js";
 
 export interface Vec2 {
   x: number;
@@ -568,7 +569,19 @@ export type PlayerAction =
   /** ROADMAP.md M6: toggle crouching. Halves your threat signature; a crouched step costs extra action energy. */
   | { kind: "crouch" }
   /** ROADMAP.md M6: set one berry from your pack down on a free tile beside you, for whoever comes. */
-  | { kind: "offer" };
+  | { kind: "offer" }
+  /**
+   * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Swings at
+   * the adjacent tile in the given direction — a living agent there takes
+   * a real hit through the ordinary combat pipeline (`player.ts`'s
+   * `attack` case reuses `predation.ts`'s `resolveHit` unmodified, same as
+   * any wild agent's own attack); an empty tile whose terrain matches one
+   * of the player's currently-known moves' `terrainEffect` (an axe against
+   * a `tree`, a machete against a `bush`) fells/clears it instead. Fails
+   * (still costs the turn) against a wall, water, or a tile nothing in the
+   * current loadout can affect.
+   */
+  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -585,6 +598,10 @@ export interface PlayerActionOutcome {
   crafted?: string;
   /** An activity finished this turn (as opposed to merely advanced). */
   completed?: Activity["kind"];
+  /** `attack` landing a real hit on another agent: who got hit. */
+  attackedId?: string;
+  /** `attack` resolving as a terrain-directed swing (axe/machete) instead — MoveSpec.terrainEffect's own before/after. */
+  felled?: { from: TerrainKind; to: TerrainKind; yields?: MaterialId };
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -624,6 +641,18 @@ export interface ItemDef {
   light?: boolean;
   /** Threat-signature term for M6 (positive: a weapon; negative: the cloak). Unused until then. */
   threat?: number;
+  /**
+   * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." A held
+   * item's real, playable moves — synced onto `Agent.moves` on equip/stow
+   * (player.ts's `syncPlayerMoves`) so the ordinary combat pipeline
+   * (`pickBestMove`/`resolveHit`, ultimately reused unmodified for the
+   * player) just works. Each entry is already the WEAKENED tool-granted
+   * version of a real move (`packages/data/src/crafting.ts`'s `toolMove` —
+   * "a tool is a slice of a move, never the whole move," at roughly 60-70%
+   * power and 1.5-2x cooldown), not the canonical creature-strength one.
+   * Absent = this item grants no moves (a light source, a cloak, a pouch).
+   */
+  grantsMoves?: MoveSpec[];
   /** Extra carry capacity while carried (pouch, pack). */
   capacity?: number;
 }
@@ -2094,6 +2123,16 @@ export interface World {
   recipes?: Record<string, RecipeDef>;
   /** ROADMAP.md M5: the item table, keyed by item key. Materials (harvest.ts) are not here; only made things. */
   items?: Record<string, ItemDef>;
+  /**
+   * MOVES_AND_TOOLS.md's baseline unarmed loadout (bare-handed Tackle,
+   * weakened per the doc's numeric rule) — handed to the scenario by the
+   * data package (`crafting.ts`'s `BARE_HANDS_MOVES`), same "config the
+   * scenario supplies, the engine only reads" pattern as `items`/`recipes`
+   * right above. `player.ts`'s `syncPlayerMoves` always includes this on
+   * top of whatever the held item currently grants. Absent in a world
+   * with no player.
+   */
+  playerBaseMoves?: MoveSpec[];
   /**
    * The seed `rng` below was constructed from — always set by `createWorld`
    * (world.ts), explicit or freshly minted via `rng.ts`'s `randomSeed()`.
