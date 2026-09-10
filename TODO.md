@@ -8260,6 +8260,51 @@ Two smaller things worth remembering, both measured:
   by injecting one. Folding it into `check-proposed-trees.ts` would be the
   natural next step.
 
+## Round seven shipped: Rain Dance and Grassy Terrain — four defects the build found
+
+Both are live at 45 nodes. Full writeup, tables and live verification in
+MOVES_DESIGN.md's "Round seven SHIPPED" section. Four things it turned up in
+EXISTING code, none of them caused by these trees, all measured:
+
+- **A species that knows two utility moves only ever uses the first.**
+  `maybeUseUtilityMove` (utilityMoves.ts) returns on the first eligible move
+  in movepool order. Oddish knows Growth before Grassy Terrain, so Grassy
+  Terrain fired **0 times in 1,500 ticks** with both in hand. The in-combat
+  half already picks the best candidate rather than the first
+  (`combatUtilityValue`); the out-of-combat half never got the same fix.
+
+- **`mateDrive` locks a healthy adult out of every utility move.**
+  `chooseBehavior` returns `"idle"` only while every need is satisfied, and
+  `mateDrive` climbs to 1 and stays there until an agent mates — urgency 0.5
+  against an idle threshold of 0.3. Measured: 3-23 free uses per 1,500 ticks
+  against 55-110 when the same call is driven on a cadence. Affects Growth,
+  Agility, Harden, Roost, Safeguard, all of them.
+
+- **Both moves unlock at or above the population's p99 level.** Dratini 45,
+  Oddish 44, Gyarados 51, Gloom 51, Vileplume 51, Dragonair/Dragonite 53,
+  against a measured live distribution of p50 27 / p90 37 / p99 52 / max 52
+  (3 seeds x 4,000 ticks). Ninety nodes of tree sit behind that. A curated
+  unlock level would fix it and is a balance call, so it is logged here
+  rather than taken.
+
+- **Purchase order can DOWNGRADE an overwrite ladder, seen live.** A real
+  rolled Dratini build took *One Sky* (`statusImmunityAura` 120/r5) via the
+  bridge route, then later bought *Shared Shelter* (60/r3) from earlier on
+  the same chain, and finished with 60/r3. The "one ancestry chain per
+  overwrite field" rule assumes purchase order follows ancestry; a bridge
+  breaks that. Every shipped ladder has the same exposure. The fix is a
+  strongest-wins resolver for `selfHeal`/`statusImmunityAura`/
+  `fertilityBoost`/`drainNeeds`/`matingRadiusBoost`, matching what
+  `statChangesOnHit`/`allyEffects` already do.
+
+Also worth remembering from this round: **`fertilityBoost` moves nothing at
+all on a freshly generated map** — 0 of ~9,200-10,400 land tiles on each of
+three seeds, because worldgen writes every non-loam tile's fertility AT its
+own ceiling and loam reads `undefined` as 1. The new `fertilityCeilingBoost`
+(MoveSpec + `Tile.fertilityCeilingBonus` + flora.ts's
+`raiseFertilityCeiling`, clamped at loam's 1.0) is the lever the round-six
+TODO entry above asked for, and it closes that entry's second bullet.
+
 ## Side note from the master merge: runner reaches into web's source
 
 `packages/runner/src/rollBuilds.ts` deep-imports `describeMoveTreeNode` and

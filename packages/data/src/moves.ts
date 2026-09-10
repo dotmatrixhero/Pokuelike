@@ -13865,6 +13865,578 @@ export const MOVES: Record<string, MoveSpec> = {
     // above, a smaller per-tile boost spread over real ground around the
     // caster instead of a bigger one on just its own tile.
     fertilityBoost: { amount: 0.15, radius: 2 },
+    // v4 (two-lane standard). Growth's AoE sibling, and the tree that had
+    // to go and find out what its own signature lever actually does.
+    //
+    // THE FANTASY. Grassy Terrain does not buff a body. It wakes up a
+    // five-by-five of ground around an Oddish that has stood still long
+    // enough, and — where that ground was rock or sand — it makes it ground
+    // that can hold a plant at all. Everything grazes in a finished field:
+    // the caster's herd, and the herds that wander into it, which is why
+    // this tree's Sociability branch is a commons and not a territory.
+    //
+    // THE MEASUREMENT THAT DECIDED THE AGGRESSION BRANCH. `raiseFertility`
+    // (flora.ts) caps at the tile's own `fertilityCeiling`, and worldgen
+    // (`assignGroundTypes`) already writes a non-loam tile's starting
+    // fertility AT that ceiling — 0.6 on sandy, 0.25 on rocky. Run over
+    // three freshly generated worlds, a fully-specced 0.6 `fertilityBoost`
+    // moved the fertility of 0.0% of all 9,246 / 10,439 / 9,733 land tiles.
+    // Not "a bit," not "only on poor ground": nothing, anywhere, until a
+    // patch has already been harvested down below its ceiling. So a lane
+    // whose payoff is "richer soil" would have been dead content on the
+    // exact ground this move most wants to fix. `fertilityCeilingBoost` is
+    // the lever added for it (MoveSpec + `Tile.fertilityCeilingBonus` +
+    // flora.ts's `raiseFertilityCeiling`, clamped at loam's own 1.0): it
+    // moves the CEILING, which is the difference between "this patch
+    // recovers faster" and "this patch can hold a plant now."
+    //
+    // AGGRESSION — the field takes the ground. Lane C is BUILT SOIL (the
+    // ceiling ladder: rock and sand permanently made into soil, the one
+    // change in this tree that is still on the map long after the Oddish
+    // that made it is dead); lane E is WHAT THE FIELD EATS (`drainNeeds` —
+    // a sward thick enough that standing in it costs you). Different in
+    // kind: one lane changes the ground, the other empties what stands on
+    // it.
+    // BOLDNESS — rooted in it. Lane F is RICH FIELD (`fertilityBoost` and
+    // tempo — honest about the measurement above: what this lane really
+    // buys is how fast a GRAZED field comes back, which is the only state
+    // in which fertility moves at all); lane R is SOFT GROUND (the
+    // caster's own body — `selfHeal`, mainline Grassy Terrain's own
+    // heal-every-turn, and mitigation).
+    // SOCIABILITY — everything grazes here. Lane P is THE PASTURE (the herd
+    // fed and un-poisonable in it — `allyEffects` and `statusImmunityAura`,
+    // the mainline terrain's own "blocks status" clause); lane O is THE
+    // COMMONS (`calmingPresence` and `nonTerritorial`, deliberately NOT
+    // herd-scoped, so other herds settle beside yours rather than fight
+    // over the field).
+    //
+    // NO THORNS ANYWHERE IN THIS TREE, on purpose. Oddish and Gloom are the
+    // only learners and they also learn Growth, whose own tree already puts
+    // them at 49% thorns — the highest in the roster after Venusaur.
+    // `damageReductionFlat`/`defenseBoost` carry the same "hard to shift
+    // out of its own field" idea without stacking onto that number.
+    //
+    // FIRING IN A FIGHT. `maybeUseUtilityMoveInCombat` scores by effect
+    // field: Aggression reaches it through Sown Over's positive self
+    // `statChangeOnHit` (and `drainNeeds`), Boldness through Soft Ground's
+    // `selfHeal`, Sociability through Clean Grass's `statusImmunityAura`
+    // and its `allyEffects`. `fertilityBoost` and `fertilityCeilingBoost`
+    // are deliberately not reachable mid-fight — a plant improving the soil
+    // while something is biting it would read as ignoring the fight.
+    tree: {
+      // ===== AGGRESSION: the field takes the ground =====
+      breaking_ground: {
+        id: "breaking_ground",
+        name: "Breaking Ground",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER, and the first node in the roster that permanently
+        // improves what a tile is capable of.
+        delta: { fertilityCeilingBoost: { amount: 0.05, radius: 1 } },
+      },
+      // --- Lane C: built soil. The ceiling itself, and it never goes back.
+      root_split: {
+        id: "root_split",
+        name: "Root Split",
+        cost: 1,
+        prerequisites: ["breaking_ground"],
+        leaning: "aggression",
+        delta: { fertilityCeilingBoost: { amount: 0.08, radius: 2 } },
+      },
+      turning_stone: {
+        id: "turning_stone",
+        name: "Turning Stone",
+        cost: 1,
+        prerequisites: ["root_split"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -5 },
+      },
+      made_ground: {
+        id: "made_ground",
+        name: "Made Ground",
+        cost: 1,
+        prerequisitesAnyOf: [["turning_stone"], ["deep_sward"]],
+        leaning: "aggression",
+        // LANE C NOTABLE. A seven-by-seven of rock (ceiling 0.25) or sand
+        // (0.6) permanently pulled up toward loam. Everything downstream in
+        // flora.ts reads the ceiling — germination odds, spread odds, and
+        // the `quality` a new patch is frozen at — so this is a change to
+        // what the zone can grow, not to how fast it recovers.
+        delta: { fertilityCeilingBoost: { amount: 0.15, radius: 3 } },
+      },
+      it_holds_now: {
+        id: "it_holds_now",
+        name: "It Holds Now",
+        cost: 1,
+        prerequisites: ["made_ground"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Lane E: what the field eats.
+      hungry_sward: {
+        id: "hungry_sward",
+        name: "Hungry Sward",
+        cost: 1,
+        prerequisites: ["breaking_ground"],
+        leaning: "aggression",
+        delta: { drainNeeds: { need: "hunger", amount: 0.03, radius: 2 } },
+      },
+      the_field_feeds: {
+        id: "the_field_feeds",
+        name: "The Field Feeds",
+        cost: 1,
+        prerequisitesAnyOf: [["hungry_sward"], ["shared_ground"]],
+        leaning: "aggression",
+        // LANE E NOTABLE. The grass takes its meal out of whatever is
+        // standing in it that is not herd — `drainNeeds` moves real hunger
+        // off that agent and into this one.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: { drainNeeds: { need: "hunger", amount: 0.07, radius: 4 } },
+      },
+      choke_grass: {
+        id: "choke_grass",
+        name: "Choke Grass",
+        cost: 1,
+        prerequisites: ["the_field_feeds"],
+        excludes: ["dry_stalks"],
+        leaning: "aggression",
+        // FORK, against Dry Stalks. Tight and hungry.
+        delta: { drainNeeds: { need: "hunger", amount: 0.11, radius: 3 } },
+      },
+      dry_stalks: {
+        id: "dry_stalks",
+        name: "Dry Stalks",
+        cost: 1,
+        prerequisites: ["the_field_feeds"],
+        excludes: ["choke_grass"],
+        leaning: "aggression",
+        // FORK, against Choke Grass. Wide, and it takes the other need —
+        // deep grass drinks the ground dry for six tiles around.
+        delta: { drainNeeds: { need: "thirst", amount: 0.06, radius: 6 } },
+      },
+      // --- Convergence, filler, capstone.
+      sown_over: {
+        id: "sown_over",
+        name: "Sown Over",
+        cost: 1,
+        prerequisitesAnyOf: [["it_holds_now"], ["choke_grass"], ["dry_stalks"]],
+        leaning: "aggression",
+        // DEEP NOTABLE, where both lanes land: ground this one made, that
+        // it is now very hard to move it off. A positive self
+        // `statChangeOnHit` is also this branch's way into a fight.
+        grantsPassive: { kind: "defenseBoost", value: 1 },
+        delta: { statChangeOnHit: { target: "self", stat: "defense", stage: 2, ticks: 150 } },
+      },
+      long_roots: {
+        id: "long_roots",
+        name: "Long Roots",
+        cost: 1,
+        prerequisites: ["sown_over"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      it_was_a_meadow: {
+        id: "it_was_a_meadow",
+        name: "It Was a Meadow",
+        cost: 1,
+        prerequisites: ["long_roots"],
+        leaning: "aggression",
+        // CAPSTONE. Nine tiles across of ground that was rock, made into
+        // ground that grows things, feeding itself off whatever walked into
+        // it. The slowest conquest in the roster and the only permanent
+        // one.
+        delta: {
+          fertilityCeilingBoost: { amount: 0.3, radius: 4 },
+          drainNeeds: { need: "hunger", amount: 0.12, radius: 5 },
+          statChangeOnHit: { target: "self", stat: "defense", stage: 3, ticks: 200 },
+        },
+      },
+
+      // ===== BOLDNESS: rooted in it =====
+      settling_in: {
+        id: "settling_in",
+        name: "Settling In",
+        cost: 1,
+        leaning: "boldness",
+        delta: { fertilityBoost: { amount: 0.25, radius: 2 } },
+      },
+      // --- Lane F: rich field. Speed back to the ceiling after a herd eats.
+      thick_thatch: {
+        id: "thick_thatch",
+        name: "Thick Thatch",
+        cost: 1,
+        prerequisites: ["settling_in"],
+        leaning: "boldness",
+        delta: { fertilityBoost: { amount: 0.4, radius: 2 } },
+      },
+      spread_wide: {
+        id: "spread_wide",
+        name: "Spread Wide",
+        cost: 1,
+        prerequisites: ["thick_thatch"],
+        leaning: "boldness",
+        delta: { fertilityBoost: { amount: 0.4, radius: 3 } },
+      },
+      whole_field: {
+        id: "whole_field",
+        name: "Whole Field",
+        cost: 1,
+        prerequisitesAnyOf: [["spread_wide"], ["deep_sward"]],
+        leaning: "boldness",
+        // LANE F NOTABLE. Nine-by-nine of ground put straight back to its
+        // own ceiling in one use. Worth being plain about what that is and
+        // is not: on untouched ground it changes nothing (the tiles are
+        // already at their ceiling), and on ground a herd has just grazed
+        // flat it is the difference between a patch that regrows this
+        // season and one that does not.
+        delta: { fertilityBoost: { amount: 0.7, radius: 4 } },
+      },
+      after_the_graze: {
+        id: "after_the_graze",
+        name: "After the Graze",
+        cost: 1,
+        prerequisites: ["whole_field"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -8 },
+      },
+      // --- Lane R: soft ground. The body lying in it.
+      lying_in_it: {
+        id: "lying_in_it",
+        name: "Lying In It",
+        cost: 1,
+        prerequisites: ["settling_in"],
+        leaning: "boldness",
+        delta: { selfHeal: { fraction: 0.08 } },
+      },
+      soft_ground: {
+        id: "soft_ground",
+        name: "Soft Ground",
+        cost: 1,
+        prerequisitesAnyOf: [["lying_in_it"], ["still_meadow"]],
+        leaning: "boldness",
+        // LANE R NOTABLE, and this branch's fight-usable node — mainline
+        // Grassy Terrain heals what stands in it every turn, and `selfHeal`
+        // is what `maybeUseUtilityMoveInCombat` scores highest when the
+        // caster is genuinely hurt.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { selfHeal: { fraction: 0.18 } },
+      },
+      bedded_down: {
+        id: "bedded_down",
+        name: "Bedded Down",
+        cost: 1,
+        prerequisites: ["soft_ground"],
+        excludes: ["quick_recovery"],
+        leaning: "boldness",
+        // FORK, against Quick Recovery. Settle into it and refuse to be
+        // shifted — `immovable` denies every `applyForcedMovement` push.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.08 },
+          { kind: "immovable", value: 1 },
+        ],
+        delta: {},
+      },
+      quick_recovery: {
+        id: "quick_recovery",
+        name: "Quick Recovery",
+        cost: 1,
+        prerequisites: ["soft_ground"],
+        excludes: ["bedded_down"],
+        leaning: "boldness",
+        // FORK, against Bedded Down. Get back up and lay the field again
+        // sooner.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { cooldownTicks: -6 },
+      },
+      // --- Convergence, filler, capstone.
+      part_of_the_field: {
+        id: "part_of_the_field",
+        name: "Part of the Field",
+        cost: 1,
+        prerequisitesAnyOf: [["after_the_graze"], ["bedded_down"], ["quick_recovery"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes are about staying put: the field does,
+        // and so does whatever grew into it.
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 2 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: {},
+      },
+      deep_turf: {
+        id: "deep_turf",
+        name: "Deep Turf",
+        cost: 1,
+        prerequisites: ["part_of_the_field"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      the_meadow_holds: {
+        id: "the_meadow_holds",
+        name: "The Meadow Holds",
+        cost: 1,
+        prerequisites: ["deep_turf"],
+        leaning: "boldness",
+        // CAPSTONE. Eleven tiles across of grazed-out ground put back in
+        // one use, over a plant the same field keeps mending.
+        grantsPassive: { kind: "regen", value: 0.012 },
+        delta: { fertilityBoost: { amount: 1, radius: 5 }, selfHeal: { fraction: 0.3 } },
+      },
+
+      // ===== SOCIABILITY: everything grazes here =====
+      open_pasture: {
+        id: "open_pasture",
+        name: "Open Pasture",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER. Resolved by `applySupportMove` (support.ts), which does
+        // not exclude utility moves.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.05 }] },
+      },
+      // --- Lane P: the pasture. The herd fed and clean in it.
+      grazing_together: {
+        id: "grazing_together",
+        name: "Grazing Together",
+        cost: 1,
+        prerequisites: ["open_pasture"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {},
+      },
+      no_bad_ground: {
+        id: "no_bad_ground",
+        name: "No Bad Ground",
+        cost: 1,
+        prerequisites: ["grazing_together"],
+        leaning: "sociability",
+        // Mainline terrains block status on whatever is standing in them;
+        // `statusImmunityAura` is this engine's own version of that clause.
+        delta: { statusImmunityAura: { ticks: 60, radius: 3 } },
+      },
+      clean_grass: {
+        id: "clean_grass",
+        name: "Clean Grass",
+        cost: 1,
+        prerequisitesAnyOf: [["no_bad_ground"], ["still_meadow"]],
+        leaning: "sociability",
+        // LANE P NOTABLE, and this branch's fight-usable node.
+        delta: {
+          statusImmunityAura: { ticks: 130, radius: 5 },
+          allyEffects: [{ healFraction: 0.12 }],
+        },
+      },
+      full_bellies: {
+        id: "full_bellies",
+        name: "Full Bellies",
+        cost: 1,
+        prerequisites: ["clean_grass"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.006 },
+        delta: {},
+      },
+      // --- Lane O: the commons. Ground nothing owns.
+      nobody_owns_it: {
+        id: "nobody_owns_it",
+        name: "Nobody Owns It",
+        cost: 1,
+        prerequisites: ["open_pasture"],
+        leaning: "sociability",
+        // `calmingPresence` is deliberately NOT herd-scoped
+        // (herdConflict.ts scans every nearby agent regardless of herd),
+        // which is exactly what a field open to other herds needs.
+        grantsPassive: { kind: "calmingPresence", value: 0.1 },
+        delta: {},
+      },
+      common_pasture: {
+        id: "common_pasture",
+        name: "Common Pasture",
+        cost: 1,
+        prerequisitesAnyOf: [["nobody_owns_it"], ["shared_ground"]],
+        leaning: "sociability",
+        // LANE O NOTABLE. Two herds eat off the same field instead of
+        // fighting over it, and this one never starts the fight itself.
+        //
+        // Deliberately NOT more `calmingPresence`, which is what this node
+        // wanted to be: `calmingMultiplier` (herdConflict.ts) floors at
+        // `MIN_CALMING_MULTIPLIER`, so every point of calm past 0.5 buys
+        // literally nothing — and Growth's own tree, which both learners
+        // also know, already totals 0.66 by itself (passive-exposure.ts
+        // reads Oddish as saturated). A second calm ladder here would have
+        // been dead content by construction. `fireproof` is the live
+        // version of the same idea: a field green enough that fire does
+        // not take it.
+        grantsPassives: [
+          { kind: "nonTerritorial", value: 1 },
+          { kind: "fireproof", value: 0.5 },
+        ],
+        delta: {},
+      },
+      nesting_grass: {
+        id: "nesting_grass",
+        name: "Nesting Grass",
+        cost: 1,
+        prerequisites: ["common_pasture"],
+        excludes: ["wide_range"],
+        leaning: "sociability",
+        // FORK, against Wide Range. A field good enough to raise young in —
+        // `matingRadiusBoost` widens reproduction.ts's own mate search and
+        // shows up as a population curve.
+        delta: { matingRadiusBoost: { multiplier: 1.8, ticks: 200 } },
+      },
+      wide_range: {
+        id: "wide_range",
+        name: "Wide Range",
+        cost: 1,
+        prerequisites: ["common_pasture"],
+        excludes: ["nesting_grass"],
+        leaning: "sociability",
+        // FORK, against Nesting Grass. Not one field to settle in — a
+        // wider stretch of ground, and enough of it that the herd spreads
+        // out over it instead of crowding one patch.
+        grantsPassives: [
+          { kind: "healAura", value: 0.004 },
+          { kind: "damageReductionFlat", value: 1 },
+        ],
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      everything_grazes_here: {
+        id: "everything_grazes_here",
+        name: "Everything Grazes Here",
+        cost: 1,
+        prerequisitesAnyOf: [["full_bellies"], ["nesting_grass"], ["wide_range"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. The field is the reason nothing here is fighting.
+        delta: {
+          statusImmunityAura: { ticks: 200, radius: 6 },
+          allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 120 } }],
+        },
+      },
+      trodden_paths: {
+        id: "trodden_paths",
+        name: "Trodden Paths",
+        cost: 1,
+        prerequisites: ["everything_grazes_here"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -8 },
+      },
+      the_meadow_outlives_us: {
+        id: "the_meadow_outlives_us",
+        name: "The Meadow Outlives Us",
+        cost: 1,
+        prerequisites: ["trodden_paths"],
+        leaning: "sociability",
+        // CAPSTONE. Whatever raised young here goes on doing it after this
+        // Oddish is gone, on ground it will not have to leave.
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {
+          allyEffects: [{ healFraction: 0.2 }],
+          matingRadiusBoost: { multiplier: 2.4, ticks: 320 },
+        },
+      },
+
+      // ===== Bridges =====
+      two_kinds_of_ground: {
+        id: "two_kinds_of_ground",
+        name: "Two Kinds of Ground",
+        cost: 1,
+        prerequisites: ["breaking_ground", "settling_in"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Its lever is roots holding: a
+        // plant that has both built its ground and enriched it is harder to
+        // knock out of it.
+        grantsPassive: { kind: "defenseBoost", value: 1 },
+        delta: {},
+      },
+      thicker_sward: {
+        id: "thicker_sward",
+        name: "Thicker Sward",
+        cost: 1,
+        prerequisites: ["two_kinds_of_ground"],
+        leaning: "aggression",
+        grantsPassive: { kind: "defenseBoost", value: 1 },
+        delta: {},
+      },
+      deep_sward: {
+        id: "deep_sward",
+        name: "Deep Sward",
+        cost: 1,
+        prerequisites: ["thicker_sward"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Lands on Made Ground (Aggression) and Whole Field
+        // (Boldness) — the two nodes about what the ground itself becomes.
+        grantsPassives: [
+          { kind: "defenseBoost", value: 1 },
+          { kind: "damageReductionFlat", value: 1 },
+        ],
+        delta: {},
+      },
+
+      lying_out_together: {
+        id: "lying_out_together",
+        name: "Lying Out Together",
+        cost: 1,
+        prerequisites: ["settling_in", "open_pasture"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. Its lever is the field mending
+        // whatever is lying in it.
+        grantsPassive: { kind: "healAura", value: 0.003 },
+        delta: {},
+      },
+      warmer_ground: {
+        id: "warmer_ground",
+        name: "Warmer Ground",
+        cost: 1,
+        prerequisites: ["lying_out_together"],
+        leaning: "boldness",
+        grantsPassive: { kind: "healAura", value: 0.003 },
+        delta: {},
+      },
+      still_meadow: {
+        id: "still_meadow",
+        name: "Still Meadow",
+        cost: 1,
+        prerequisites: ["warmer_ground"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Lands on Soft Ground (Boldness) and Clean Grass
+        // (Sociability).
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+
+      nothing_fights_here: {
+        id: "nothing_fights_here",
+        name: "Nothing Fights Here",
+        cost: 1,
+        prerequisites: ["open_pasture", "breaking_ground"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. Its lever is tempo: a herd
+        // walking the same ground keeps it laid down, so the field goes
+        // back in far more often than one plant could manage.
+        delta: { cooldownTicks: -3 },
+      },
+      quieter_ground: {
+        id: "quieter_ground",
+        name: "Quieter Ground",
+        cost: 1,
+        prerequisites: ["nothing_fights_here"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -3 },
+      },
+      shared_ground: {
+        id: "shared_ground",
+        name: "Shared Ground",
+        cost: 1,
+        prerequisites: ["quieter_ground"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Lands on The Field Feeds (Aggression) and Common
+        // Pasture (Sociability) — the two answers to who the field is for.
+        delta: { cooldownTicks: -4 },
+      },
+    },
   },
   synthesis: {
     id: "synthesis",
@@ -17453,6 +18025,560 @@ export const MOVES: Record<string, MoveSpec> = {
     // caster, reusing weather.ts's own cell shape/lifecycle rather than a
     // second invented weather concept.
     spawnsRain: true,
+    // v4 (two-lane standard), and the second tree in the roster whose
+    // target is neither a body nor a tile but the SKY.
+    //
+    // THE FANTASY. Rain Dance does not make the dancer stronger. It puts a
+    // real `WeatherCell` (weather.ts) on the map — a centre, a radius, a
+    // drift vector and a lifespan — that keeps moving and keeps working
+    // after the dancer has gone. While it sits over ground, flora decays
+    // three times slower (`floraDecayDivisor`), thirst decays at 0.6
+    // (`thirstDecayMultiplier`), and every eligible shoreline tile under it
+    // rolls `RAIN_WATER_FORM_CHANCE_PER_TICK` to become real water
+    // (`advanceWaterCycle`). A specced dancer redraws the coast it dances
+    // on. Nothing in this tree is a hidden percentage on the dancer's own
+    // body if a version of it could be a bigger, longer, meaner front
+    // instead.
+    //
+    // AGGRESSION — the front arrives with you. Lane F is THE FRONT (how
+    // much sky the cell covers, ending in weather that is no longer rain
+    // at all); lane T is THE TAKE (the downpour falls on everything and
+    // only the dancer drinks it — `drainNeeds`). Different in kind: one
+    // lane changes the map, the other empties the things standing on it.
+    // BOLDNESS — the one who stays out in it. Lane L is THE LONG FRONT
+    // (lifespan, which is the half of a weather cell that actually converts
+    // shoreline into water: forming is a per-tile-per-tick roll, so
+    // duration is the multiplier on it); lane B is SOAKED THROUGH (the
+    // dancer's own body — `selfHeal` and mitigation). One buys a change to
+    // the world that outlasts the dancer, the other buys the dancer.
+    // SOCIABILITY — the whole coast dances. Lane G is UNDER ONE SKY
+    // (`statusImmunityAura`, the herd sheltered together); lane S is SWIFT
+    // SWIM (`aquaticHaste` — a real Speed multiplier that only pays out on
+    // water, which is the thing this move's own rain MAKES).
+    //
+    // THE THREE NEW ENGINE LEVERS, and why a shipped one would not do:
+    // `spawnsRain` is a BOOLEAN. Before this tree the entire live surface
+    // of a weather move was "yes, weather" — 45 nodes of it and no way for
+    // any of them to make the weather bigger, longer, or worse. So
+    // `weatherRadiusBonus` (additive), `weatherLifespanBonus` (additive)
+    // and `weatherType` (overwrite, one chain) were added to `MoveSpec` and
+    // read at `spawnWeatherCellAt`'s own call site in utilityMoves.ts. The
+    // two additive ones are deliberately the additive form the roster
+    // already prefers — two nodes widening the front both count.
+    //
+    // WHAT IS DEAD HERE AND WAS NOT USED: `pickBestMove` (combat.ts) filters
+    // every `utilityMove` out of hostile selection, so nothing downstream of
+    // `resolveHit` exists on this move — no power, no accuracy, no shape, no
+    // `forcedMovement`, no `terrainFill`. The tree touches none of them.
+    //
+    // FIRING IN A FIGHT. `maybeUseUtilityMoveInCombat` scores by effect
+    // field: `selfHeal` (Boldness's Second Skin line), a positive self
+    // `statChangeOnHit` (Aggression's Cloudburst line), `statusImmunityAura`
+    // (Sociability's One Sky line), plus `allyEffect` and `drainNeeds`.
+    // `spawnsRain` scores LOWEST there (20, and only when no cell of that
+    // type is already up), so a build that leans only on the weather will
+    // rarely spend a fight action — which is correct for this move and is
+    // why each branch also carries one of the higher-scoring fields.
+    tree: {
+      // ===== AGGRESSION: the front arrives with you =====
+      squall_line: {
+        id: "squall_line",
+        name: "Squall Line",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER. The cell it pulls down is already bigger than the sky
+        // would have made on its own (weather.ts rolls radius 8-18).
+        delta: { weatherRadiusBonus: 2 },
+      },
+      // --- Lane F: the front. How much sky this dance owns.
+      low_sky: {
+        id: "low_sky",
+        name: "Low Sky",
+        cost: 1,
+        prerequisites: ["squall_line"],
+        leaning: "aggression",
+        delta: { weatherRadiusBonus: 3 },
+      },
+      sheet_rain: {
+        id: "sheet_rain",
+        name: "Sheet Rain",
+        cost: 1,
+        prerequisites: ["low_sky"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -12 },
+      },
+      black_water: {
+        id: "black_water",
+        name: "Black Water",
+        cost: 1,
+        prerequisitesAnyOf: [["sheet_rain"], ["hard_weather"]],
+        leaning: "aggression",
+        // LANE F NOTABLE, and the only node in the roster that changes what
+        // KIND of weather exists. What arrives is not rain any more: a
+        // storm halves accuracy for everything under it
+        // (`stormAccuracyMultiplier` 0.6), cuts sight by four tiles
+        // (`stormFovPenalty`), and sustained exposure with no cover is a
+        // real herd-migration trigger (herdMigration.ts's `"weather"`
+        // reason). A dancer with this node moves other herds off ground by
+        // making the ground unliveable, which is a thing an observer can
+        // watch happen on the map.
+        delta: { weatherType: "storm", weatherRadiusBonus: 4 },
+      },
+      nowhere_dry: {
+        id: "nowhere_dry",
+        name: "Nowhere Dry",
+        cost: 1,
+        prerequisites: ["black_water"],
+        leaning: "aggression",
+        delta: { weatherRadiusBonus: 4 },
+      },
+      // --- Lane T: the take. Everything gets rained on; one thing drinks.
+      drinking_it: {
+        id: "drinking_it",
+        name: "Drinking It",
+        cost: 1,
+        prerequisites: ["squall_line"],
+        leaning: "aggression",
+        delta: { drainNeeds: { need: "thirst", amount: 0.03, radius: 2 } },
+      },
+      rain_shadow: {
+        id: "rain_shadow",
+        name: "Rain Shadow",
+        cost: 1,
+        prerequisitesAnyOf: [["drinking_it"], ["dance_and_take"]],
+        leaning: "aggression",
+        // LANE T NOTABLE. Standing in this dancer's downpour is drier than
+        // standing outside it — `drainNeeds` moves real thirst off the
+        // nearest thing that is not herd and into the dancer.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: { drainNeeds: { need: "thirst", amount: 0.07, radius: 4 } },
+      },
+      undertow: {
+        id: "undertow",
+        name: "Undertow",
+        cost: 1,
+        prerequisites: ["rain_shadow"],
+        excludes: ["standing_flood"],
+        leaning: "aggression",
+        // FORK, against Standing Flood. Close and deep: it takes far more,
+        // from whatever is nearest.
+        delta: { drainNeeds: { need: "thirst", amount: 0.12, radius: 3 } },
+      },
+      standing_flood: {
+        id: "standing_flood",
+        name: "Standing Flood",
+        cost: 1,
+        prerequisites: ["rain_shadow"],
+        excludes: ["undertow"],
+        leaning: "aggression",
+        // FORK, against Undertow. Wide and shallow, and it takes the other
+        // need: flooded ground is ground nothing can eat off.
+        delta: { drainNeeds: { need: "hunger", amount: 0.06, radius: 6 } },
+      },
+      // --- Convergence, filler, capstone.
+      cloudburst: {
+        id: "cloudburst",
+        name: "Cloudburst",
+        cost: 1,
+        prerequisitesAnyOf: [["nowhere_dry"], ["undertow"], ["standing_flood"]],
+        leaning: "aggression",
+        // DEEP NOTABLE, where both lanes land: a thing that made the
+        // weather is at home in it. A positive self `statChangeOnHit` is
+        // also one of the fields `maybeUseUtilityMoveInCombat` will spend a
+        // fight action on, so this is the branch's way into a fight.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: { statChangeOnHit: { target: "self", stat: "speed", stage: 2, ticks: 120 } },
+      },
+      running_water: {
+        id: "running_water",
+        name: "Running Water",
+        cost: 1,
+        prerequisites: ["cloudburst"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: { cooldownTicks: -10 },
+      },
+      the_long_rain: {
+        id: "the_long_rain",
+        name: "The Long Rain",
+        cost: 1,
+        prerequisites: ["running_water"],
+        leaning: "aggression",
+        // CAPSTONE. Six tiles of downpour that only one thing in it is
+        // drinking, and a dancer moving faster than anything trying to
+        // leave. Flat mitigation rather than a percentage on purpose:
+        // Gyarados already carries Hydro Pump's `damageReduction`, and
+        // measured with passive-exposure.ts a second percentage node here
+        // put it at 30% of all incoming damage, seventh worst in the
+        // roster. Flat keeps this tree's own percentage total at 8%.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {
+          drainNeeds: { need: "thirst", amount: 0.15, radius: 6 },
+          statChangeOnHit: { target: "self", stat: "speed", stage: 3, ticks: 200 },
+        },
+      },
+
+      // ===== BOLDNESS: the one who stays out in it =====
+      open_water: {
+        id: "open_water",
+        name: "Open Water",
+        cost: 1,
+        leaning: "boldness",
+        delta: { weatherLifespanBonus: 40 },
+      },
+      // --- Lane L: the long front. Duration is what makes new water.
+      slow_front: {
+        id: "slow_front",
+        name: "Slow Front",
+        cost: 1,
+        prerequisites: ["open_water"],
+        leaning: "boldness",
+        delta: { weatherLifespanBonus: 60 },
+      },
+      low_pressure: {
+        id: "low_pressure",
+        name: "Low Pressure",
+        cost: 1,
+        prerequisites: ["slow_front"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -15 },
+      },
+      it_does_not_pass: {
+        id: "it_does_not_pass",
+        name: "It Does Not Pass",
+        cost: 1,
+        prerequisitesAnyOf: [["low_pressure"], ["hard_weather"]],
+        leaning: "boldness",
+        // LANE L NOTABLE, and the tree's most literal world change. Water
+        // forms under rain on a per-tile, per-tick roll of 1/1800
+        // (`RAIN_WATER_FORM_CHANCE_PER_TICK`), so the number of new water
+        // tiles a dance produces is a function of how long the cell sits
+        // there, not how hard it rains. A base cell lives 200-500 ticks;
+        // this one does not leave.
+        delta: { weatherLifespanBonus: 200 },
+      },
+      mist_after: {
+        id: "mist_after",
+        name: "Mist After",
+        cost: 1,
+        prerequisites: ["it_does_not_pass"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { weatherLifespanBonus: 80 },
+      },
+      // --- Lane B: soaked through. The dancer's own body.
+      rain_on_the_back: {
+        id: "rain_on_the_back",
+        name: "Rain on the Back",
+        cost: 1,
+        prerequisites: ["open_water"],
+        leaning: "boldness",
+        delta: { selfHeal: { fraction: 0.08 } },
+      },
+      second_skin: {
+        id: "second_skin",
+        name: "Second Skin",
+        cost: 1,
+        prerequisitesAnyOf: [["rain_on_the_back"], ["still_water"]],
+        leaning: "boldness",
+        // LANE B NOTABLE, and this branch's fight-usable node — `selfHeal`
+        // is what `maybeUseUtilityMoveInCombat` scores highest of all when
+        // the dancer is actually hurt.
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: { selfHeal: { fraction: 0.18 } },
+      },
+      runoff: {
+        id: "runoff",
+        name: "Runoff",
+        cost: 1,
+        prerequisites: ["second_skin"],
+        excludes: ["waterlogged"],
+        leaning: "boldness",
+        // FORK, against Waterlogged. Shed it and keep moving.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { cooldownTicks: -8 },
+      },
+      waterlogged: {
+        id: "waterlogged",
+        name: "Waterlogged",
+        cost: 1,
+        prerequisites: ["second_skin"],
+        excludes: ["runoff"],
+        leaning: "boldness",
+        // FORK, against Runoff. Take it on and become heavier for it —
+        // `immovable` refuses every `applyForcedMovement` push outright.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.08 },
+          { kind: "immovable", value: 1 },
+        ],
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      weathered: {
+        id: "weathered",
+        name: "Weathered",
+        cost: 1,
+        prerequisitesAnyOf: [["mist_after"], ["runoff"], ["waterlogged"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes are about not leaving: the front does
+        // not, and neither does the thing standing in it.
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 2 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: { cooldownTicks: -6 },
+      },
+      the_cold_after: {
+        id: "the_cold_after",
+        name: "The Cold After",
+        cost: 1,
+        prerequisites: ["weathered"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      the_rain_stays: {
+        id: "the_rain_stays",
+        name: "The Rain Stays",
+        cost: 1,
+        prerequisites: ["the_cold_after"],
+        leaning: "boldness",
+        // CAPSTONE. A cell that outlives most of the fights that happen
+        // under it, over a dancer the rain keeps putting back together.
+        grantsPassive: { kind: "regen", value: 0.012 },
+        delta: { weatherLifespanBonus: 250, selfHeal: { fraction: 0.32 } },
+      },
+
+      // ===== SOCIABILITY: the whole coast dances =====
+      called_down: {
+        id: "called_down",
+        name: "Called Down",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER. The dance is done at someone, not alone — resolved by
+        // `applySupportMove` (support.ts), which does NOT exclude utility
+        // moves.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.05 }] },
+      },
+      // --- Lane G: under one sky. The herd sheltered together.
+      shared_shelter: {
+        id: "shared_shelter",
+        name: "Shared Shelter",
+        cost: 1,
+        prerequisites: ["called_down"],
+        leaning: "sociability",
+        delta: { statusImmunityAura: { ticks: 60, radius: 3 } },
+      },
+      close_ranks: {
+        id: "close_ranks",
+        name: "Close Ranks",
+        cost: 1,
+        prerequisites: ["shared_shelter"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {},
+      },
+      one_sky: {
+        id: "one_sky",
+        name: "One Sky",
+        cost: 1,
+        prerequisitesAnyOf: [["close_ranks"], ["still_water"]],
+        leaning: "sociability",
+        // LANE G NOTABLE, and this branch's fight-usable node:
+        // `statusImmunityAura` is worth a fight action specifically against
+        // something that can inflict a status, which is exactly the check
+        // `combatUtilityValue` makes.
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: { statusImmunityAura: { ticks: 120, radius: 5 } },
+      },
+      nothing_gets_in: {
+        id: "nothing_gets_in",
+        name: "Nothing Gets In",
+        cost: 1,
+        prerequisites: ["one_sky"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.006 },
+        delta: {},
+      },
+      // --- Lane S: swift swim. Speed that only exists on water.
+      swift_swim: {
+        id: "swift_swim",
+        name: "Swift Swim",
+        cost: 1,
+        prerequisites: ["called_down"],
+        leaning: "sociability",
+        // `aquaticHaste` pays out only while the herd-mate is standing on
+        // a "water" tile (support.ts's `aquaticHasteMultiplier`) — and the
+        // water it stands on is the water this move's own rain formed.
+        grantsPassive: { kind: "aquaticHaste", value: 0.06 },
+        delta: {},
+      },
+      running_with_it: {
+        id: "running_with_it",
+        name: "Running With It",
+        cost: 1,
+        prerequisitesAnyOf: [["swift_swim"], ["dance_and_take"]],
+        leaning: "sociability",
+        // LANE S NOTABLE. The herd moves with the front instead of being
+        // caught by it.
+        grantsPassive: { kind: "aquaticHaste", value: 0.1 },
+        delta: { allyEffects: [{ buff: { stat: "speed", stage: 1, ticks: 90 } }] },
+      },
+      spawning_run: {
+        id: "spawning_run",
+        name: "Spawning Run",
+        cost: 1,
+        prerequisites: ["running_with_it"],
+        excludes: ["long_migration"],
+        leaning: "sociability",
+        // FORK, against Long Migration. The rain is when things pair off —
+        // `matingRadiusBoost` widens `reproduction.ts`'s own mate search,
+        // and shows up later as a population curve rather than a number.
+        delta: { matingRadiusBoost: { multiplier: 2, ticks: 200 } },
+      },
+      long_migration: {
+        id: "long_migration",
+        name: "Long Migration",
+        cost: 1,
+        prerequisites: ["running_with_it"],
+        excludes: ["spawning_run"],
+        leaning: "sociability",
+        // FORK, against Spawning Run. Stay with the weather instead of
+        // settling under it.
+        grantsPassives: [
+          { kind: "aquaticHaste", value: 0.08 },
+          { kind: "calmingPresence", value: 0.06 },
+        ],
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      one_weather: {
+        id: "one_weather",
+        name: "One Weather",
+        cost: 1,
+        prerequisitesAnyOf: [["nothing_gets_in"], ["spawning_run"], ["long_migration"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. One cell, one herd under it, and nothing in it
+        // taking a status while it holds.
+        delta: {
+          statusImmunityAura: { ticks: 200, radius: 6 },
+          allyEffects: [{ healFraction: 0.12 }],
+        },
+      },
+      long_dance: {
+        id: "long_dance",
+        name: "Long Dance",
+        cost: 1,
+        prerequisites: ["one_weather"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -20 },
+      },
+      the_whole_coast_dances: {
+        id: "the_whole_coast_dances",
+        name: "The Whole Coast Dances",
+        cost: 1,
+        prerequisites: ["long_dance"],
+        leaning: "sociability",
+        // CAPSTONE. The herd is faster on the water the dance made, heals
+        // off the dance itself, and breeds under it.
+        grantsPassive: { kind: "aquaticHaste", value: 0.12 },
+        delta: {
+          allyEffects: [{ healFraction: 0.2 }, { buff: { stat: "speed", stage: 2, ticks: 150 } }],
+          matingRadiusBoost: { multiplier: 2.5, ticks: 320 },
+        },
+      },
+
+      // ===== Bridges =====
+      weather_together: {
+        id: "weather_together",
+        name: "Weather Together",
+        cost: 1,
+        prerequisites: ["squall_line", "open_water"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Its lever is the size of the
+        // sky, and every node on this bridge escalates that one lever.
+        delta: { weatherRadiusBonus: 2 },
+      },
+      wider_front: {
+        id: "wider_front",
+        name: "Wider Front",
+        cost: 1,
+        prerequisites: ["weather_together"],
+        leaning: "aggression",
+        delta: { weatherRadiusBonus: 2 },
+      },
+      hard_weather: {
+        id: "hard_weather",
+        name: "Hard Weather",
+        cost: 1,
+        prerequisites: ["wider_front"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. A front wider than either branch reaches on its
+        // own. Lands on Black Water (Aggression) and It Does Not Pass
+        // (Boldness).
+        delta: { weatherRadiusBonus: 5 },
+      },
+
+      sheltering: {
+        id: "sheltering",
+        name: "Sheltering",
+        cost: 1,
+        prerequisites: ["open_water", "called_down"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. Standing out in it together.
+        grantsPassive: { kind: "healAura", value: 0.003 },
+        delta: {},
+      },
+      deeper_shelter: {
+        id: "deeper_shelter",
+        name: "Deeper Shelter",
+        cost: 1,
+        prerequisites: ["sheltering"],
+        leaning: "boldness",
+        grantsPassive: { kind: "healAura", value: 0.003 },
+        delta: {},
+      },
+      still_water: {
+        id: "still_water",
+        name: "Still Water",
+        cost: 1,
+        prerequisites: ["deeper_shelter"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Lands on Second Skin (Boldness) and One Sky
+        // (Sociability) — the two nodes about being kept whole in the rain.
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {},
+      },
+
+      dance_again: {
+        id: "dance_again",
+        name: "Dance Again",
+        cost: 1,
+        prerequisites: ["called_down", "squall_line"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. Its lever is tempo: a dance
+        // this herd can call far more often than once a storm.
+        delta: { cooldownTicks: -8 },
+      },
+      again_and_again: {
+        id: "again_and_again",
+        name: "Again and Again",
+        cost: 1,
+        prerequisites: ["dance_again"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -8 },
+      },
+      dance_and_take: {
+        id: "dance_and_take",
+        name: "Dance and Take",
+        cost: 1,
+        prerequisites: ["again_and_again"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Lands on Rain Shadow (Aggression) and Running
+        // With It (Sociability).
+        delta: { cooldownTicks: -10 },
+      },
+    },
   },
   sweet_scent: {
     id: "sweet_scent",

@@ -3,6 +3,7 @@ import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { maybeUseUtilityMove, maybeUseUtilityMoveInCombat } from "../src/utilityMoves.js";
 import { getStatStage } from "../src/status.js";
+import { fertilityCeiling } from "../src/flora.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
 
@@ -157,6 +158,67 @@ describe("maybeUseUtilityMove", () => {
     const cell = world.weatherCells![0]!;
     expect(cell.type).toBe("rain");
     expect(cell.center).toEqual({ x: 8, y: 8 });
+  });
+
+  it("weatherRadiusBonus/weatherLifespanBonus/weatherType shape the cell the move puts down", () => {
+    // Control first: the same move with no shaping, on the same seed, so
+    // the shaped numbers are a difference and not just "a cell exists".
+    const control = createWorld(40, 40, 1);
+    maybeUseUtilityMove(control, makeAgent({ moves: [makeMove({ id: "rain_dance", spawnsRain: true })], pos: { x: 8, y: 8 } }), undefined, alwaysFire);
+    const plain = control.weatherCells![0]!;
+
+    const world = createWorld(40, 40, 1);
+    const move = makeMove({
+      id: "rain_dance",
+      spawnsRain: true,
+      weatherRadiusBonus: 6,
+      weatherLifespanBonus: 300,
+      weatherType: "storm",
+    });
+    maybeUseUtilityMove(world, makeAgent({ moves: [move], pos: { x: 8, y: 8 } }), undefined, alwaysFire);
+    const shaped = world.weatherCells![0]!;
+
+    expect(plain.type).toBe("rain");
+    expect(shaped.type).toBe("storm");
+    expect(shaped.radius).toBeCloseTo(plain.radius + 6);
+    expect(shaped.lifespanTicks).toBe(plain.lifespanTicks + 300);
+  });
+
+  it("fertilityCeilingBoost raises rocky ground's ceiling — the one thing fertilityBoost cannot do there", () => {
+    const world = createWorld(10, 10, 1);
+    // Rocky ground as worldgen actually leaves it: fertility written AT the
+    // 0.25 ceiling, which is why the plain boost has nothing to move.
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]] as const) {
+      const tile = tileAt(world, "surface", 5 + dx, 5 + dy)!;
+      tile.groundType = "rocky";
+      tile.fertility = 0.25;
+    }
+    const plain = makeMove({ id: "grassy_terrain", fertilityBoost: { amount: 0.6, radius: 1 } });
+    maybeUseUtilityMove(world, makeAgent({ moves: [plain] }), undefined, alwaysFire);
+    expect(tileAt(world, "surface", 5, 5)!.fertility).toBeCloseTo(0.25); // the control: nothing moved
+
+    const built = makeMove({ id: "grassy_terrain", fertilityCeilingBoost: { amount: 0.3, radius: 1 } });
+    maybeUseUtilityMove(world, makeAgent({ id: "a2", moves: [built] }), undefined, alwaysFire);
+    const tile = tileAt(world, "surface", 5, 5)!;
+    expect(tile.fertilityCeilingBonus).toBeCloseTo(0.3);
+    expect(fertilityCeiling(tile)).toBeCloseTo(0.55);
+    expect(tile.fertility).toBeCloseTo(0.55);
+    // And a tile outside the radius is untouched — the radius is real.
+    expect(tileAt(world, "surface", 8, 8)!.fertilityCeilingBonus).toBeUndefined();
+  });
+
+  it("built ground can never pass loam's own ceiling, however much is poured on it", () => {
+    const world = createWorld(10, 10, 1);
+    const tile = tileAt(world, "surface", 5, 5)!;
+    tile.groundType = "sandy";
+    tile.fertility = 0.6;
+    const move = makeMove({ id: "grassy_terrain", fertilityCeilingBoost: { amount: 0.9, radius: 0 } });
+    for (let i = 0; i < 5; i++) {
+      const agent = makeAgent({ id: `a${i}`, moves: [makeMove({ ...move })] });
+      maybeUseUtilityMove(world, agent, undefined, alwaysFire);
+    }
+    expect(fertilityCeiling(tile)).toBeCloseTo(1);
+    expect(tile.fertility).toBeCloseTo(1);
   });
 
   it("matingRadiusBoost sets the agent's own boost counter", () => {

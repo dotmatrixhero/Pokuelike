@@ -5,7 +5,7 @@ import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { useMove } from "./combat.js";
 import { applyStatStage, getStatStage } from "./status.js";
-import { raiseFertility, isNearSunbeam } from "./flora.js";
+import { raiseFertility, raiseFertilityCeiling, isNearSunbeam } from "./flora.js";
 import { spawnWeatherCellAt } from "./weather.js";
 import { agentsWithin, nearest } from "./predation.js";
 import { applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
@@ -72,6 +72,20 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
       }
     }
 
+    // Building the ground itself, as opposed to `fertilityBoost`'s "get
+    // this ground back to its own ceiling faster". On rocky (ceiling 0.25)
+    // and sandy (0.6) tiles worldgen already writes fertility AT the
+    // ceiling, so this is the only one of the two that changes anything
+    // there at all — see `MoveSpec.fertilityCeilingBoost`.
+    if (move.fertilityCeilingBoost) {
+      const { amount, radius } = move.fertilityCeilingBoost;
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          raiseFertilityCeiling(tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy), amount);
+        }
+      }
+    }
+
     for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
       applyStatStage(agent, change.stat, change.stage, change.ticks);
     }
@@ -87,7 +101,10 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
     }
 
     if (move.spawnsRain) {
-      spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, "rain", rng);
+      spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, move.weatherType ?? "rain", rng, {
+        radiusBonus: move.weatherRadiusBonus,
+        lifespanBonus: move.weatherLifespanBonus,
+      });
     }
 
     if (move.matingRadiusBoost) {
@@ -209,7 +226,8 @@ function combatUtilityValue(world: World, agent: Agent, opponent: Agent, move: M
   // 6. Change the weather. Lowest: it is a real effect on a real fight
   //    (weather multiplies damage), but it is the least urgent thing here
   //    and should never be picked over healing.
-  if (move.spawnsRain && !(world.weatherCells ?? []).some((cell) => cell.type === "rain")) value = Math.max(value, 20);
+  const spawnType = move.weatherType ?? "rain";
+  if (move.spawnsRain && !(world.weatherCells ?? []).some((cell) => cell.type === spawnType)) value = Math.max(value, 20);
 
   return value;
 }
@@ -299,7 +317,12 @@ export function maybeUseUtilityMoveInCombat(
     }
   }
 
-  if (move.spawnsRain) spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, "rain", rng);
+  if (move.spawnsRain) {
+    spawnWeatherCellAt(world, log, agent.pos.x, agent.pos.y, move.weatherType ?? "rain", rng, {
+      radiusBonus: move.weatherRadiusBonus,
+      lifespanBonus: move.weatherLifespanBonus,
+    });
+  }
 
   log?.record({
     kind: "utilityMoveUsed",

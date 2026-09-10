@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMoveTree, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
+import { applyMoveTree, raiseFertility, raiseFertilityCeiling, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
 import type { MoveSpec, MoveTreeNode } from "@pokuelike/engine";
 import { MOVES } from "../src/moves.js";
 
@@ -2242,5 +2242,136 @@ describe("Defense Curl tree: a ball has no handles", () => {
     expect(passiveTotal(curl, "damageReduction")).toBeLessThanOrEqual(0.2);
     expect(passiveTotal(curl, "regen") + passiveTotal(curl, "healAura") + passiveTotal(curl, "regenFlat") / 43)
       .toBeLessThanOrEqual(0.1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round seven: the two world-changing trees — Rain Dance and Grassy Terrain.
+// ---------------------------------------------------------------------------
+
+describe("the two world-changing status trees pull only levers a utilityMove can reach", () => {
+  for (const moveId of ["rain_dance", "grassy_terrain"]) {
+    const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+    it(`${moveId} is a 45-node utilityMove tree`, () => {
+      expect(move.utilityMove).toBe(true);
+      expect(Object.keys(move.tree)).toHaveLength(45);
+    });
+
+    it(`${moveId} sets no field only the hostile hit pipeline reads`, () => {
+      const offenders: string[] = [];
+      for (const node of Object.values(move.tree)) {
+        for (const field of DEAD_ON_A_UTILITY_MOVE) {
+          if ((node.delta as Record<string, unknown>)[field] !== undefined) offenders.push(`${node.id}.${field}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it(`every ${moveId} statChangeOnHit targets self and is positive`, () => {
+      for (const node of Object.values(move.tree)) {
+        const change = node.delta.statChangeOnHit;
+        if (!change) continue;
+        expect(change.target).toBe("self");
+        expect(change.stage).toBeGreaterThan(0);
+      }
+    });
+
+    it(`every ${moveId} branch can spend a real fight action`, () => {
+      // The families `maybeUseUtilityMoveInCombat` (utilityMoves.ts) scores.
+      // `spawnsRain` is deliberately NOT in this list even though it scores
+      // 20: it only scores while no cell of its own type is up, so a branch
+      // resting on it alone would fire rarely and this test would pass for
+      // the wrong reason.
+      const COMBAT_USABLE = ["selfHeal", "statChangeOnHit", "statusImmunityAura", "allyEffect", "allyEffects", "drainNeeds"];
+      for (const branch of ["aggression", "boldness", "sociability"] as const) {
+        const inBranch = Object.values(move.tree).filter((n) => n.leaning === branch);
+        expect(inBranch.length).toBeGreaterThan(0);
+        const reaches = inBranch.filter((n) => COMBAT_USABLE.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined));
+        expect(reaches.length).toBeGreaterThan(0);
+      }
+    });
+  }
+});
+
+describe("Rain Dance tree: the move whose target is the sky", () => {
+  const rain = MOVES.rain_dance as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the base move can only say 'yes, rain' — the tree is what makes the cell bigger, longer and worse", () => {
+    expect(rain.spawnsRain).toBe(true);
+    expect(rain.weatherRadiusBonus).toBeUndefined();
+    expect(rain.weatherLifespanBonus).toBeUndefined();
+    expect(rain.weatherType).toBeUndefined();
+  });
+
+  it("Black Water turns the cell into a real storm, and is the only node that changes its kind", () => {
+    const respec = applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "black_water")]);
+    expect(respec.weatherType).toBe("storm");
+    expect(Object.values(rain.tree).filter((n) => n.delta.weatherType).map((n) => n.id)).toEqual(["black_water"]);
+  });
+
+  it("radius and lifespan are ADDITIVE, so two nodes buying width both count", () => {
+    const radiusNodes = Object.values(rain.tree).filter((n) => n.delta.weatherRadiusBonus !== undefined);
+    expect(radiusNodes.length).toBeGreaterThan(3);
+    // squall_line 2 + low_sky 3 + black_water 4 + nowhere_dry 4
+    expect(applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "nowhere_dry")]).weatherRadiusBonus).toBe(13);
+    // open_water 40 + slow_front 60 + it_does_not_pass 200 + mist_after 80
+    expect(applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, "mist_after")]).weatherLifespanBonus).toBe(380);
+  });
+
+  it("the thirst-theft ladder is one chain, and the two deepest rungs exclude each other", () => {
+    const amountAt = (id: string) => applyMoveTree(rain, [...resolveChosenSetFor(rain.tree, id)]).drainNeeds?.amount;
+    expect(rain.drainNeeds).toBeUndefined();
+    expect(amountAt("drinking_it")).toBeCloseTo(0.03);
+    expect(amountAt("rain_shadow")).toBeCloseTo(0.07);
+    expect(rain.tree.undertow!.excludes).toEqual(["standing_flood"]);
+    expect(rain.tree.standing_flood!.excludes).toEqual(["undertow"]);
+  });
+
+  it("the cooldown cut stays inside the 3x tempo cap for a 150-tick move", () => {
+    const cut = Object.values(rain.tree).reduce((sum, n) => sum + Math.max(0, -(n.delta.cooldownTicks ?? 0)), 0);
+    const floor = Math.ceil((rain.cooldownTicks + 1) / 3) - 1;
+    expect(cut).toBeLessThanOrEqual(rain.cooldownTicks - floor);
+  });
+});
+
+describe("Grassy Terrain tree: the ground, and what it can hold", () => {
+  const grass = MOVES.grassy_terrain as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the base move only raises fertility, which on rock is measurably nothing", () => {
+    expect(grass.fertilityBoost).toEqual({ amount: 0.15, radius: 2 });
+    expect(grass.fertilityCeilingBoost).toBeUndefined();
+    // The control that makes that claim mean something: a rocky tile exactly
+    // as worldgen leaves it, its fertility written AT the 0.25 ceiling.
+    const tile = { terrain: "floor" as const, walkable: true, groundType: "rocky" as const, fertility: 0.25 };
+    raiseFertility(tile, grass.fertilityBoost!.amount);
+    expect(tile.fertility).toBeCloseTo(0.25); // nothing moved
+    raiseFertilityCeiling(tile, 0.15);
+    raiseFertility(tile, grass.fertilityBoost!.amount);
+    expect(tile.fertility).toBeCloseTo(0.4); // the ceiling lever is what moved it
+  });
+
+  it("the ceiling ladder is one chain — 0.05 -> 0.08 -> 0.15 -> 0.3 — widening as it climbs", () => {
+    const at = (id: string) => applyMoveTree(grass, [...resolveChosenSetFor(grass.tree, id)]).fertilityCeilingBoost;
+    expect(at("breaking_ground")).toEqual({ amount: 0.05, radius: 1 });
+    expect(at("root_split")).toEqual({ amount: 0.08, radius: 2 });
+    expect(at("made_ground")).toEqual({ amount: 0.15, radius: 3 });
+    expect(at("it_was_a_meadow")).toEqual({ amount: 0.3, radius: 4 });
+  });
+
+  it("Oddish and Gloom already carry Growth's thorns, so this tree grants none", () => {
+    const thorns = Object.values(grass.tree)
+      .flatMap((n) => [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
+      .filter((p) => p.kind === "thorns");
+    expect(thorns).toEqual([]);
+    // The control: Growth, which the same two species learn, does grant it.
+    expect(passiveTotal(MOVES.growth as MoveSpec & { tree: Record<string, MoveTreeNode> }, "thorns")).toBeGreaterThan(0.2);
+  });
+
+  it("the fertility ladder is one chain ending in an 11-tile-wide flood", () => {
+    const at = (id: string) => applyMoveTree(grass, [...resolveChosenSetFor(grass.tree, id)]).fertilityBoost;
+    expect(at("settling_in")).toEqual({ amount: 0.25, radius: 2 });
+    expect(at("whole_field")).toEqual({ amount: 0.7, radius: 4 });
+    expect(at("the_meadow_holds")).toEqual({ amount: 1, radius: 5 });
   });
 });
