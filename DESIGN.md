@@ -15607,3 +15607,22 @@ over a few thousand ticks) — the mechanism itself is unit-tested directly
 and `resolveSpawnEvolution`'s multi-stage/threshold/unknown-species
 behavior), which is the stronger evidence here; the live run is a
 directional sanity check on top of that, not the primary proof.
+
+## Fixed: clash log lines never named the move used
+
+Direct report, a real pasted log: "Lapras clashes with Dewgong! Dewgong
+takes 7 damage!" — "Why don't i see what moves they used here?"
+
+**Root cause.** `herdClash`'s own `event.moveId` was already there (an
+earlier fix taught `eventText.ts`'s Event Log formatter to use it), but
+`battleScreenPanel.ts`'s own per-line battle-textbox rendering
+(`battleLinesFor`) never picked it up — its `"herdClash"` case hardcoded
+`"${attacker} clashes with ${defender}!"` instead of calling
+`findMoveUsed`/naming the move, unlike `"fought"`/`"missed"`'s shared
+`moveOpeningLines` helper right next to it.
+
+**Fix.** `"herdClash"`'s opening line now reads `"${attacker} used
+${moveName} on ${defender}!"`, same `findMoveUsed` lookup the other two
+cases already use. Verified live (Playwright, real tick run): "Kingler
+used Hammer Arm on Golduck!", "Golduck used Psybeam on Kingler!" — real
+move names, not the old placeholder text. Web build clean.
