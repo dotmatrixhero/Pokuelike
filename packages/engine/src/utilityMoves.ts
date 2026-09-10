@@ -117,6 +117,9 @@ const COMBAT_HEAL_HP_FRACTION = 0.6;
  */
 const COMBAT_MAX_SELF_BUFF_STAGES = 2;
 
+/** A self-buff this move already owns is worth re-spending a fight action on only once it is nearly gone. */
+const REFRESH_WHEN_TICKS_LEFT = 5;
+
 /**
  * Is this utility move worth an ACTION IN A FIGHT, right now?
  *
@@ -139,11 +142,21 @@ function worthAnActionInCombat(agent: Agent, move: MoveSpec): boolean {
   }
   for (const change of resolveStatChangesOnHit(move)) {
     if (change.target !== "self" || change.stage <= 0) continue;
-    // Only while the buff is still buying something. Re-applying a stat the
-    // agent has already stacked is the classic "AI wastes its whole fight
-    // on setup" failure, and it is a real one here: `applyStatStage` PUSHES
-    // rather than replaces, so nothing else stops it.
-    if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) return true;
+    // Two reasons to spend an action here, and the second one only matters
+    // now that `applyStatStage` keys entries by their source move:
+    //
+    //  1. The agent is not yet at the setup ceiling. Re-buffing past that is
+    //     the classic "AI wastes its whole fight on setup" failure.
+    //  2. This move's OWN entry is about to expire. Entries refresh rather
+    //     than stack now, so a +3 buff sits above the ceiling forever and
+    //     rule 1 alone would make the move permanently unusable the moment
+    //     it first landed — worse than the bug the ceiling prevents.
+    const mine = (agent.statStages ?? []).find((st) => st.stat === change.stat && st.sourceMoveId === move.id);
+    if (!mine) {
+      if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) return true;
+    } else if ((mine.ticksRemaining ?? Infinity) <= REFRESH_WHEN_TICKS_LEFT) {
+      return true;
+    }
   }
   // Status immunity is worth an action only against something that can
   // actually inflict a status — checked by the caller, which has the

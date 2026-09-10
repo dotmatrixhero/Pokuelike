@@ -1304,7 +1304,9 @@ function resolveHitAgainstTarget(
       maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
     }
     for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "defender")) {
-      applyStatStage(defender, change.stat, change.stage, change.ticks);
+      // Keyed by the move, so hitting the same target with the same move
+      // again refreshes the debuff instead of stacking a second copy of it.
+      applyStatStage(defender, change.stat, change.stage, change.ticks, move.id);
     }
     if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
     if (move.positionSwap) {
@@ -1494,7 +1496,10 @@ function resolveHit(
   // A self-side stat change (e.g. a windup buff) always applies the moment
   // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
   for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
-    applyStatStage(attacker, change.stat, change.stage, change.ticks);
+    // Keyed by the move: using it again refreshes the windup buff rather
+    // than stacking another stage, so spamming one move can never beat
+    // building it. A DIFFERENT move still adds its own entry.
+    applyStatStage(attacker, change.stat, change.stage, change.ticks, move.id);
   }
 
   // `allyEffectOnAttack`: the ally-effect piggybacks on a hostile attack,

@@ -866,7 +866,18 @@ export interface Agent {
    * duration is set. Multiple entries on the same `stat` stack additively
    * (clamped downstream by `statStageMultiplier`'s own [-6,+6] clamp).
    */
-  statStages?: Array<{ stat: StatKey; stage: number; ticksRemaining?: number }>;
+  statStages?: Array<{
+    stat: StatKey;
+    stage: number;
+    ticksRemaining?: number;
+    /**
+     * Which move put this entry here, so re-using that same move REFRESHES it
+     * instead of stacking another copy — see `applyStatStage` (status.ts).
+     * Absent for entries with no move behind them (a designed permanent
+     * effect, or a bare-engine test), which never merge with anything.
+     */
+    sourceMoveId?: string;
+  }>;
   /**
    * Granted permanently by a move-tree node's `grantsPassive` (moves.ts) once
    * chosen — see `PassiveKind`'s own doc comment for what each key does and

@@ -1338,7 +1338,11 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
 
     tickWorld(world, undefined, RULES);
 
-    expect(hunter.statStages).toEqual([{ stat: "attack", stage: 1, ticksRemaining: undefined }]);
+    // `sourceMoveId` is asserted, not ignored: it is what makes re-using this
+    // same move refresh the entry rather than stack a second stage.
+    expect(hunter.statStages).toEqual([
+      { stat: "attack", stage: 1, ticksRemaining: undefined, sourceMoveId: "self-buff-move" },
+    ]);
   });
 
   it("a defender-side stat change applies only on a landed, non-killing hit", () => {
@@ -1358,7 +1362,9 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
     // own action tick, then the target's own tickAgentNeeds (later in the
     // same tickWorld iteration) immediately counts it down by 1 — real,
     // same-tick behavior, not a bug.
-    expect(target.statStages).toEqual([{ stat: "defense", stage: -1, ticksRemaining: 9 }]);
+    expect(target.statStages).toEqual([
+      { stat: "defense", stage: -1, ticksRemaining: 9, sourceMoveId: "debuff-move" },
+    ]);
   });
 
   it("no defender-side stat change on a killing/finishing hit", () => {
