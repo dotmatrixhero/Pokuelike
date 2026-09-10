@@ -57,7 +57,9 @@ function fight(move: MoveSpec, rng: () => number) {
   tickWorld(world, log, RULES, undefined, rng);
 
   const fought = (log.events as any[]).filter((e) => e.kind === "fought" && e.attackerId === "bulbasaur-0");
+  const missed = (log.events as any[]).filter((e) => e.kind === "missed" && e.attackerId === "bulbasaur-0");
   return {
+    missedEvents: missed.length,
     damageEvents: fought.length,
     crits: fought.filter((e) => e.critical).length,
     tilesMoved: Math.abs(target.pos.x - startPos.x) + Math.abs(target.pos.y - startPos.y),
@@ -95,11 +97,36 @@ describe("multi-hit ordering: damage, knockback and crits", () => {
     expect(neverCrit.crits).toBe(0);
   });
 
-  it("accuracy is rolled ONCE for the whole flurry — a multi-hit move lands every hit or none", () => {
-    const allOrNothing = fight(moveOf({ hits: { min: 3, max: 3 }, accuracy: 100 }), () => 0.7);
-    expect(allOrNothing.damageEvents).toBe(3);
+  it("accuracy is rolled PER HIT, so a flurry can connect partially", () => {
+    // Direct: "Accuracy should be per hit I think." Rolling once for the
+    // whole flurry meant a 3-hit move was exactly as reliable as a 1-hit
+    // one, which made accuracy worth MORE on a multi-hit build than a
+    // single-hit one — backwards.
+    const perfect = fight(moveOf({ hits: { min: 3, max: 3 }, accuracy: 100 }), () => 0.7);
+    expect(perfect.damageEvents).toBe(3);
 
-    const cantHit = fight(moveOf({ hits: { min: 3, max: 3 }, accuracy: 1 }), () => 0.99);
-    expect(cantHit.damageEvents).toBe(0); // not 1 or 2 — the roll gates the loop, not each hit
+    const hopeless = fight(moveOf({ hits: { min: 3, max: 3 }, accuracy: 1 }), () => 0.99);
+    expect(hopeless.damageEvents).toBe(0);
+    expect(hopeless.missedEvents).toBe(1); // one "missed" beat for the swing, not three
+
+    // The real proof: an rng that alternates pass/fail lands SOME hits, which
+    // an all-or-nothing roll could never produce.
+    let n = 0;
+    const alternating = () => (n++ % 2 === 0 ? 0.1 : 0.99);
+    const partial = fight(moveOf({ hits: { min: 3, max: 3 }, accuracy: 50 }), alternating);
+    expect(partial.damageEvents).toBeGreaterThan(0);
+    expect(partial.damageEvents).toBeLessThan(3);
+  });
+
+  it("a single-hit move is unchanged: one roll, one miss beat", () => {
+    // Control for the change above — the per-hit loop must not alter the
+    // behaviour of the 20 single-hit moves in the roster.
+    const miss = fight(moveOf({ accuracy: 1 }), () => 0.99);
+    expect(miss.damageEvents).toBe(0);
+    expect(miss.missedEvents).toBe(1);
+
+    const hit = fight(moveOf({ accuracy: 100 }), () => 0.7);
+    expect(hit.damageEvents).toBe(1);
+    expect(hit.missedEvents).toBe(0);
   });
 });

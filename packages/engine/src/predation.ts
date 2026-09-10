@@ -1267,7 +1267,38 @@ function resolveHitAgainstTarget(
   const defenderElevation = tileAt(world, defender.layer, defender.pos.x, defender.pos.y)?.elevation ?? 0;
   const elevationMultiplier = elevationAccuracyMultiplier(attackerElevation, defenderElevation);
 
-  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier * elevationMultiplier)) {
+  const accuracyExtra =
+    stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier * elevationMultiplier;
+
+  let diedTrue = false;
+  let landed = 0;
+  const hitCount = rollHitCount(move.hits, rng);
+  for (let i = 0; i < hitCount; i++) {
+    if (isDead(defender)) break; // died mid-flurry — nothing left for later hits of this same move to land on
+
+    // Accuracy is rolled PER HIT, not once for the whole flurry. Direct:
+    // "Accuracy should be per hit I think." Rolling once made a multi-hit
+    // move land every hit or none, which inverted the intuition badly — a
+    // 3-hit move was no less reliable than a 1-hit one, so accuracy was
+    // worth strictly MORE on a multi-hit build than a single-hit one. Now a
+    // flurry can connect partially, and the expected damage of a 3-hit move
+    // at 80 accuracy is 2.4 hits rather than "3 hits, 80% of the time".
+    if (!rollAccuracy(move, 0, 0, rng, accuracyExtra)) continue;
+
+    // Fire thaws on the first hit that actually connects, not on the swing.
+    if (landed === 0) maybeThawOnFireHit(defender, move.type, world, log);
+    landed++;
+
+    if (applySingleDamageInstance(world, attacker, defender, move, log, faintKind, ctx, rng)) {
+      diedTrue = true;
+      break;
+    }
+  }
+
+  if (landed === 0) {
+    // A whole-flurry miss reads as one "missed" beat, not one per hit — the
+    // chronicle wants "it swung and missed", not three lines of it. Single-hit
+    // moves are byte-identical to the old behaviour here.
     log?.record({
       kind: "missed",
       tick: world.tick,
@@ -1279,20 +1310,6 @@ function resolveHitAgainstTarget(
       pos: defender.pos,
     });
     return false;
-  }
-
-  // A landed Fire hit thaws a frozen defender instantly, independent of
-  // whether this move itself inflicts anything — real mainline behavior.
-  maybeThawOnFireHit(defender, move.type, world, log);
-
-  let diedTrue = false;
-  const hitCount = rollHitCount(move.hits, rng);
-  for (let i = 0; i < hitCount; i++) {
-    if (isDead(defender)) break; // died mid-flurry — nothing left for later hits of this same move to land on
-    if (applySingleDamageInstance(world, attacker, defender, move, log, faintKind, ctx, rng)) {
-      diedTrue = true;
-      break;
-    }
   }
 
   if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
