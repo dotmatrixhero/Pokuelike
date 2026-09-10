@@ -8705,3 +8705,15 @@ console errors. Full suite green (1435 engine / 387 data tests).
       before/after, 8 seeds/8000 ticks: 1 agent stuck 10+ levels past its
       own threshold before the fix (a level-17 Weedle), 0 after. Full
       engine (1428) and data (383) suites green.
+
+## Flake noticed, not chased: simulation.test.ts's cooldown-gate test
+
+One post-merge full-suite run failed `simulation.test.ts`'s "cooldownTicks
+genuinely gates reuse across the owner's own action ticks" — passed in
+isolation and on an immediate full-suite re-run (1443/1443, 58/58). Not
+reproducible, and neither this session's HUD/moves work nor the merged
+evolution-decline changes touch `simulation.ts` or that test. Real
+finding (order-dependent tests mean some shared state is leaking
+somewhere — possibly `Math.random` used unseeded in a test that doesn't
+pass its own `rng`), just not one worth chasing mid-task; flagging for
+whoever next has reason to look at `simulation.test.ts`.
