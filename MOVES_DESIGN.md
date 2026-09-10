@@ -6867,3 +6867,239 @@ with it, because a cast range longer than the footprint is exactly how
 rock_throw's cone managed to whiff on a legal target. Both numbers are
 asserted in TILES in `moveTrees.test.ts`, not left implicit in a length/width
 constant.
+
+### Round six SHIPPED — the five bare moves finally get trees, and what a `utilityMove` can actually do
+
+`harden`, `twineedle`, `poison_sting`, `growth` and `agility` are live in
+`packages/data/src/moves.ts` at 45 nodes each, template v4, 9 `anyOf`, 3
+three-node bridges. `packages/data/scripts/proposed-trees.ts` is now the
+historical draft, not the source of truth.
+
+**This was not a copy-paste job, and the reason is one finding.**
+
+#### The finding: `pickBestMove` excludes every `utilityMove`, so most of the lever list is DEAD on a status move
+
+Read at the call site, not in this doc: `combat.ts`'s `pickBestMove` filters
+`utilityMove`-flagged specs out of hostile selection, exactly like `burrow`.
+So Harden, Growth and Agility never roll an accuracy check, never deal
+damage, and never run `resolveHit`. Everything downstream of `resolveHit` is
+therefore unreachable on them:
+
+| dead on a `utilityMove` | count in the drafts |
+|---|---|
+| `shape`/`hitsArea`, `power`, `hits`, `range`, `accuracy` | 5 draft nodes |
+| `defensePenetration`, `critRateStage`, `critCooldownReset` | 4 |
+| `statusChance`, `statusSeverity`, `statusSpreads` | 2 |
+| `jamCooldownTicks`, `situationalBonus`, `selfStateBonus` | 4 |
+| `forcedMovement`/`reposition`, `positionSwap`, `terrainBurn`/`terrainFill`, `consumesOwnTerrain` | 5 |
+| `selfCostPerUse`, `gatherBurst`, `allyEffectOnAttack`, `excludesAllies` | 5 |
+
+The live surface of a status move is small and worth writing down once:
+
+- `cooldownTicks` and `lockTicks` — applied by `useMove`, which the utility
+  path does call, so a real action lock is a real cost.
+- `selfHeal`, `statChangeOnHit` (self), `statusImmunityAura`,
+  `fertilityBoost`, `spawnsRain`, `matingRadiusBoost`, `drainNeeds` —
+  `utilityMoves.ts`'s `maybeUseUtilityMove`.
+- `targetsAlly` + `allyEffect` — `support.ts`'s `applySupportMove`, which
+  does **not** exclude utility moves. This is the one that saves the
+  Sociability branches.
+- every `grantsPassive` kind — agent-level, needs no trigger at all.
+
+That is 10 delta levers plus 13 passive kinds, and it maps to **8 of the
+colour pie's 15 flavours**. Harden and Agility reach 7 of those 8, which is
+why `tree-balance.ts` flags them at 7 flavours against a roster median of 11.
+That is a ceiling, not an under-explored fantasy — the same shape `dig` (5)
+and `leech_seed` (7) already sit in.
+
+#### The check that matters most: can a branch fire in a fight at all
+
+`maybeUseUtilityMoveInCombat` decides by EFFECT FIELD, not move id, and will
+only ever spend a fight action on `selfHeal`, a **positive self**
+`statChangeOnHit`, or `statusImmunityAura`. All three are OVERWRITE fields,
+so each can only have one ancestry chain per tree — which means placing them
+is a whole-tree constraint, not a per-branch decision.
+
+Placed one per branch on every status tree:
+
+| move | Aggression | Boldness | Sociability |
+|---|---|---|---|
+| harden | *passives only* (thorns/unshaken/defenseBoost) | `selfHeal` (Chrysalis) + Defense ladder | `statusImmunityAura` (Let It Pass) |
+| growth | `selfHeal` (Spore Reserve) | `statChangeOnHit` (Worked Ground) | `statusImmunityAura` (Homestead) |
+| agility | `statChangeOnHit` (Speed ladder) | `selfHeal` (Overland) | `statusImmunityAura` (One Pace) |
+
+**A test caught a real defect here mid-build.** Agility's Sociability branch
+originally had none of the three — it was allyEffect + passives only, so it
+could never spend a fight action. The `statusImmunityAura` chain moved out of
+Boldness and into Sociability to fix it, and Boldness's Pathfinder lane took
+`fertilityBoost` instead (a herd churning a path leaves ground things grow
+in — the live version of the draft's `createsTerrain` node). The test that
+caught it is in `packages/data/test/moveTrees.test.ts` and was proven to fail
+by injecting a `defensePenetration` onto an Agility node.
+
+#### Every "needs a new primitive" claim, checked at the call site
+
+None of these exist. Each was replaced with a live lever that serves the same
+fantasy, not shipped as a dead node:
+
+| draft primitive | verdict | what shipped instead |
+|---|---|---|
+| `bulk` (the Harden→Tackle weight idea) | `weightScaling` reads `attacker.maxHp` and nothing else — no term to add to | `defenseBoost` / `damageReductionFlat` |
+| `unnoticed`/`unnoticedAura`/`huntTargetSkip` | nothing subtracts from `isDetectable`'s `baseRadius` but the bush term | `calmingPresence` + `nonTerritorial` — the shipped "nothing near it starts anything" |
+| `thornsRubble` + a "rubble" `TerrainKind` | neither exists | `thorns` + a real `fertilityBoost`: the shell still sheds onto the ground, it grows things instead of blocking them |
+| `statusNeedsInterference` (*Sickened*) | `tickStatusEffects` gives poison a flat DOT and nothing else; no needs-recovery path reads `agent.status` | `statusSeverity` + `jamCooldownTicks` — see below |
+| `createsTerrain` at the caster's tile | `terrainFill` fires at the DEFENDER's tile on a landed hit; a utility move never lands one | a `fertilityBoost` flood big enough that flora.ts's own germination does the planting |
+| `fertilityCeilingBoost`, `floraRegrowthMultiplier`, `floraCompetition`, `herdForageBonus`, `herdMigrationResistance` | not delta fields, nothing reads them | `matingRadiusBoost` carries the settle-here fantasy, and shows up as a population curve |
+| `terrainUnhindered`, `dispersalSpeed`, `herdHaste`, `cooldownHaste` | not `PassiveKind`s | `fireproof` (ground that stops everything else), `aquaticHaste` (the shipped herd speed aura), plain `cooldownTicks` |
+| `ppCost` / `maxPPBonus` | no PP economy; `MoveSpec.pp` is inert | `selfCostPerUse` (energy) on Twineedle/Poison Sting — a real per-use price on the sim's own needs axes |
+
+**The one node that could not ship, stated plainly.** *Sickened* — "a poisoned
+agent recovers hunger and thirst at half rate, so the payoff of poisoning
+something is that it STARVES" — was the best idea in the round-six drafts and
+it is still unbuildable. `drainNeeds` is the nearest shipped primitive and is
+unreachable on Poison Sting: `utilityMoves.ts` is its only reader, and
+flagging Poison Sting `utilityMove` would remove it from combat entirely. It
+ships as the half that runs: venom severe enough that the thing it is in
+cannot get its own tempo back. **The needs-recovery hook in needs.ts is still
+the highest-value missing primitive for this move, and it is now the only
+thing standing between the draft and its own best node.**
+
+#### The OVERWRITE fix the checker caught
+
+The draft `growth` had **fourteen** co-takeable `fertilityBoost` setters —
+`applyMoveTree` overwrites that field, so a build with several of them
+silently got whichever the engine reached last. Every overwrite field in all
+five shipped trees is now on exactly one ancestry chain, so a later node
+escalates an earlier one instead of racing it:
+
+| tree | field | the chain |
+|---|---|---|
+| growth | `fertilityBoost` | Deep Roots 0.45 → Humus 0.6 → Old Ground 0.8/r1 → Seedbed 0.9 → It Takes 1.2/r2 |
+| harden | `statChangeOnHit` | base +1 → Settling Weight +2 → Hardening Habit +3 → Unbudgeable +4 |
+| agility | `statChangeOnHit` | base +2 → First Move +3 → Wound Up +4 → Blur +5 → Faster Than Thought +6 (the engine clamps at 6) |
+| twineedle | `forcedMovement` | Hit and Gone 2 → Never Landed 3 → Never There 4 tiles |
+| poison_sting | `statusSeverity` | 1.3 → 1.6 → 2.4 → 3.2 |
+
+#### `shape` is dead without `hitsArea`
+
+Only `resolveAreaHit` reads `shape`, and only `hitsArea` routes into it. Both
+burst nodes that shipped set both, and `resolveAreaHit` centres the shape on
+the **attacker**, not the target — which is what the live verification below
+had to be rebuilt around. `burst` radius 1 is a filled Manhattan diamond,
+5 tiles; radius 2 is 13.
+
+#### Balance, with the roster as control
+
+| move | nodes | levers | flavours | tempo (cap) | cheapest capstone |
+|---|---|---|---|---|---|
+| poison_sting | 45 | 30 | 11 | 1.50x (3.00) | 8 pts |
+| twineedle | 45 | 28 | 13 | 3.00x (3.00) | 8 pts |
+| growth | 45 | 21 | 8 | 2.82x (2.82) | 8 pts |
+| harden | 45 | 20 | 7 * | 2.93x (2.93) | 8 pts |
+| agility | 45 | 19 | 7 * | 3.00x (3.00) | 8 pts |
+| **roster median** | 45 | 25 | 11 | 2.00x | 10 pts |
+
+The two flagged flavour counts are the `utilityMove` ceiling described above,
+not padding. Every tempo figure is at or under its own cap.
+
+#### Passive exposure: the largest single change this project has made
+
+Five trees at once, `passive-exposure.ts` before and after. Roster worst case:
+
+| passive | before | after |
+|---|---|---|
+| damageReduction | 33% (diglett) | **36%** (krabby/kingler) |
+| thorns | 65% (venusaur) | 65% (venusaur, unchanged) |
+| regen + aura + regenFlat/43 | 18.8% (sandshrew) | **25.9%** (sandshrew) |
+
+Per species that learns one of the five (before → after):
+
+| species | movepool | dmgRed | thorns | healing | defenseBoost |
+|---|---|---|---|---|---|
+| krabby / kingler | tackle+water_gun+harden | 16% → **36%** | 15% → 45% | 10.2% → 20.0% | 0 → 4.0 |
+| metapod / kakuna / shellder | tackle+harden | 8% → 28% | 15% → 45% | 6.2% → 16.0% | 0 → 4.0 |
+| kabuto / kabutops | scratch+harden | 8% → 28% | 15% → 45% | 5.0% → 14.8% | 0 → 4.0 |
+| grimer / muk / pinsir | harden+sludge/slash | 0% → 20% | 0% → 30% | 0.0% → 9.8% | 0 → 4.0 |
+| oddish / gloom | tackle+growth+grassy_terrain | 8% → 18% | 15% → **49%** | 6.2% → 16.2% | 0 → 4.0 |
+| sandshrew | scratch+dig+agility+earthquake | 33% (unchanged) | 40% (unchanged) | 18.8% → **25.9%** | 0.3 → 4.8 |
+| rapidash | tackle+ember+agility | 8% (unchanged) | 15% (unchanged) | 13.1% → 20.1% | 0.5 → 5.0 |
+| the other 20 learners | — | mostly unchanged | mostly unchanged | +7-8 points | 0 → ~4.5 |
+
+Three deliberate trims were made during the build, all reported rather than
+buried:
+
+1. **Agility's `damageReduction` was pulled entirely.** At 0.18 it was legal
+   per-move but pushed Sandshrew (which already carries Dig's and
+   Earthquake's) to **51%** — over half of all incoming damage, uncapped.
+   Converted to `damageReductionFlat`/`defenseBoost`, which scale down late
+   the way MOVES_DESIGN's own note prefers. Sandshrew is back at 33%.
+2. **Harden's `thorns` went 0.38 → 0.30.** At 0.38 the seven Harden species
+   read 63%; they now read 45%, under Venusaur's existing 65% ceiling.
+3. **`defenseBoost` went 9.0 → 4.0 on Harden and 8.0 → 4.5 on Agility.**
+   `statStageMultiplier` (combat.ts) **clamps stages at ±6** and the trees'
+   own `statChangeOnHit` already climbs to +4, so everything past ~4 was
+   points spent on nothing — the same shape as `calmingPresence` past its
+   floor. Worth knowing: `defenseBoost` had essentially no roster exposure
+   before this (worst 0.5), so a naive spend would have gone from 0.5 to 9.0
+   without anyone noticing.
+
+Still true and still unfixed: `thorns` and `damageReduction` have no engine
+cap at all, and the healing softcap bends healing only.
+
+#### Verified by running it, not by reading it
+
+**Reach** — `maybeAutoRespec` driven for real on an actual learner of each
+move, 40 seeds x 60 points, control = shipped `tackle` on Rattata through the
+identical harness:
+
+| move | learner | nodes reached | capstones reached (of 40 seeds) |
+|---|---|---|---|
+| harden | metapod | **45/45** | 12 / 11 / 10 |
+| twineedle | beedrill | **45/45** | 3 / 8 / 4 |
+| poison_sting | ekans | **45/45** | 14 / 9 / 7 |
+| growth | oddish | **45/45** | 10 / 10 / 9 |
+| agility | scyther | **45/45** | 10 / 16 / 8 |
+| *tackle (control)* | *rattata* | *45/45* | *40 / 40 / 40* |
+
+Nothing is unreachable, and every capstone lands in a real build. The control
+reaching 40/40 is the expected shape — Rattata knows one move, so no points
+are split; a two- or three-move species spreads them, which is exactly why
+the new trees land at 3-16 rather than 40.
+
+**Live, one signature node per tree, each with a control that fires**, driven
+through the real `tickWorld`, 3 seeds each:
+
+| tree | node | with | control |
+|---|---|---|---|
+| harden | *Chrysalis* (`selfHeal` 0.15 + `lockTicks` 6) | in-combat utility uses 4, ticks healing ≥15% maxHp: **1-2** | same 3-4 uses, ticks healing ≥15%: **0** |
+| twineedle | *Nothing Forgets* (burst r1 + `hitsArea`) | bystander damage **488 / 49.5 / 542.5** | base point shape, bystander damage **0 / 0 / 0** |
+| poison_sting | *The Nest Decides* (+`excludesAllies`) | bystander is a herd-mate: **0 / 0 / 0** | same node, bystander is a FOE: **113 / 59 / 308.5** |
+| growth | *It Takes* (`fertilityBoost` 1.2 r2) | fertility at range 2 = **1.0** | base r0 move: **0.6** (ambient regen only), both with real utility uses |
+| agility | *Moving as One* (`aquaticHaste` 0.25) | herd-mate on water, mean `actionSpeedOf` **127.97** | same herd-mate on floor: **107.05** (ratio 1.19) |
+
+**Two things the first version of that harness got wrong**, recorded because
+both produced confident all-zero tables that looked like findings:
+
+- Nothing ever attacked, because a fight needs `HuntRules` keyed by the
+  attacker's species AND `isPreyOf`'s size gate (attacker `maxHp` well above
+  the target's) — two same-sized agents never fight no matter how hungry.
+- The AoE bystander was placed one tile past the target. `resolveAreaHit`
+  centres the shape on the **attacker**, so a burst r1 never covered it. The
+  first run reported "bystander damage 0" for both the burst and the control
+  and would have read as a passing test.
+
+`raiseFertility` also caps at the tile's own `fertilityCeiling`, so the growth
+measurement had to run on loam (1.0) rather than the default sandy (0.6),
+where ambient regen reaches the cap on its own and both arms read 0.6. That
+is worth remembering: **`fertilityBoost` buys speed to the ceiling, not a
+level above it** — which is exactly what the draft's `fertilityCeilingBoost`
+was reaching for, and it is still not buildable.
+
+#### Open, flagged not resolved
+
+- *Nobody Leaves* (Growth's Sociability capstone): a herd that has solved food
+  is a zone that never turns over, which collides with the standing
+  "equilibrium and variety, not a dominant answer" pillar. Shipped with the
+  concern written into its own node comment, as the draft did.
+- The needs-recovery hook for *Sickened*, above.
+- `thorns`/`damageReduction` still have no engine-side cap.
