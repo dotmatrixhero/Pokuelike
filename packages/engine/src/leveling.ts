@@ -723,7 +723,7 @@ export function grantKillExp(
  * not worth a slot; the rest describe what was given up and why — see
  * `forgetReasonFor`.
  */
-export type ForgetReason = "capacity" | "declined" | "outclassed" | "redundant" | "unbuilt";
+export type ForgetReason = "capacity" | "declined" | "outclassed" | "redundant" | "unbuilt" | "exhausted";
 
 /**
  * How many moves an agent may know at once.
@@ -824,26 +824,57 @@ export function forgetMove(
 }
 
 /**
- * How much a chosen tree node counts toward "don't throw this build away."
+ * What a move learned but never representable in combat is worth per point
+ * sunk into it — the one place investment is priced directly, since such a
+ * move has no `MoveSpec` and so no tree budget to split.
  *
- * Was 8, which made investment an effective VETO — nothing invested was ever
- * dropped, and the refund became dead content: 0 points returned across 6744
- * forgets in a live run. Direct correction: "It's okay to drop an invested
- * move but there should be reasoning behind it."
- *
- * 2 is the honest weight once you follow the refund through. Forgetting
- * returns EVERY point spent, as wildcard, and `maybeAutoRespec` immediately
- * starts spending them again — so dropping a built move does not destroy the
- * points, it converts them. What is actually lost is narrower than it looks:
- * the specific shape of the build, the passives that tree granted (revoked
- * by `forgetMove`), and the time to climb a new tree. Real costs, but not
- * the whole thirty points, which is what a weight of 8 was implicitly
- * charging.
- *
- * So this is a friction term, not a lock: a clearly better move wins the
- * slot and the agent respecs into it, and a marginally better one does not.
+ * The main path does NOT use this. Investment there is the built half of
+ * `FORGET_HAS_TREE_BONUS`, traded node for node against potential; an extra
+ * per-point premium on top of that was tried and quietly broke the whole
+ * mechanic (see `invested` in `moveKeepScore`).
  */
-const FORGET_INVESTMENT_WEIGHT = 2;
+const FORGET_UNRESOLVED_INVESTMENT_WEIGHT = 2;
+
+/**
+ * What a FINISHED tree keeps of its value.
+ *
+ * Investment and potential are deliberately two halves of the same budget
+ * (`FORGET_HAS_TREE_BONUS`), traded node for node as a tree gets built: an
+ * untouched tree is all potential, a half-built one is half of each, and the
+ * total barely moves. That matters — if building a tree lowered its own keep
+ * score, agents would churn away from every move the moment they started
+ * investing in it, which is the "always take the newest move" failure in a
+ * new costume.
+ *
+ * A COMPLETED tree is the one real exception, and it is the whole point of
+ * the refund: "if they have other things to spend skill points on to build
+ * anew then that's the chance to do it. A reason to get your skill points
+ * back." Nothing is left to buy, and the points are sitting idle in a move
+ * that will never grow again — so it is worth half, and an untouched tree
+ * outscores it and cashes it in.
+ *
+ * This is a deliberate cliff at 100%, not a curve. "It had nothing left to
+ * learn" is a legible state; "it is 94% learned" is not.
+ */
+const EXHAUSTED_TREE_KEEP_FRACTION = 0.5;
+
+/**
+ * A small per-node cushion on top of the traded budget, so a part-built tree
+ * is not displaced by a marginally better move.
+ *
+ * Without it, building is exactly score-neutral and whichever move has a
+ * sliver more damage per action wins the slot — a build churning away over a
+ * 5-power difference is not "reasoning behind it," it is noise.
+ *
+ * Sized deliberately against the cash-in so it cannot smother it: a finished
+ * 45-node tree must still score below an untouched one, i.e.
+ * `FORGET_HAS_TREE_BONUS * EXHAUSTED_TREE_KEEP_FRACTION + premium * 45 <
+ * FORGET_HAS_TREE_BONUS`, which caps the premium below 1.33. At 1, a
+ * finished tree sits at 105 against an untouched tree's 120 and is still
+ * cashed in, while a 12-node build carries a 12-point cushion that only a
+ * real upgrade clears.
+ */
+const FORGET_BUILT_NODE_PREMIUM = 1;
 
 /** Bonus for a move whose type the agent doesn't otherwise have, so a movepool doesn't collapse to four of the same type. */
 const FORGET_COVERAGE_BONUS = 25;
@@ -863,20 +894,30 @@ const FORGET_UTILITY_BASE_VALUE = 30;
  * lower on raw damage per action. Every curated move in the roster was being
  * displaced by undesigned filler with slightly better numbers.
  *
- * Deliberately BINARY — "does this move have a designed tree at all" — and
- * not scaled by node count. Scaling was the first attempt and it was wrong:
- * it made tree SIZE decide which moves survive, and size is currently an
- * artifact of how far the v4 conversion has got rather than anything about
- * the move. A level-50 Charizard started dropping Slash (36 nodes) for
- * Scratch (45) the moment Scratch was converted, purely on the node count,
- * even though Slash wins on damage per action and the two are the same type.
- * Converting the remaining trees would have kept reshuffling every movepool
- * in the game for no design reason.
+ * Scaled by how much of the tree is still UNBOUGHT, not by the tree's total
+ * size. Total size was the first attempt and it was wrong: size is an
+ * artifact of how far the v4 conversion has got, so a level-50 Charizard
+ * started dropping Slash (36 nodes) for Scratch (45) the moment Scratch was
+ * converted, purely on the count, though Slash wins on damage per action and
+ * both are Normal. Converting the remaining trees would have reshuffled
+ * every movepool in the game for no design reason.
  *
- * The bug this term exists for was never 36-vs-45; it was curated-move
- * versus undesigned dex filler. Binary answers that and nothing else, and
- * once every tree is 45 nodes a scaled version would collapse to this
- * anyway.
+ * REMAINING nodes are a different and real thing, and they are what makes
+ * the refund worth having. Direct: "if they have other things to spend skill
+ * points on to build anew then that's the chance to do it. A reason to get
+ * your skill points back."
+ *
+ * A move whose tree is fully bought has nothing left to offer — it is
+ * finished, and it is sitting on a pile of points. A move with 45 unbought
+ * nodes is a whole build waiting to be afforded. So an exhausted tree loses
+ * this term entirely and becomes the sensible thing to give up: the refund
+ * pays for the new one, which is the mechanic rather than a consolation for
+ * losing the old.
+ *
+ * The two terms balance deliberately. A maxed 45-node tree scores 45 x 2 = 90
+ * in investment and 0 here; an untouched one scores 0 and the full 120 — so
+ * the finished move goes and funds the unfinished one, while a HALF-built
+ * tree keeps enough of both to stay put.
  */
 const FORGET_HAS_TREE_BONUS = 120;
 
@@ -895,13 +936,20 @@ function forgetReasonFor(
   kept: string[],
   ctx: LevelingContext,
   ownTypes: PokemonType[]
-): "outclassed" | "redundant" | "unbuilt" | "capacity" {
+): Exclude<ForgetReason, "declined"> {
   const spec = ctx.resolveMove(dropped);
   const investedPoints = pointsSpentOn(agent, dropped, ctx);
 
   // Same type as something it kept, and it lost — the movepool was doubling
   // up, which is the cheapest kind of slot to free.
   if (spec && kept.some((id) => ctx.resolveMove(id)?.type === spec.type)) return "redundant";
+
+  // A finished tree, given up to fund an unfinished one. The most
+  // interesting case in the system and the reason the refund exists at all:
+  // nothing was lost, a completed build was cashed in for a new one.
+  const totalNodes = Object.keys(spec?.tree ?? {}).length;
+  const bought = (agent.moveTreeChoices?.[dropped] ?? []).length;
+  if (totalNodes > 0 && bought >= totalNodes) return "exhausted";
 
   // A real build was given up. That is the case worth naming: it only
   // happens when something genuinely outscored it, and the points come back
@@ -936,10 +984,23 @@ function moveKeepScore(agent: Agent, moveId: string, ctx: LevelingContext, ownTy
   if (!spec) {
     // Learned but not representable in combat. Its tree investment is still
     // real, so it is not free to drop, but it has no combat value to add.
-    return FORGET_INVESTMENT_WEIGHT * pointsSpentOn(agent, moveId, ctx);
+    return FORGET_UNRESOLVED_INVESTMENT_WEIGHT * pointsSpentOn(agent, moveId, ctx);
   }
 
-  const invested = FORGET_INVESTMENT_WEIGHT * pointsSpentOn(agent, moveId, ctx);
+  const totalNodes = Object.keys(spec.tree ?? {}).length;
+  const boughtNodes = (agent.moveTreeChoices?.[moveId] ?? []).length;
+  const builtShare = totalNodes > 0 ? Math.min(1, boughtNodes / totalNodes) : 0;
+  const isExhausted = totalNodes > 0 && boughtNodes >= totalNodes;
+
+  // The built half of the budget, and the ONLY investment term — an extra
+  // per-point premium on top of this was the first attempt and it broke the
+  // mechanic quietly: it made the score climb as a tree was built, so a
+  // finished tree still scored 150 against an untouched tree's 120 and was
+  // never cashed in. Printing the curve is what caught it. Held at parity
+  // instead, so building is score-neutral until the tree is done.
+  const invested =
+    FORGET_HAS_TREE_BONUS * builtShare * (isExhausted ? EXHAUSTED_TREE_KEEP_FRACTION : 1) +
+    FORGET_BUILT_NODE_PREMIUM * boughtNodes;
 
   // Damage per action, not damage per use — a move usable every action is
   // worth more than a stronger one usable every fourth. Same denominator the
@@ -959,7 +1020,12 @@ function moveKeepScore(agent: Agent, moveId: string, ctx: LevelingContext, ownTy
       .filter((t): t is PokemonType => t !== undefined)
   );
   const coverage = otherTypes.has(spec.type) ? 0 : FORGET_COVERAGE_BONUS;
-  const potential = Object.keys(spec.tree ?? {}).length > 0 ? FORGET_HAS_TREE_BONUS : 0;
+  // Guarded on `totalNodes`, not just on `builtShare`: an undesigned
+  // dex-derived move has no tree at all, so its builtShare is 0 for the same
+  // reason an untouched 45-node tree's is, and without this it collected the
+  // full potential bonus — exactly inverting the term's purpose. Three tests
+  // caught it at once.
+  const potential = totalNodes > 0 ? FORGET_HAS_TREE_BONUS * (1 - builtShare) : 0;
 
   return invested + perAction * stab + coverage + potential;
 }
