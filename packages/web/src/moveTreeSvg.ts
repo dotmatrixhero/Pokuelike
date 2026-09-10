@@ -272,21 +272,32 @@ function pct(v: number): string {
 function signed(v: number): string {
   return `${v > 0 ? "+" : ""}${v}`;
 }
-function conditionLabel(c: string): string {
-  const labels: Record<string, string> = {
-    targetLowHp: "at or below half HP",
-    flanking: "caught off guard (flanking)",
-    night: "it's night",
-    elevation: "the user is standing higher up",
-    concealed: "the user is concealed in a bush",
-    coldSnap: "there's a cold snap",
-    storm: "there's a storm",
-    drought: "there's a drought",
-    rain: "it's raining",
-    targetBurning: "burning",
-    targetStatused: "already statused",
+/**
+ * The WHOLE clause, not a fragment. It used to be a fragment slotted into a
+ * hardcoded "when the target is ...", which is only grammatical for the four
+ * conditions that are actually about the target — the other eight print
+ * things like "when the target is the user is standing higher up" and "when
+ * the target is there's a cold snap". Half of `SituationalCondition` is a
+ * fact about the ATTACKER or about the WEATHER (`oneSituationalMultiplier`,
+ * predation.ts), so each condition now carries its own subject.
+ * `rallyMarked` had no entry at all and printed the raw key.
+ */
+function conditionClause(c: string): string {
+  const clauses: Record<string, string> = {
+    targetLowHp: "when the target is at or below half HP",
+    flanking: "when the target isn't already reacting to the user",
+    night: "at night",
+    elevation: "when the user is standing higher up than the target",
+    concealed: "when the user is concealed in a bush",
+    coldSnap: "during a cold snap",
+    storm: "during a storm",
+    drought: "during a drought",
+    rain: "in the rain",
+    targetBurning: "when the target is burning",
+    targetStatused: "when the target already has a status on it",
+    rallyMarked: "when the target is carrying the herd's priority mark",
   };
-  return labels[c] ?? c;
+  return clauses[c] ?? `when ${c}`;
 }
 function shapeLabel(shape: { kind: string; length?: number; width?: number; radius?: number }): string {
   if (shape.kind === "point") return "a point-blank hit";
@@ -315,9 +326,9 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("hits")) lines.push(`Strikes ${delta.hits.min === delta.hits.max ? `${delta.hits.min} times` : `${delta.hits.min}–${delta.hits.max} times`} per use.`);
   if (has("hitsBonus")) lines.push(`${signed(delta.hitsBonus)} strike${Math.abs(delta.hitsBonus) === 1 ? "" : "s"} per use, on top of however many it already makes.`);
   if (has("lockTicks")) lines.push(`Locks the user out of acting ${signed(delta.lockTicks)} extra tick${Math.abs(delta.lockTicks) === 1 ? "" : "s"} after use.`);
-  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage when the target is ${conditionLabel(delta.situationalBonus.condition)}.`);
+  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage ${conditionClause(delta.situationalBonus.condition)}.`);
   for (const sb of (delta.situationalBonuses ?? []) as any[]) {
-    lines.push(`×${sb.multiplier} damage when the target is ${conditionLabel(sb.condition)} — stacks with this move's other conditions.`);
+    lines.push(`×${sb.multiplier} damage ${conditionClause(sb.condition)} — stacks with this move's other conditions.`);
   }
   if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
   for (const sc of [...(delta.statChangeOnHit ? [delta.statChangeOnHit] : []), ...((delta.statChangesOnHit ?? []) as any[])]) {
@@ -362,10 +373,15 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
-    const mover = fm.mover === "attacker" ? "The user" : "The target";
-    const dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
+    // "toward the other side" named neither party and read as a euphemism.
+    // Say who moves and who they move relative to.
     const timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
-    lines.push(`${mover} moves ${fm.tiles} tile${fm.tiles === 1 ? "" : "s"} ${dir}, ${timing}.`);
+    const tiles = `${fm.tiles} tile${fm.tiles === 1 ? "" : "s"}`;
+    const verb =
+      fm.mover === "attacker"
+        ? `The user ${fm.direction === "closer" ? "closes" : "backs off"} ${tiles} ${fm.direction === "closer" ? "on" : "from"} the target`
+        : `The target is ${fm.direction === "closer" ? "dragged" : "knocked"} ${tiles} ${fm.direction === "closer" ? "toward" : "away from"} the user`;
+    lines.push(`${verb}, ${timing}.`);
   }
   if (has("chargeAttack")) {
     const ca = delta.chargeAttack;
