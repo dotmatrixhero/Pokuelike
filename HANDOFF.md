@@ -5,6 +5,19 @@ file Y" that is a decision already made with the code open, not a
 suggestion. Where a decision belongs to the user it says so and gives the
 menu. Read `CLAUDE.md` first, then `ROADMAP.md`, then this.
 
+Contents:
+
+- 0. The shape of what exists — files, functions, measured numbers
+- 1. The protocol — the seven steps every milestone runs, and the traps
+- 2. Hearing — the optional M4 leftover
+- 3. **M5 Make — stacks, the crafting data model and its reachability
+  tests, harvest sources, search and craft as time-spends, equip and the
+  torch** (3.1–3.5)
+- 4. M6 Bond — threat signature, the verbs, trust stages, the follower door
+- 5. M7 Climb — chained layers, predators, the exit
+- 6. Rulings needed from the user
+- 7. Sizing
+
 State at handoff (master, 2026-09-10): M0–M4 are built, verified live and
 pushed. The player is a human in a cave with fog of war, hunger, thirst,
 eat/drink, a death screen, and an examine verb that tells you what a
