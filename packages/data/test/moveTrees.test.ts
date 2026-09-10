@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMoveTree } from "@pokuelike/engine";
+import { applyMoveTree, resolveShape } from "@pokuelike/engine";
 import type { MoveSpec, MoveTreeNode } from "@pokuelike/engine";
 import { MOVES } from "../src/moves.js";
 
@@ -1215,8 +1215,14 @@ describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
     // footprint the move can never reach — the node would have been dead the
     // moment `hitsArea` made it real.
     const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring"]);
-    expect(respec.shape).toEqual({ kind: "burst", radius: 2 });
+    expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
     expect(respec.range).toEqual({ min: 0, max: 1 });
+
+    // The radius is a deliberate balance number, not an implementation
+    // detail, so the footprint is asserted in TILES rather than left implicit
+    // in a constant. Burst radius is manhattan: r1 is 5 tiles, r2 is 13.
+    // Direct call on the size: "13 is probably too much. Do the burst R1."
+    expect(resolveShape(respec.shape, { x: 10, y: 10 }, "east")).toHaveLength(5);
   });
 
   it("the whole tree has exactly one shape lineage, and it is Boldness's", () => {
@@ -1302,7 +1308,7 @@ describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
 
     // Into Boldness: Fill the Circle without walking Banked Heat / Slow Burn.
     const viaBold = applyMoveTree(ember, [...bridge, "wide_ring"]);
-    expect(viaBold.shape).toEqual({ kind: "burst", radius: 2 });
+    expect(viaBold.shape).toEqual({ kind: "burst", radius: 1 });
   });
 
   it("Into the Coals' bridge (Boldness<->Sociability) deepens its own crosslink's swap rather than grabbing a stat", () => {

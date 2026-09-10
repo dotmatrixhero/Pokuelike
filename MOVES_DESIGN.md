@@ -5965,3 +5965,36 @@ Leech Seed spent on a fight action buffs and heals but does not actually drain
 the thing it is fighting. That reads like a real gap rather than a decision,
 and it is the single highest-value follow-up for this move. Also untouched
 here: it would change what every `drainNeeds` node is worth.
+
+### Ember's Ring of Fire: how big the circle is
+
+The footprint and the fire count are two different numbers, and the first
+write-up of this conversion conflated them.
+
+| build | shape | tiles in footprint |
+|---|---|---|
+| base ember | point | 1 |
+| Ring of Fire (opener) | ring r1 (hollow) | 8 |
+| Fill the Circle (lane notable) | burst r1 (filled) | **5** |
+
+Those tiles are where the HIT lands. Damage only reaches agents standing on
+them, so an open-field cast is still one target.
+
+**Fire is a separate, much smaller number.** Exactly one node in the 45-node
+tree can ignite terrain (`wider_burn`, via `terrainBurn`), and `igniteNear`
+lights the agent's own tile or the first of four neighbours with fuel and
+then RETURNS — so ignitions are capped at **one per agent hit**, never one
+per tile. Fuel is roughly 5% of a real map. A fully-specced Ring of Fire
+starts one to three fires in a herd fight, not thirteen.
+
+The notable shipped at `burst radius: 2` — 13 tiles, since burst radius is
+manhattan — which was the roster's biggest single footprint on a 40-power
+move that also spreads burn. Direct call: *"13 is probably too much. Do the
+burst R1."* Five tiles still reads as an area, and it is still the escalation
+the name describes: the r1 ring is a hollow 8-tile shell that misses the
+caster's own adjacent diagonals, and the burst is the solid plus that covers
+them.
+
+The footprint is now asserted in TILES in `moveTrees.test.ts`, not left
+implicit in a radius constant, because it is a balance number rather than an
+implementation detail.

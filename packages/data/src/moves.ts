@@ -2155,10 +2155,18 @@ export const MOVES: Record<string, MoveSpec> = {
         // tiles out and 0 to the one standing next to the caster. Ember is
         // aimed at range 1, so a radius-2 shell is a footprint the move can
         // never fire into: the node would have been dead the moment it
-        // started working. A `burst` is the filled form (13 tiles, manhattan
-        // radius 2), which is the escalation the name always described —
-        // the circle stops being an outline and becomes the whole floor.
-        delta: { shape: { kind: "burst", radius: 2 } },
+        // started working. A `burst` is the filled form, which is the
+        // escalation the name always described — the circle stops being an
+        // outline and becomes the whole floor.
+        //
+        // Radius 1, not 2. Burst radius is MANHATTAN, so r2 is 13 tiles and
+        // r1 is 5 — and 13 on a 40-power move that also spreads burn was the
+        // roster's biggest single footprint. Direct call: "13 is probably
+        // too much. Do the burst R1." Five tiles still reads as an area and
+        // still fills the ring the opener only outlined (the r1 ring is a
+        // hollow 8-tile shell that misses the caster's own adjacent tiles on
+        // the diagonals; this is the solid plus that covers them).
+        delta: { shape: { kind: "burst", radius: 1 } },
       },
       never_ours: {
         id: "never_ours",
