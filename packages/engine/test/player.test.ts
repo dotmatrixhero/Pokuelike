@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createWorld, setTile } from "../src/world.js";
+import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
+import { EventLog } from "../src/events.js";
 import { ACTION_THRESHOLD, advancePlayerTurn, tickWorld } from "../src/simulation.js";
-import { applyPlayerAction, findPlayer } from "../src/player.js";
+import { applyPlayerAction, findPlayer, foodUnderfoot, waterWithinReach } from "../src/player.js";
 import type { Agent } from "../src/types.js";
 
 function human(id: string, x: number, y: number, extra: Partial<Agent> = {}): Agent {
@@ -93,6 +94,108 @@ describe("player agent (ROADMAP M0)", () => {
     const me = human("me", 2, 2, { alive: false });
     world.agents.push(me);
     expect(advancePlayerTurn(world, { kind: "wait" })).toBe(0);
+  });
+});
+
+describe("eat and drink (ROADMAP M3)", () => {
+  it("eating on a food tile restores hunger, depletes the patch, and logs a consumed event", () => {
+    const world = createWorld(8, 8, 1);
+    setTile(world, "surface", 3, 3, "food");
+    const tile = tileAt(world, "surface", 3, 3)!;
+    tile.stock = 1;
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(me);
+    const log = new EventLog();
+    const ticks = advancePlayerTurn(world, { kind: "eat" }, log);
+    expect(ticks).toBeGreaterThan(0);
+    expect(me.needs.hunger).toBeGreaterThan(0.2);
+    expect(tile.stock).toBeLessThan(1);
+    expect(me.lastActionOutcome).toMatchObject({ action: { kind: "eat" }, ok: true });
+    expect(log.events.some((e) => e.kind === "consumed" && e.agentId === "me" && e.need === "hunger")).toBe(true);
+  });
+
+  it("eating on bare floor does nothing, still costs the turn, and says so", () => {
+    const world = createWorld(8, 8, 1);
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(me);
+    const hungerBefore = me.needs.hunger;
+    const ticks = advancePlayerTurn(world, { kind: "eat" });
+    expect(ticks).toBeGreaterThan(0);
+    expect(me.needs.hunger).toBeLessThanOrEqual(hungerBefore);
+    expect(me.lastActionOutcome).toMatchObject({ action: { kind: "eat" }, ok: false });
+  });
+
+  it("an eaten-out patch (stock 0) is not food", () => {
+    const world = createWorld(8, 8, 1);
+    setTile(world, "surface", 3, 3, "food");
+    tileAt(world, "surface", 3, 3)!.stock = 0;
+    const me = human("me", 3, 3);
+    world.agents.push(me);
+    expect(foodUnderfoot(world, me)).toBe(false);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(false);
+  });
+
+  it("drinking works beside water, not only on it", () => {
+    const world = createWorld(8, 8, 1);
+    setTile(world, "surface", 4, 4, "water");
+    const me = human("me", 3, 3, { needs: createNeeds({ thirst: 0.2 }) });
+    world.agents.push(me);
+    expect(waterWithinReach(world, me)).toBe(true);
+    const log = new EventLog();
+    advancePlayerTurn(world, { kind: "drink" }, log);
+    expect(me.needs.thirst).toBeGreaterThan(0.2);
+    expect(me.lastActionOutcome).toMatchObject({ action: { kind: "drink" }, ok: true });
+    expect(log.events.some((e) => e.kind === "consumed" && e.agentId === "me" && e.need === "thirst")).toBe(true);
+  });
+
+  it("drinking with no water within reach fails and costs the turn", () => {
+    const world = createWorld(8, 8, 1);
+    setTile(world, "surface", 6, 6, "water"); // two tiles off — not adjacent
+    const me = human("me", 3, 3, { needs: createNeeds({ thirst: 0.2 }) });
+    world.agents.push(me);
+    expect(waterWithinReach(world, me)).toBe(false);
+    const ticks = advancePlayerTurn(world, { kind: "drink" });
+    expect(ticks).toBeGreaterThan(0);
+    expect(me.lastActionOutcome).toMatchObject({ action: { kind: "drink" }, ok: false });
+  });
+});
+
+describe("you can starve (ROADMAP M3)", () => {
+  it("a player who only waits dies of hunger, with a starved event naming them, and the gate stops", () => {
+    const world = createWorld(8, 8, 1);
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.05, thirst: 1 }) });
+    world.agents.push(me);
+    const log = new EventLog();
+    let turns = 0;
+    let ticksTotal = 0;
+    while (findPlayer(world) && turns < 5000) {
+      ticksTotal += advancePlayerTurn(world, { kind: "wait" }, log);
+      turns++;
+    }
+    expect(findPlayer(world)).toBeUndefined();
+    expect(me.alive).toBe(false);
+    const death = log.events.find((e) => e.kind === "starved" && e.agentId === "me");
+    expect(death).toBeDefined();
+    expect(death!.kind === "starved" && death!.cause).toBe("hunger");
+    // The gate is closed for good.
+    expect(advancePlayerTurn(world, { kind: "wait" }, log)).toBe(0);
+    // Measured, so the roadmap can say how long you have (see ROADMAP M3 STATUS).
+    console.log(`starved from hunger 0.05 after ${turns} turns / ${ticksTotal} ticks`);
+  });
+
+  it("from full, hunger and thirst each give roughly a couple of thousand ticks", () => {
+    const world = createWorld(8, 8, 1);
+    const me = human("me", 3, 3);
+    world.agents.push(me);
+    const log = new EventLog();
+    let ticksTotal = 0;
+    while (findPlayer(world) && ticksTotal < 20000) ticksTotal += advancePlayerTurn(world, { kind: "wait" }, log);
+    expect(findPlayer(world)).toBeUndefined();
+    const death = log.events.find((e) => e.kind === "starved" && e.agentId === "me")!;
+    expect(death).toBeDefined();
+    expect(ticksTotal).toBeGreaterThan(500);
+    expect(ticksTotal).toBeLessThan(5000);
+    console.log(`from full: died of ${death.kind === "starved" ? death.cause : "?"} at tick ${world.tick}`);
   });
 });
 

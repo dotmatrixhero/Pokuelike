@@ -206,6 +206,35 @@ Build:
 
 **Done when:** you can starve.
 
+**STATUS: DONE.** Two new actions, `eat` (e) and `drink` (q), in
+`player.ts`. They go through the same `consume` the behaviour tree's
+seekFood/seekWater arrive at, with the same stock depletion, grazing scar,
+exp and `consumed` event — the sim does not know a human ate rather than a
+Sandshrew. Eat needs a food tile underfoot with stock left; drink needs
+water on your tile or any of the eight around it (you kneel at the edge).
+A failed verb still costs the turn and the HUD says what was missing.
+`Agent.lastActionOutcome` carries the result out of `tickWorld` for the UI.
+Death was already real (`tickAgentNeeds` starves the player like anyone);
+what is new is the screen: a game-over overlay whose cause is the last
+logged event naming the player, in the log's own words, and R to restart
+the same seed. Needs HUD top-right, always on, red under 25%.
+Measured (`runner/validateCaveNeeds.ts`, 5 seeds): food 18–33 keys from
+spawn, eat succeeds on every seed; water 1–7 keys past it, drink succeeds;
+a player who only waits dies of thirst at tick 1670 on every seed (thirst
+decays faster than hunger: from full, ~1520 ticks to empty plus a 150-tick
+grace). One meal restores 0.4. Live (Playwright): see the commit for the
+HUD readings before/after e and q, the death screen's cause line, and the
+restart.
+Two things found on the way, neither fixed here: **energy is a meter with
+no teeth for the player** — the only consumer of low energy is the
+behaviour tree's sleep threshold, which the player skips, so it hit 25% by
+tick 150 and 0% at death with no effect. A rest/sleep verb is a time-spend
+with interrupt rules (PLAYER_ACTIONS.md) and belongs with M4's examine or
+later, not here. And **death lifts the fog**: the renderer asks
+`findPlayer`, which excludes the dead, so the death screen sits over the
+whole cave. An accident that matches the roguelike convention; kept, and
+named as an accident.
+
 ### M4 — Read
 
 The free examine action and the tells — reading what a creature is doing

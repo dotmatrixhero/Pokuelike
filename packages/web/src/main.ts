@@ -1,6 +1,7 @@
 import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, type PlayerAction, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { eventNamesAgent, formatEvent } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
@@ -126,6 +127,12 @@ const minimapOverworldCanvas = document.getElementById("minimap-overworld-canvas
 const minimapMarkerEl = document.getElementById("minimap-marker") as HTMLElement;
 const minimapCaption = document.getElementById("minimap-caption") as HTMLElement;
 const regionBannerEl = document.getElementById("region-banner") as HTMLElement;
+// ROADMAP.md M3 — the player's needs HUD and the death screen.
+const playerHudEl = document.getElementById("player-hud") as HTMLElement;
+const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
+const gameOverEl = document.getElementById("game-over") as HTMLElement;
+const gameOverCauseEl = document.getElementById("game-over-cause") as HTMLElement;
+const gameOverStatsEl = document.getElementById("game-over-stats") as HTMLElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -164,6 +171,10 @@ let selectedAgentId: string | undefined;
  * drives `advancePlayerTurn`. Entered via `?player=1`.
  */
 let playerMode = false;
+/** What `loadPlayerWorld` was last asked for, so "R to try again" reloads the same run. */
+let playerScene: "surface" | "cave" = "surface";
+let playerSeed = 0;
+let playerDead = false;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
@@ -357,6 +368,9 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
   world = scene === "cave" ? createCaveScenario(seed) : createPlayerDemoWorld(seed);
+  playerScene = scene;
+  playerSeed = seed;
+  playerDead = false;
   log = new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
@@ -367,6 +381,69 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
     selectAgent(player);
     focusCameraOn(player.pos);
   }
+  gameOverEl.hidden = true;
+  playerHudEl.hidden = false;
+  hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere." : "";
+  renderPlayerHud();
+}
+
+/**
+ * ROADMAP.md M3: needs on screen, always. The inspector renders the same
+ * bars for whichever agent is selected; this one is the player's and does
+ * not go away when you click a Sandshrew.
+ */
+function renderPlayerHud(): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  const bar = (id: string, value: number, text: string) => {
+    const fill = document.getElementById(`hud-${id}`) as HTMLElement;
+    const num = document.getElementById(`hud-${id}-text`) as HTMLElement;
+    fill.style.width = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+    fill.classList.toggle("low", value < 0.25);
+    num.textContent = text;
+  };
+  const maxHp = player.maxHp ?? 1;
+  const hp = player.hp ?? maxHp;
+  bar("hp", hp / maxHp, `${Math.round(hp)}/${maxHp}`);
+  bar("hunger", player.needs.hunger, `${Math.round(player.needs.hunger * 100)}%`);
+  bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
+  bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
+  const outcome = player.lastActionOutcome;
+  if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(outcome.action.kind, outcome.ok);
+}
+
+/** Plain sentences for what the last key did. If the verb failed, say what was missing. */
+function outcomeText(kind: PlayerAction["kind"], ok: boolean): string {
+  switch (kind) {
+    case "move":
+      return ok ? "" : "Something is in the way.";
+    case "wait":
+      return "You wait.";
+    case "eat":
+      return ok ? "You eat." : "Nothing to eat here. Stand on a berry patch.";
+    case "drink":
+      return ok ? "You drink." : "No water within reach.";
+  }
+}
+
+/**
+ * The death screen. The cause is the last logged event that names the
+ * player — `starved`, `killed`, whichever — in the log's own words, so the
+ * screen says why, not just that.
+ */
+function showGameOver(playerId: string): void {
+  playerDead = true;
+  let cause = "";
+  for (let i = log.events.length - 1; i >= 0; i--) {
+    const e = log.events[i]!;
+    if (eventNamesAgent(e, playerId)) {
+      cause = formatEvent(e, world);
+      break;
+    }
+  }
+  gameOverCauseEl.textContent = cause || "The log does not say how.";
+  gameOverStatsEl.textContent = `Tick ${world.tick} · seed ${playerSeed}`;
+  gameOverEl.hidden = false;
 }
 
 /**
@@ -386,6 +463,8 @@ function playerAct(action: PlayerAction): void {
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
   focusCameraOn(player.pos);
+  renderPlayerHud();
+  if (!findPlayer(world)) showGameOver(player.id);
 }
 
 const PLAYER_KEYS: Record<string, PlayerAction> = {
@@ -403,12 +482,21 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
   n: { kind: "move", dx: 1, dy: 1 },
   ".": { kind: "wait" },
   " ": { kind: "wait" },
+  e: { kind: "eat" },
+  q: { kind: "drink" },
 };
 
 window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+  if (playerDead) {
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      loadPlayerWorld(playerSeed, playerScene);
+    }
+    return;
+  }
   const action = PLAYER_KEYS[e.key];
   if (!action) return;
   e.preventDefault();

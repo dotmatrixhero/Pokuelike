@@ -396,7 +396,7 @@ export function tickWorld(
       // (accumulateActionEnergy caps it), so the world is effectively paused
       // for this agent until the UI queues something and ticks again.
       if (agent.queuedAction) {
-        applyPlayerAction(world, agent, agent.queuedAction);
+        applyPlayerAction(world, agent, agent.queuedAction, log, ctx, rng);
         agent.queuedAction = undefined;
       } else {
         agent.actionEnergy = ACTION_THRESHOLD;

@@ -903,7 +903,7 @@ export function findLayerWithTerrain(
  * higher quality berries." Only `seekFood` ever passes anything but the
  * default 1: water tiles have no `quality` concept of their own.
  */
-function consume(needs: Needs, behavior: "seekWater" | "seekFood", qualityMultiplier = 1): void {
+export function consume(needs: Needs, behavior: "seekWater" | "seekFood", qualityMultiplier = 1): void {
   const { need, amount } = CONSUME_RATE[behavior];
   needs[need] = Math.min(1, needs[need] + amount * qualityMultiplier);
 }

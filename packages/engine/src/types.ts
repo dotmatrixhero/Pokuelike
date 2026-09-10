@@ -532,7 +532,24 @@ export type BehaviorKind =
  * world that keeps moving. Everything in PLAYER_ACTIONS.md (examine, search,
  * craft, the time-spends) lands in later milestones as further variants.
  */
-export type PlayerAction = { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 } | { kind: "wait" };
+export type PlayerAction =
+  | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  | { kind: "wait" }
+  /** ROADMAP.md M3: eat from the food tile you stand on. Fails (and still costs the turn) on anything else. */
+  | { kind: "eat" }
+  /** ROADMAP.md M3: drink from the water tile you stand on or beside. Fails (and still costs the turn) otherwise. */
+  | { kind: "drink" };
+
+/**
+ * What happened when the player's last action was applied — for the UI to
+ * say "Nothing to eat here." without the engine composing prose. Set by
+ * player.ts's `applyPlayerAction` on every action, including moves.
+ */
+export interface PlayerActionOutcome {
+  action: PlayerAction;
+  ok: boolean;
+  tick: number;
+}
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
@@ -586,6 +603,8 @@ export interface Agent {
    * `computeVisible` inside the behaviour tree, not a remembered map.
    */
   vision?: Vision;
+  /** Player-controlled agents only: the result of the last applied action. See `PlayerActionOutcome`. */
+  lastActionOutcome?: PlayerActionOutcome;
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
   /**

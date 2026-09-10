@@ -7891,3 +7891,24 @@ way, not acted on:
 - **Dev hook:** `window.__pokuelike.world` on the vite dev server only
   (`import.meta.env.DEV`). Playwright checks should read state from it
   rather than scraping the inspector, which only shows the selected agent.
+
+## ROADMAP M3 Need — built; side notes
+
+- **Energy has no consequence for the player.** Decays like anyone's
+  (34% by tick 131 in the live run, 0% at death), but the only thing in the
+  engine that reads low energy is `chooseBehavior`'s sleep threshold, which
+  the player never runs. Needs a rest/sleep verb (a time-spend: "sleep
+  until rested or disturbed") and ideally a real cost for exhaustion
+  (speed? accuracy?) so the meter means something. Decision needed on the
+  cost; not tuned unilaterally.
+- **Death lifts the fog.** `renderer.ts`'s `playerVision` goes through
+  `findPlayer`, which returns undefined for a dead player, so the frame
+  under the death screen shows the whole cave. Reads as the usual
+  roguelike "here is what you missed" and is kept, but it was not designed.
+  If it should stay dark, look up the player with `controlledBy` directly.
+- **The player's `consumed` event reads "Human (player) ate on
+  underground"** in the event log — the sim's third-person line. When the
+  log gets a player voice (M4+), "You ate" belongs there, not in the HUD's
+  one-line message only.
+- **Eat is one key per bite** (0.4 hunger per press; a patch has ~3 bites).
+  Fine for now; a "eat until full" time-spend is the same shape as sleep.
