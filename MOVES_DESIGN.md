@@ -5966,6 +5966,204 @@ the thing it is fighting. That reads like a real gap rather than a decision,
 and it is the single highest-value follow-up for this move. Also untouched
 here: it would change what every `drainNeeds` node is worth.
 
+### Flamethrower converted to v4 (Shipped) — "one held breath"
+
+Fourteenth conversion, and the deliberate opposite pole to `ember`, which was
+converted one commit earlier. Going in: **39 nodes, 3 checker problems** (all
+three branches at 10 nodes against v4's 12). Out: **45 nodes, 0 problems.**
+
+**The fantasy, written before a node was touched**, and written against Ember
+rather than in isolation:
+
+> Flamethrower is ONE BREATH. The chest fills, and what comes out is not a
+> spark but a jet — held, aimed and steered for exactly as long as the lungs
+> last. Nothing inside the cone gets a moment to be somewhere else: you put it
+> on one thing and you keep it there until that thing is finished, or until
+> the air is. What is dangerous about it is that it does not let up. What is
+> dangerous to the creature holding it is the same fact — while the breath is
+> out it is rooted, pointed one way, and everything else on the field knows
+> exactly where it is and that it is busy.
+
+| | |
+|---|---|
+| **ember** | spark, then consequence — spread, aftermath, terrain |
+| **flamethrower** | control, then duration — aim, hold, commitment |
+
+Two of Ember's signature levers were therefore **removed** from this tree
+rather than kept: `statusSpreads` (a burn that jumps to the next body is
+*Spreading Blaze*'s whole payoff) and `terrainBurn` (this move's fire is over
+when the breath is). What went in instead is `lockTicks`, three times, as the
+recurring price of holding a breath — every big node here costs the caster its
+own next action tick. `lockTicks` locks the **user**, not the defender
+(combat.ts's `useMove`), which is why it is the right lever for this move and
+the wrong one for almost every other.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **One Breath, One Thing** (agg) | **reach** — what the jet gets through (*Nothing Melts Quickly*, then *Melting Blast*) | **severity** — what being held in it does, paid in the caster's own actions (*Held Breath*, then *Held to the Bone*, then the preserved beam-vs-cone fork) | *Combustion* | ***Until It's Finished*** |
+| **The Line It Holds** (bold) | **the footprint** — ***Open the Throat***, then *Nowhere to Step* | **the stance** — *Banked Coals*, then the preserved plant-vs-thorns fork | *Unburnt* | *Nothing Gets Past* |
+| **What It Holds, We Finish** (soc) | **the mark** — *Held in Plain Sight*'s `rallyCall`, then *United Blaze* | **the cover** — *Warm at Your Back*, then the preserved rouse-vs-calm fork | *Communal Blaze* | *Hold the Target* |
+
+Boldness was a generic armor ladder that vine_whip and rock_slide were running
+node-for-node; it is now geometry plus refusal. Sociability was Ember's hearth
+wearing a different name; it is now the inverse reading of the same flame — a
+creature that is rooted, blind and pointed one way is, to a herd, a pointing
+finger.
+
+#### Three shipped bugs, all found by running the engine rather than reading it
+
+**1. The cone had never covered a tile.** Flamethrower is the roster's cone
+move — `shape: { kind: "cone", length: 4, width: 2 }`, which `resolveShape`
+resolves to **12 real tiles** — and it set `hitsArea` nowhere. `shape` is read
+only by `resolveShape` inside `resolveAreaHit`, which only runs for a
+`hitsArea` move. Measured on a real `tickWorld`, three bodies laid inside that
+footprint, 8 ticks, same seed:
+
+| build | bodies in a `fought` event |
+|---|---|
+| shipped (control) | `prim` |
+| + *Open the Throat* (`hitsArea`, no shape change) | `prim`, `cone_side`, `cone_far` |
+
+Same class of bug as Ember's three dead `shape` nodes, on the one move in the
+roster whose entire silhouette is its cone. The fix is Boldness's lane
+notable, because turning a needle into a 12-tile cone is notable-tier currency
+(principle 14).
+
+**And it was worse than one dead node** — *Focused Beam*, one half of the
+tree's oldest fork, sets `shape: { kind: "line", length: 6 }` and was equally
+dead:
+
+| build | bodies hit |
+|---|---|
+| *Focused Beam* alone (control) | `prim` |
+| *Focused Beam* + *Open the Throat* | `prim`, `cone_far` |
+
+(`cone_side` sits off the line, which is the line behaving correctly.)
+
+**2. Four `fireproof` nodes summing to 2.5 against a clamp of 1.**
+`applyFireDamage` (fire.ts) does `Math.min(1, agent.passives.fireproof ?? 0)`,
+so **1.5 of that was provably dead** — the same clamp finding as Ember's crit
+stage 3. It is now exactly two nodes, *Scorchproof Hide* (0.5) and *Unburnt*
+(0.5), landing on 1.0 on the nose. *Set Your Feet* and *Living Furnace* spent
+their fireproof on real levers instead.
+
+**3. Three `+10 Accuracy` fillers on a 100-accuracy move.** `rollAccuracy`
+only ever spends surplus through `stormAccuracyMultiplier` and the elevation
+multiplier — and a **storm is the weather that puts fires out**. Ember made
+the same call for the same reason; all three are real levers now
+(`bonusVsType`, `power`+`statusChance`, `rallyCall`).
+
+#### The best node in the tree
+
+***Nothing Melts Quickly*** — `bonusVsType: { type: "rock", multiplier: 2 }`.
+Fire is **0.5x into Rock** on this engine's own chart (typing.ts), and a
+doubling puts it back at neutral. That is the whole duration fantasy said as a
+type matchup: a spat coal bounces off stone, a flame *held* on it does not.
+And the condition is one the map actually supplies — Charizard lives in
+badlands/highland, which is exactly where Geodude and Onix live.
+
+#### Levers checked at the call site and rejected
+
+- **`chargeAttack`** — the obvious "one held breath" primitive, and **Slash
+  already is it** ("the stillness before the swing", `ticks: 2, leapTiles: 0`).
+  Charizard is the only Flamethrower learner and it knows Slash. Same species,
+  same lever, twice.
+- **`situationalBonus: { condition: "drought" }`** — would have been the
+  roster's first `drought` user and reads perfect on a fire move. Measured over
+  **3 seeds x 4,000 ticks**, 40 sampled tiles per biome, sampling every 10th
+  tick:
+
+  | biome | drought share of sampled ticks | any weather |
+  |---|---|---|
+  | badlands | 0.0% / 4.9% / 0.6% | 10.6% / 13.5% / 19.0% |
+  | highland | 7.6% / 0.0% / 0.0% | 10.5% / 2.0% / 14.1% |
+  | grassland (control) | 0.2% / 0.0% / 0.1% | 12.0% / 4.2% / 15.5% |
+
+  Badlands has the roster's highest drought affinity (weight 3 in
+  `BIOME_WEATHER_AFFINITY`) and still spends an entire 4,000-tick run at 0.0%
+  on one seed in three. A capstone that is simply absent for a whole run is
+  unreachable content, not a spike. Rejected; the capstone went to
+  `targetLowHp` instead, which is the finisher reading and is common.
+- **`excludesAllies`** — read only inside `resolveAreaHit`'s target filter, so
+  it is dead unless the same build also bought `hitsArea`, which lives in a
+  different branch here. A node that only works if you invested elsewhere is
+  not a node.
+- **A second `unshaken`.** `resolveHitAgainstTarget` tests
+  `(defender.passives?.unshaken ?? 0) > 0` — **the value is never read**, only
+  its sign. Slash already grants Charizard `unshaken: 1`, so a second grant is
+  dead on the only species that can hold both. This is a cross-tree finding,
+  not a Flamethrower one: five trees grant `unshaken` and any species learning
+  two of them is wasting one.
+- **`terrainFill: { terrain: "fire" }`** — `resolveHitAgainstTarget` calls
+  `waterSoil(tile)` unconditionally after any `terrainFill`, so it would
+  fertilise the ground it lit. Same rejection Ember made.
+- **`drainNeeds`, `selfHeal`, `spawnsRain`, `fertilityBoost`,
+  `statusImmunityAura`** — all read only inside `maybeUseUtilityMove`, whose
+  candidate list is `agent.moves.filter(m => m.utilityMove)`. Dead on an
+  attack move.
+- **`gatherBurst`** — the only canopy crop is Apple (forest-only) and no
+  Flamethrower learner lives in forest. Same rejection as Ember, Rock Slide
+  and Water Gun.
+- **A fourth `critRateStage` node.** `rollCritical` clamps the stage at 3
+  (`Math.min(3, ...)`), and the Flashpoint bridge reaches exactly 3. Its own
+  notable therefore stops at the clamp instead of buying a stage the engine
+  throws away.
+
+#### One thing measured that the tree does NOT claim
+
+On an area hit, `isPrimaryTarget` gates status infliction, the defender-side
+stat change, on-hit forced movement, position swap, `jamCooldownTicks` **and**
+`terrainBurn` (predation.ts). So *Open the Throat* spreads **damage** across
+the cone and nothing else. *Nowhere to Step* and *Nothing Gets Past* land on
+the primary target only, and the node comments say so rather than implying a
+cone-wide slow or a cone-wide jam.
+
+#### Numbers, before and after
+
+`tree-balance.ts`, roster median as the control:
+
+| metric | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| checker problems | **3** | **0** | — |
+| distinct levers | 24 | **29** | 28 |
+| colour-pie flavours | 9 | **12** | 12 |
+| tempo multiplier | 1.75x | **1.75x** | 2.00x |
+| power multiplier | 1.61x | **2.20x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+
+**Cooldown deliberately untouched.** -3 against a base of 6 is 1.75x where the
+cap allows 2.33x. That is 12% under the median, not an outlier, and spending
+the last -1 of headroom would be a balance decision rather than a conversion.
+Flagged, not taken.
+
+#### Passives went DOWN, and nothing else moved
+
+`passive-exposure.ts` before and after is **byte-identical** — no species in
+the worst-case table moved, and the roster worst cases (33% damageReduction,
+65% thorns, 13.6%/tick healing) are unchanged. Charizard is the only learner,
+and the one thing that changed for it is the dead fireproof:
+
+| charizard passive | before | after |
+|---|---|---|
+| fireproof | 2.5 (clamp is 1) | **1.0** |
+| thorns | 0.32 | 0.32 |
+| damageReduction | 0.06 | 0.06 |
+| regen | 0.04 | 0.04 |
+
+No new passive kind was added anywhere in the tree. Every new node is a
+`delta`.
+
+#### Tests
+
+`pnpm -r test` is green at **1,587 tests, 0 changed**. No shipped test
+encoded this tree's node ids or paths, so no assertion's meaning changed. The
+two pre-existing `tsc --noEmit` errors in `engine/src/rapportProse.ts` and
+`engine/src/predation.ts` (a `RapportSubject.standing` field) are untouched by
+this work and were already failing on the branch.
+
 ### Ember's Ring of Fire: how big the circle is
 
 The footprint and the fire count are two different numbers, and the first

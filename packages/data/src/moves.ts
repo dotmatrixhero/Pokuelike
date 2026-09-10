@@ -2677,17 +2677,117 @@ export const MOVES: Record<string, MoveSpec> = {
     statusChance: 0.1,
     statusKind: "burn",
     range: { min: 0, max: 4 },
-    // v2 (MOVES_DESIGN.md's own template) — Charmeleon/Charizard's real
-    // upgrade from Ember, reached purely through in-sim leveling from
-    // Charmander (spawned every run). This is the template's own reference
-    // example for the "Power move" archetype: a real mutually-exclusive
-    // final fork between two distinct "sick" end-states (Focused Beam's
-    // single-target nuke vs. Wildfire Cone's wide AoE), not just a longer
-    // grind to one ending. Every lever here is standard, already-shipped
-    // damage-move plumbing — no new engine work needed for this one.
+    // --- Template v4 (45 nodes). THE FANTASY, written before any node:
+    //
+    // Flamethrower is ONE BREATH. The chest fills, and what comes out is not
+    // a spark but a jet — held, aimed and steered for exactly as long as the
+    // lungs last. Nothing inside the cone gets a moment to be somewhere
+    // else: you put it on one thing and you keep it there until that thing
+    // is finished, or until the air is. What is dangerous about it is that
+    // it does not let up. What is dangerous to the creature holding it is
+    // the same fact — while the breath is out it is rooted, pointed one way,
+    // and everything else on the field knows exactly where it is and that it
+    // is busy.
+    //
+    // Written AGAINST `ember`, which was converted one commit earlier as
+    // "the first fire a creature makes — a mouthful of coals that CATCHES,
+    // and a dozen ticks later what is hurting you is the ground." These are
+    // the two poles of Fire in this roster and they must not blur:
+    //
+    //   ember          spark, then consequence — spread, aftermath, terrain
+    //   flamethrower   control, then duration — aim, hold, commitment
+    //
+    // So Ember's signature levers are deliberately NOT reused here.
+    // `statusSpreads` (Spreading Blaze) is gone from this tree: a burn that
+    // jumps to the next body is Ember's whole payoff. `terrainBurn` is gone
+    // too — Flamethrower's fire is over when the breath is. What this tree
+    // spends instead is `lockTicks`, three times, as the recurring price of
+    // holding a breath: every big thing here costs the caster its own next
+    // action.
+    //
+    // Aggression answers "where is it pointed and what does being held in it
+    // do"; Boldness answers "it is a LINE, not a needle — open the throat and
+    // then refuse to be moved off it"; Sociability answers "it is rooted and
+    // blind and pointed one way, which for a herd is a pointing finger."
+    // Every existing `excludes` fork is preserved, relocated into a lane tail.
+    //
+    // THREE SHIPPED BUGS FIXED HERE, all found by running the engine:
+    //
+    // 1. THE CONE HAD NEVER COVERED A TILE. `shape` is read only by
+    //    `resolveShape` inside `resolveAreaHit`, which only runs for a
+    //    `hitsArea` move — and Flamethrower, the roster's cone move, set
+    //    `shape: { kind: "cone", length: 4, width: 2 }` (12 real tiles) and
+    //    `hitsArea` nowhere. Measured on a real `tickWorld` with three bodies
+    //    laid inside that footprint: without `hitsArea` only the picked
+    //    target was ever in a `fought` event; with it, all three were. Same
+    //    class of bug as Ember's three dead `shape` nodes. Boldness's
+    //    *Open the Throat* is the fix, and it is the branch's lane notable
+    //    because turning a needle into a 12-tile cone is notable-tier
+    //    currency (principle 14). It also makes *Focused Beam*'s line real
+    //    for the first time.
+    // 2. FOUR `fireproof` NODES SUMMING TO 2.5 AGAINST A CLAMP OF 1.
+    //    `applyFireDamage` (fire.ts) does `Math.min(1, passives.fireproof)`,
+    //    so 1.5 of that was provably dead — the same clamp finding as Ember's
+    //    crit stage 3. Now exactly two nodes, *Scorchproof Hide* (0.5) and
+    //    *Unburnt* (0.5), reaching 1.0 on the nose.
+    // 3. THREE `+10 Accuracy` FILLERS ON A 100-ACCURACY MOVE. `rollAccuracy`
+    //    only ever spends surplus through `stormAccuracyMultiplier` and the
+    //    elevation multiplier — and a storm is the weather that puts fires
+    //    OUT. Ember made the same call; all three are real levers now.
+    //
+    // Levers checked at the call site and REJECTED:
+    //   - `chargeAttack`. The obvious "one held breath" primitive, and
+    //     Slash already is it ("the stillness before the swing", ticks 2 /
+    //     leapTiles 0). Charizard is the only Flamethrower learner and it
+    //     knows Slash. Same species, same lever, twice.
+    //   - `situationalBonus: { condition: "drought" }`. Would have been the
+    //     roster's first `drought` user and reads perfect on a fire move.
+    //     Measured over 3 seeds x 4,000 ticks, 40 sampled tiles per biome:
+    //     drought covers a badlands tile 0.0% / 4.9% / 0.6% of sampled ticks
+    //     and a highland tile 7.6% / 0.0% / 0.0% (grassland control 0.1%).
+    //     A capstone that is absent for a whole run on one seed in three is
+    //     unreachable content, not a spike.
+    //   - `excludesAllies`. Read only inside `resolveAreaHit`'s target
+    //     filter, so it is dead unless the same build also bought
+    //     `hitsArea` — which lives in a different branch here. A node that
+    //     only works if you invested elsewhere is not a node.
+    //   - A second `unshaken`. `resolveHitAgainstTarget` tests
+    //     `(passives.unshaken ?? 0) > 0` — the VALUE is never read. Slash
+    //     already grants Charizard `unshaken`, so a second grant is dead on
+    //     the only species that can take both.
+    //   - `terrainFill: { terrain: "fire" }`. `resolveHitAgainstTarget`
+    //     calls `waterSoil(tile)` unconditionally after any `terrainFill`,
+    //     so it would fertilise the ground it lit. Same rejection Ember made.
+    //   - `drainNeeds`, `selfHeal`, `spawnsRain`, `fertilityBoost`,
+    //     `statusImmunityAura`. All read only inside `maybeUseUtilityMove`,
+    //     whose candidate list is `agent.moves.filter(m => m.utilityMove)`.
+    //     Dead on an attack move.
+    //   - `gatherBurst`. The only canopy crop is Apple (forest-only) and no
+    //     Flamethrower learner lives in forest. Same rejection as Ember.
+    //
+    // ONE THING MEASURED AND WORTH KNOWING: on an area hit, `isPrimaryTarget`
+    // gates status infliction, the defender-side stat change, on-hit forced
+    // movement, position swap, `jamCooldownTicks` AND `terrainBurn`
+    // (predation.ts). So *Open the Throat* spreads DAMAGE across the cone and
+    // nothing else. *Nowhere to Step* and *Nothing Gets Past* land on the
+    // primary only, and this tree does not claim otherwise.
+    //
+    // Cooldown deliberately untouched: -3 against a base of 6 is a 1.75x
+    // tempo gain where the roster median is 2.00x — close enough that
+    // spending the remaining -1 of headroom would be a balance decision, not
+    // a conversion. Flagged, not taken.
     tree: {
-      // --- Aggression: "Inferno Focus" — hotter, harder, ending in the
-      // archetype's own real fork.
+      // ============================================================
+      // AGGRESSION — "One Breath, One Thing"
+      // Flavours: piercing (bonusVsType/defensePenetration), raw damage
+      // (power/statusSeverity/lifestealFraction/recoil), aggressive movement
+      // (lockTicks as commitment, forcedMovement as walking the jet on),
+      // wider aoe (the preserved fork), stealth/ambush (the finisher).
+      //
+      // Lane A is REACH — what the jet gets through and how fast it comes
+      // back. Lane B is SEVERITY — what being held in it does to a body,
+      // paid for in the caster's own actions. Different in kind, not degree.
+      // ============================================================
       searing_heat: {
         id: "searing_heat",
         name: "Searing Heat",
@@ -2695,6 +2795,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         delta: { statusChance: 0.1 },
       },
+      // --- Lane A: the aim ---
       hotter_flame: {
         id: "hotter_flame",
         name: "+5 Power",
@@ -2705,17 +2806,23 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       steadier_aim: {
         id: "steadier_aim",
-        name: "+10 Accuracy",
+        name: "Nothing Melts Quickly",
         cost: 1,
-        prerequisitesAnyOf: [["hotter_flame"], ["molten_edge"], ["flashpoint"]],
+        prerequisites: ["hotter_flame"],
         leaning: "aggression",
-        delta: { accuracy: 10 },
+        // Was "+10 Accuracy" on a 100-accuracy move (see the header note).
+        // Fire is 0.5x into Rock on this engine's own chart (typing.ts), and
+        // a doubling puts it back at neutral. That is the duration fantasy
+        // said as a type matchup: a spat coal bounces off stone, a flame
+        // HELD on it does not. Charizard's badlands/highland neighbours are
+        // Geodude and Onix, so this is a matchup it actually meets.
+        delta: { bonusVsType: { type: "rock", multiplier: 2 } },
       },
       melting_blast: {
         id: "melting_blast",
         name: "Melting Blast",
-        cost: 1,
-        prerequisites: ["steadier_aim"],
+        cost: 2,
+        prerequisitesAnyOf: [["steadier_aim"], ["chain_ignition"]],
         leaning: "aggression",
         delta: { defensePenetration: 0.15 },
       },
@@ -2723,60 +2830,393 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "faster_ignition",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["melting_blast"], ["slagged_guard"], ["chain_ignition"]],
+        prerequisites: ["melting_blast"],
         leaning: "aggression",
         delta: { cooldownTicks: -1 },
+      },
+      // --- Lane B: the hold ---
+      held_breath: {
+        id: "held_breath",
+        name: "Held Breath",
+        cost: 1,
+        prerequisites: ["searing_heat"],
+        leaning: "aggression",
+        // The tree's signature trade, stated once at the shallow end: it
+        // costs the caster its own next action tick (`lockTicks` locks the
+        // USER — combat.ts's `useMove`, not the defender) and the breath
+        // that comes out is worth it. Benefit and cost in the same node.
+        delta: { power: 10, lockTicks: 1 },
+      },
+      wildfires_reach: {
+        id: "wildfires_reach",
+        name: "Held to the Bone",
+        cost: 2,
+        prerequisitesAnyOf: [["held_breath"], ["slagged_guard"]],
+        leaning: "aggression",
+        // Was `statusSeverity: 2, terrainBurn: true`. The terrain half moved
+        // out: setting the ground alight is Ember's payoff, not this move's.
+        // What is left is the half only a SUSTAINED flame can claim — a burn
+        // that keeps taking a fixed multiple of max HP every tick
+        // (`severityMultiplier`, status.ts) long after the breath ran out.
+        delta: { statusSeverity: 2 },
       },
       focused_beam: {
         id: "focused_beam",
         name: "Focused Beam",
         cost: 2,
-        prerequisites: ["faster_ignition"],
+        prerequisites: ["wildfires_reach"],
         excludes: ["wildfire_cone"],
         leaning: "aggression",
-        // A single-target nuke — narrows to a long, precise line.
+        // Preserved fork, relocated to this lane's tail. Its `shape` was
+        // dead content until Boldness's *Open the Throat* existed — a build
+        // with both now gets a real six-tile line.
         delta: { shape: { kind: "line", length: 6 }, range: { max: 6 }, power: 15 },
       },
       wildfire_cone: {
         id: "wildfire_cone",
         name: "Wildfire Cone",
         cost: 2,
-        prerequisites: ["faster_ignition"],
+        prerequisites: ["wildfires_reach"],
         excludes: ["focused_beam"],
         leaning: "aggression",
-        // A wide AoE instead — spread thinner, but everyone caught in the
-        // cone burns.
+        // The other half of the preserved fork: 15 tiles (cone 3/3,
+        // `resolveShape`), spread thinner, and it carries its own `hitsArea`
+        // so this side works without Boldness.
         delta: { shape: { kind: "cone", length: 3, width: 3 }, hitsArea: true, power: -10 },
       },
       combustion: {
         id: "combustion",
         name: "Combustion",
         cost: 2,
-        prerequisitesAnyOf: [["focused_beam"], ["wildfire_cone"]],
+        prerequisitesAnyOf: [["faster_ignition"], ["focused_beam"], ["wildfire_cone"]],
         leaning: "aggression",
-        // An overwhelming blast that costs the user something too.
         delta: { power: 10, recoilFraction: 0.05 },
       },
-      lingering_heat: {
-        id: "lingering_heat",
-        name: "+5 Power",
+      walk_the_flame: {
+        id: "walk_the_flame",
+        name: "Walk the Flame",
         cost: 1,
         prerequisites: ["combustion"],
         leaning: "aggression",
+        // Replaces a third "+5 Power" filler. The only way to keep a jet on
+        // something that is backing away is to walk after it, so the caster
+        // steps in one tile before the hit resolves — the tree's one
+        // positional lever, and an observer can see it happen.
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
+      },
+      last_of_the_air: {
+        id: "last_of_the_air",
+        name: "Until It's Finished",
+        cost: 2,
+        prerequisites: ["walk_the_flame"],
+        leaning: "aggression",
+        // The capstone is the branch's own sentence finished: you hold it on
+        // one thing until that thing is done. `targetLowHp` is the condition
+        // the fantasy obviously cares about rather than the cheapest one to
+        // check, and the lifesteal is why an apex predator holds the breath
+        // at all — Charizard is `isPredator` (species.ts) and this is it
+        // eating. Honest limit: neither primitive is new to the roster; the
+        // pairing is. `drought` would have been new and was measured out
+        // (header note).
+        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.8 }, lifestealFraction: 0.15 },
+      },
+      // ============================================================
+      // BOLDNESS — "The Line It Holds"
+      // Flavours: wider aoe (hitsArea), defence (fireproof/thorns),
+      // planted/duration (statChangeOnHit), aggressive movement (lockTicks).
+      //
+      // Not "the tanky one" — three moves cannot all be that, and this one
+      // was running a generic armor ladder. Its boldness is GEOMETRY plus
+      // REFUSAL: open the throat until the jet is a line instead of a
+      // needle, then plant and hold that line. Lane A is the footprint,
+      // Lane B is the stance. Ember's Boldness stands in the middle of a
+      // ring it lit; this one holds a line in front of it and does not
+      // move. Different in kind.
+      // ============================================================
+      thick_scales: {
+        id: "thick_scales",
+        name: "Scorchproof Hide",
+        cost: 1,
+        leaning: "boldness",
+        // Half damage from standing in fire. Half of the tree's whole
+        // `fireproof` budget — `applyFireDamage` clamps the passive at 1 and
+        // *Unburnt* is the other half. Nothing else in this tree grants it.
+        grantsPassive: { kind: "fireproof", value: 0.5 },
+        delta: {},
+      },
+      // --- Lane A: the sweep ---
+      hardened_plates: {
+        id: "hardened_plates",
+        name: "Both Lungs",
+        cost: 1,
+        prerequisites: ["thick_scales"],
+        leaning: "boldness",
+        // Was "+10 Accuracy" (see the header note).
+        delta: { power: 8, statusChance: 0.05 },
+      },
+      steady_burn: {
+        id: "steady_burn",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["hardened_plates"],
+        leaning: "boldness",
         delta: { power: 5 },
       },
-      wildfires_reach: {
-        id: "wildfires_reach",
-        name: "Wildfire's Reach",
+      open_the_throat: {
+        id: "open_the_throat",
+        name: "Open the Throat",
         cost: 2,
-        prerequisites: ["lingering_heat"],
-        leaning: "aggression",
-        // Badly burns whatever it catches, and burns down any bush it was
-        // hiding in — the fire doesn't leave anything the way it found it.
-        delta: { statusSeverity: 2, terrainBurn: true },
+        prerequisitesAnyOf: [["steady_burn"], ["warding_pyre"]],
+        leaning: "boldness",
+        // THE FIX FOR BUG 1. The move already declared a 12-tile cone and
+        // had never covered a single one of those tiles, because `shape` is
+        // only read inside `resolveAreaHit` and nothing set `hitsArea`. This
+        // node sets it — no new shape, the one the move has always drawn —
+        // and pays for it in power, the same trade Ember's ring makes.
+        delta: { hitsArea: true, power: -8 },
       },
-      // Crosslink: Aggression <-> Boldness — the banked heat sharpens the
+      nowhere_to_step: {
+        id: "nowhere_to_step",
+        name: "Nowhere to Step",
+        cost: 1,
+        prerequisites: ["open_the_throat"],
+        leaning: "boldness",
+        // You do not walk out of a jet quickly. Primary target only —
+        // `isPrimaryTarget` gates the defender-side stat change even on an
+        // area hit (predation.ts), and this tree does not pretend otherwise.
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 20 } },
+      },
+      // --- Lane B: the stance ---
+      slower_burn: {
+        id: "slower_burn",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["thick_scales"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      banked_coals: {
+        id: "banked_coals",
+        name: "Banked Coals",
+        cost: 2,
+        prerequisitesAnyOf: [["slower_burn"], ["slagged_guard"]],
+        leaning: "boldness",
+        // Cornered and burning hotter for it.
+        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.35 } },
+      },
+      // The preserved fork, relocated to this lane's tail. Both answers are
+      // "do not move me," and they pull apart: commit HARDER, or make
+      // standing next to it the problem.
+      smoldering_core: {
+        id: "smoldering_core",
+        name: "Set Your Feet",
+        cost: 1,
+        prerequisites: ["banked_coals"],
+        excludes: ["flame_wreath"],
+        leaning: "boldness",
+        // Was `fireproof: 0.5` (dead against the clamp — see bug 2) plus a
+        // second `situationalBonus` the engine could only have applied one
+        // of, on Ember's own `targetBurning` condition. Now it is the deep
+        // end of this tree's own trade: plant, spend the action, and the
+        // breath that comes out is the biggest single number in the tree.
+        delta: { lockTicks: 1, power: 15 },
+      },
+      flame_wreath: {
+        id: "flame_wreath",
+        name: "Flame Wreath",
+        cost: 1,
+        prerequisites: ["banked_coals"],
+        excludes: ["smoldering_core"],
+        leaning: "boldness",
+        // The other answer: never mind the ground, be the hazard yourself.
+        grantsPassive: { kind: "thorns", value: 0.14 },
+        delta: { statusChance: 0.1 },
+      },
+      unburnt: {
+        id: "unburnt",
+        name: "Unburnt",
+        cost: 2,
+        prerequisitesAnyOf: [["nowhere_to_step"], ["smoldering_core"], ["flame_wreath"]],
+        leaning: "boldness",
+        // Tops the branch up to full fire immunity from EITHER fork, which
+        // is what the name has always said. With *Scorchproof Hide* that is
+        // exactly 1.0 — the clamp in `applyFireDamage`, on the nose, and the
+        // point past which the old tree was buying nothing.
+        grantsPassive: { kind: "fireproof", value: 0.5 },
+        delta: { power: 5 },
+      },
+      hotter_scales: {
+        id: "hotter_scales",
+        name: "+10% Burn Chance",
+        cost: 1,
+        prerequisites: ["unburnt"],
+        leaning: "boldness",
+        // Was "+10 Accuracy" (see the header note).
+        delta: { statusChance: 0.1 },
+      },
+      living_furnace: {
+        id: "living_furnace",
+        name: "Nothing Gets Past",
+        cost: 2,
+        prerequisites: ["hotter_scales"],
+        leaning: "boldness",
+        // Was `fireproof: 1` (entirely dead behind the clamp) plus
+        // `terrainBurn` (Ember's payoff). What the branch actually earned is
+        // this: it plants, holds one beat longer than it can afford, and for
+        // those ticks the thing in front of it cannot bring anything of its
+        // own to bear — `jamCooldownTicks` pushes every one of the
+        // defender's cooldowns back (predation.ts). Primary target only,
+        // like every other on-hit effect on an area move.
+        delta: { jamCooldownTicks: 3, lockTicks: 1 },
+      },
+      // ============================================================
+      // SOCIABILITY — "What It Holds, We Finish"
+      // Flavours: rallying (rallyCall), ally buffing (targetsAlly/
+      // allyEffect/allyEffectOnAttack), calming (calmingPresence), healing
+      // (regen), resource economy (selfCostPerUse).
+      //
+      // Ember's Sociability is a HEARTH: warmth given away at rest, a beacon
+      // to gather around. This one is the opposite reading of the same
+      // flame. While the breath is out this creature is rooted, blind and
+      // pointed exactly one way — and for a herd that is not a liability,
+      // it is a POINTING FINGER. Lane A is the mark: it says which one dies
+      // next and every herd-mate's own targeting agrees (`preferMarked`).
+      // Lane B is the cover it gives while it works. Different in kind.
+      // ============================================================
+      kindling_call: {
+        id: "kindling_call",
+        name: "Kindling Call",
+        cost: 1,
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
+      },
+      // --- Lane A: the mark ---
+      warmth_shared: {
+        id: "warmth_shared",
+        name: "Held in Plain Sight",
+        cost: 1,
+        prerequisites: ["kindling_call"],
+        leaning: "sociability",
+        // Was "+10 Accuracy" (see the header note). A thing being held in a
+        // jet is the most visible thing on the field: `rallyCall` marks the
+        // DEFENDER (predation.ts), and every herd-mate's independently-run
+        // target pick prefers a marked one.
+        delta: { rallyCall: { ticks: 20 } },
+      },
+      steadfast_blaze: {
+        id: "steadfast_blaze",
+        name: "+5 Power",
+        cost: 1,
+        prerequisites: ["warmth_shared"],
+        leaning: "sociability",
+        delta: { power: 5 },
+      },
+      united_blaze: {
+        id: "united_blaze",
+        name: "United Blaze",
+        cost: 2,
+        prerequisitesAnyOf: [["steadfast_blaze"], ["chain_ignition"]],
+        leaning: "sociability",
+        // The ally effect now also fires the instant this hits an enemy —
+        // so marking a target and helping a herd-mate stop being two turns.
+        delta: { allyEffectOnAttack: true },
+      },
+      quicker_call: {
+        id: "quicker_call",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["united_blaze"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      // --- Lane B: the cover ---
+      deepening_warmth: {
+        id: "deepening_warmth",
+        name: "Deepening Warmth",
+        cost: 1,
+        prerequisites: ["kindling_call"],
+        leaning: "sociability",
+        delta: { allyEffect: { healFraction: 0.15, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
+      },
+      brighter_blaze: {
+        id: "brighter_blaze",
+        name: "Warm at Your Back",
+        cost: 2,
+        prerequisitesAnyOf: [["deepening_warmth"], ["warding_pyre"]],
+        leaning: "sociability",
+        // Was "+5 Power". `allyEffect` is an OVERWRITE field, so every
+        // setter in this branch sits on one ancestry chain and each one
+        // strictly escalates the last — no build can end up holding the
+        // shallow version by accident.
+        delta: { allyEffect: { healFraction: 0.2, buff: { stat: "attack", stage: 1, ticks: 25 } } },
+      },
+      rousing_flame: {
+        id: "rousing_flame",
+        name: "Rousing Flame",
+        cost: 1,
+        prerequisites: ["brighter_blaze"],
+        excludes: ["calming_ash"],
+        leaning: "sociability",
+        // Preserved fork, relocated to this lane's tail. Trades the healing
+        // lean down for a real second stage of Attack.
+        delta: { allyEffect: { healFraction: 0.1, buff: { stat: "attack", stage: 2, ticks: 30 } } },
+      },
+      calming_ash: {
+        id: "calming_ash",
+        name: "Calming Ash",
+        cost: 1,
+        prerequisites: ["brighter_blaze"],
+        excludes: ["rousing_flame"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: { power: 5 },
+      },
+      communal_blaze: {
+        id: "communal_blaze",
+        name: "Communal Blaze",
+        cost: 2,
+        prerequisitesAnyOf: [["quicker_call"], ["rousing_flame"], ["calming_ash"]],
+        leaning: "sociability",
+        // Everyone gathered around it recovers faster AND settles down.
+        grantsPassives: [
+          { kind: "regen", value: 0.04 },
+          { kind: "calmingPresence", value: 0.1 },
+        ],
+        delta: { power: 5 },
+      },
+      spend_yourself: {
+        id: "spend_yourself",
+        name: "Spend Yourself",
+        cost: 1,
+        prerequisites: ["communal_blaze"],
+        leaning: "sociability",
+        // It burns its own energy so the herd does not have to close.
+        // `selfCostPerUse` comes off `needs.energy` on every use
+        // (predation.ts) — a real running cost, in the same node as the
+        // reason to pay it.
+        delta: { power: 12, selfCostPerUse: { need: "energy", amount: 0.05 } },
+      },
+      hold_the_target: {
+        id: "hold_the_target",
+        name: "Hold the Target",
+        cost: 2,
+        prerequisites: ["spend_yourself"],
+        leaning: "sociability",
+        // The capstone is the branch's sentence finished: it cannot look
+        // anywhere else, and now neither can the herd. The longest mark in
+        // the roster (45 ticks against Ember's beacon at 20), paid for with
+        // the tree's own currency — the caster's next action. Honest limit:
+        // this is a magnitude plus a cost, not a new primitive. Every
+        // Sociability primitive that IS new to the roster is `utilityMove`-
+        // gated and therefore dead on an attack move (header note).
+        delta: { rallyCall: { ticks: 45 }, lockTicks: 1 },
+      },
+      // ============================================================
+      // BRIDGE 1 — Aggression <-> Boldness: the banked heat sharpens the
       // blast enough to punch straight through whatever guard it meets.
+      // Lands on Aggression's *Held to the Bone* and Boldness's *Banked
+      // Coals* — one lane notable each, complementing rather than matching.
+      // ============================================================
       molten_edge: {
         id: "molten_edge",
         name: "Molten Edge",
@@ -2800,134 +3240,14 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["white_heat"],
         leaning: "boldness",
-        // Past a certain heat a resistance stops being much of a resistance —
-        // the natural escalation of punching through guard.
+        // Past a certain heat a resistance stops being much of a resistance.
         delta: { resistanceBreaker: { multiplier: 1.4 } },
       },
-      // --- Boldness: "Banked Flame" — a controlled, enduring fire instead
-      // of an explosive burst.
-      // --- Boldness: the furnace that stands in its own fire ---
-      //
-      // Reworked away from a generic armor ladder (damageReduction ->
-      // defenseBoost -> regen/thorns fork -> defenseBoost+thorns capstone)
-      // that vine_whip and rock_slide were running node-for-node with the
-      // same passive values. Three moves cannot all be "the tanky one."
-      //
-      // The fantasy that is only true here: this creature does not survive
-      // by being armored, it survives by being made of the thing that hurts
-      // everyone else. Now that fire is real, persistent terrain (fire.ts),
-      // that is a mechanic and not just flavor — this branch buys the right
-      // to keep fighting inside its own wildfire, which no other move in the
-      // roster can do, and which pairs with the Aggression branch's
-      // Wildfire's Reach rather than sitting in a separate corner.
-      thick_scales: {
-        id: "thick_scales",
-        name: "Scorchproof Hide",
-        cost: 1,
-        leaning: "boldness",
-        // Half damage from standing in fire — enough to hold a burning tile
-        // for a while, not enough to ignore it.
-        grantsPassive: { kind: "fireproof", value: 0.5 },
-        delta: {},
-      },
-      hardened_plates: {
-        id: "hardened_plates",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["thick_scales"],
-        leaning: "boldness",
-        delta: { accuracy: 10 },
-      },
-      steady_burn: {
-        id: "steady_burn",
-        name: "+5 Power",
-        cost: 1,
-        prerequisitesAnyOf: [["hardened_plates"], ["molten_edge"], ["ember_ward"]],
-        leaning: "boldness",
-        delta: { power: 5 },
-      },
-      banked_coals: {
-        id: "banked_coals",
-        name: "Banked Coals",
-        cost: 1,
-        prerequisites: ["steady_burn"],
-        leaning: "boldness",
-        // Cornered and burning hotter for it — the branch's own escalation
-        // lever, rather than another flat defense number.
-        delta: { selfStateBonus: { condition: "selfLowHp", multiplier: 1.35 } },
-      },
-      slower_burn: {
-        id: "slower_burn",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["banked_coals"], ["slagged_guard"], ["warding_pyre"]],
-        leaning: "boldness",
-        delta: { cooldownTicks: -1 },
-      },
-      // The real fork: do you want to OWN the burning ground, or to make
-      // yourself the thing that isn't safe to stand next to? Both are "fire
-      // as armor", and they pull toward genuinely different fights — one
-      // wants a wildfire to stand in, the other doesn't care about terrain
-      // at all.
-      smoldering_core: {
-        id: "smoldering_core",
-        name: "Smoldering Core",
-        cost: 1,
-        prerequisites: ["slower_burn"],
-        excludes: ["flame_wreath"],
-        leaning: "boldness",
-        // Total fire immunity: at 1 the holder also keeps regenerating while
-        // standing in fire (fire.ts). The burning tile becomes YOUR ground.
-        grantsPassive: { kind: "fireproof", value: 0.5 },
-        delta: { situationalBonus: { condition: "targetBurning", multiplier: 1.5 } },
-      },
-      flame_wreath: {
-        id: "flame_wreath",
-        name: "Flame Wreath",
-        cost: 1,
-        prerequisites: ["slower_burn"],
-        excludes: ["smoldering_core"],
-        leaning: "boldness",
-        // The other answer: never mind the ground, be the hazard yourself.
-        grantsPassive: { kind: "thorns", value: 0.14 },
-        delta: { statusChance: 0.1 },
-      },
-      unburnt: {
-        id: "unburnt",
-        name: "Unburnt",
-        cost: 2,
-        prerequisitesAnyOf: [["smoldering_core"], ["flame_wreath"]],
-        leaning: "boldness",
-        // Tops the branch up to full fire immunity from EITHER fork — the
-        // Flame Wreath side has spent its nodes on being the hazard rather
-        // than on surviving one, so this is where that build stops caring
-        // about burning ground too. (Named for what it does: unburnt.)
-        grantsPassive: { kind: "fireproof", value: 0.5 },
-        delta: { power: 5 },
-      },
-      hotter_scales: {
-        id: "hotter_scales",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["unburnt"],
-        leaning: "boldness",
-        delta: { accuracy: 10 },
-      },
-      living_furnace: {
-        id: "living_furnace",
-        name: "Living Furnace",
-        cost: 2,
-        prerequisites: ["hotter_scales"],
-        leaning: "boldness",
-        // The capstone escalates this branch's own lever rather than
-        // reaching for the roster's generic tank passives: it leaves fire
-        // behind it wherever it fights, and it is the one thing in the game
-        // that is comfortable there.
-        grantsPassive: { kind: "fireproof", value: 1 },
-        delta: { terrainBurn: true },
-      },
-      // Crosslink: Boldness <-> Sociability — the banked heat singes
-      // anyone who gets too close to whoever it's standing guard over.
+      // ============================================================
+      // BRIDGE 2 — Boldness <-> Sociability: the banked heat singes anyone
+      // who gets too close to whoever it is standing guard over. Lands on
+      // Boldness's *Open the Throat* and Sociability's *Warm at Your Back*.
+      // ============================================================
       ember_ward: {
         id: "ember_ward",
         name: "Ember Ward",
@@ -2954,107 +3274,18 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["banked_ward"],
         leaning: "boldness",
         // Standing this close to it is its own problem, and the heat shields
-        // whoever it's guarding too.
+        // whoever it is guarding too.
         grantsPassives: [
           { kind: "thorns", value: 0.06 },
           { kind: "damageReduction", value: 0.06 },
         ],
         delta: {},
       },
-      // --- Sociability: "Rally Flame" — a shared fire that sharpens and
-      // warms whoever's near it.
-      kindling_call: {
-        id: "kindling_call",
-        name: "Kindling Call",
-        cost: 1,
-        leaning: "sociability",
-        delta: { targetsAlly: true, allyEffect: { buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
-      },
-      warmth_shared: {
-        id: "warmth_shared",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["kindling_call"],
-        leaning: "sociability",
-        delta: { accuracy: 10 },
-      },
-      quicker_call: {
-        id: "quicker_call",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["warmth_shared"], ["ember_ward"], ["flashpoint"]],
-        leaning: "sociability",
-        delta: { cooldownTicks: -1 },
-      },
-      deepening_warmth: {
-        id: "deepening_warmth",
-        name: "Deepening Warmth",
-        cost: 1,
-        prerequisites: ["quicker_call"],
-        leaning: "sociability",
-        delta: { allyEffect: { healFraction: 0.15, buff: { stat: "spAttack", stage: 1, ticks: 20 } } },
-      },
-      brighter_blaze: {
-        id: "brighter_blaze",
-        name: "+5 Power",
-        cost: 1,
-        prerequisitesAnyOf: [["deepening_warmth"], ["warding_pyre"], ["chain_ignition"]],
-        leaning: "sociability",
-        delta: { power: 5 },
-      },
-      rousing_flame: {
-        id: "rousing_flame",
-        name: "Rousing Flame",
-        cost: 1,
-        prerequisites: ["brighter_blaze"],
-        excludes: ["calming_ash"],
-        leaning: "sociability",
-        // Trades the healing lean for a real Attack buff instead.
-        delta: { allyEffect: { healFraction: 0.05, buff: { stat: "attack", stage: 1, ticks: 20 } } },
-      },
-      calming_ash: {
-        id: "calming_ash",
-        name: "Calming Ash",
-        cost: 1,
-        prerequisites: ["brighter_blaze"],
-        excludes: ["rousing_flame"],
-        leaning: "sociability",
-        grantsPassive: { kind: "calmingPresence", value: 0.2 },
-        delta: {},
-      },
-      united_blaze: {
-        id: "united_blaze",
-        name: "United Blaze",
-        cost: 2,
-        prerequisitesAnyOf: [["rousing_flame"], ["calming_ash"]],
-        leaning: "sociability",
-        // The ally effect now also fires the instant this hits an enemy.
-        delta: { allyEffectOnAttack: true },
-      },
-      steadfast_blaze: {
-        id: "steadfast_blaze",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["united_blaze"],
-        leaning: "sociability",
-        delta: { power: 5 },
-      },
-      communal_blaze: {
-        id: "communal_blaze",
-        name: "Communal Blaze",
-        cost: 2,
-        prerequisites: ["steadfast_blaze"],
-        leaning: "sociability",
-        // Everyone gathered around it recovers faster AND settles down —
-        // a real "two passives" finale distinct from a flat heal aura.
-        grantsPassives: [
-          { kind: "regen", value: 0.04 },
-          { kind: "calmingPresence", value: 0.1 },
-        ],
-        delta: {},
-      },
-      // Crosslink: Sociability <-> Aggression — a fire this shared catches
-      // fast and hot the instant it's actually provoked.
+      // ============================================================
+      // BRIDGE 3 — Sociability <-> Aggression: a fire this shared catches
+      // fast and hot the instant it is actually provoked. Lands on
+      // Aggression's *Melting Blast* and Sociability's *United Blaze*.
+      // ============================================================
       flashpoint: {
         id: "flashpoint",
         name: "Flashpoint",
@@ -3074,13 +3305,17 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       chain_ignition: {
         id: "chain_ignition",
-        name: "Chain Ignition",
+        name: "Blink and It's Done",
         cost: 2,
         prerequisites: ["hair_trigger"],
         leaning: "sociability",
-        // A fire that catches this fast doesn't stay on one target — the burn
-        // jumps to whoever's standing next to it.
-        delta: { statusSpreads: true },
+        // Was `statusSpreads` — a burn that jumps to the next body is
+        // Ember's *Spreading Blaze*, the single clearest thing this tree
+        // must not borrow. The bridge escalates its OWN lever instead
+        // (principle 13): stage 3 exactly, which is where `rollCritical`
+        // clamps (`Math.min(3, ...)`, combat.ts) — a fourth stage node would
+        // be content the engine throws away.
+        delta: { critRateStage: 1, power: 8 },
       },
     },
   },
