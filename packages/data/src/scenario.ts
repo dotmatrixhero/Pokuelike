@@ -4,6 +4,7 @@ import {
   findPosInBiome,
   createNeeds,
   tileAt,
+  type Agent,
   type Vec2,
   type World,
 } from "@pokuelike/engine";
@@ -149,6 +150,27 @@ function findWaterNear(world: World, x: number, y: number): Vec2 {
  * elevation-aware movement/fog" section for the full design and real-run
  * findings.
  */
+/**
+ * `createDemoWorld` plus one player-controlled human — ROADMAP.md's M0. A
+ * separate constructor rather than a flag on `createDemoWorld`, so every
+ * existing test and validator keeps its exact deterministic world: adding an
+ * agent shifts rng consumption and would silently change every seed's run.
+ *
+ * The player is placed a little apart from the bulbasaur herd (which spawns
+ * around x=5..9, y=6..7) so the first thing you can do is walk toward it and
+ * watch it react — that walk is M0's acceptance test.
+ */
+export function createPlayerDemoWorld(seed: number = SCENARIO_SEED): World {
+  const world = createDemoWorld(seed);
+  const player: Agent = {
+    ...spawnAgent("human", "player", anchor(world, 14, 12), 5, world.rng),
+    controlledBy: "player",
+    sex: "female",
+  };
+  world.agents.push(player);
+  return world;
+}
+
 export function createDemoWorld(seed: number = SCENARIO_SEED): World {
   const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed);
 

@@ -165,6 +165,38 @@ export function speciesFromDex(dexKey: string, sim: SimSpeciesFields): SpeciesDe
  * species gets it" — species-tied per direct instruction, not universal.
  */
 export const SPECIES: Record<string, SpeciesDef> = {
+  /**
+   * The player — ROADMAP.md's M0. Not in the dex, so a literal rather than
+   * `speciesFromDex`. Stats are deliberately frail: DESIGN.md's "fragile
+   * human, earning your first partner" is the premise, and CAMPAIGN_DESIGN.md
+   * opens with the player as "the frailest thing in the ecosystem." Base
+   * stats sit under a level-5 Rattata's; HP is the one thing kept ordinary so
+   * a single hit is a lesson rather than a death.
+   *
+   * `isPredator: true` is an M0 STOPGAP, and flagged as one: prey flee via
+   * `isPreyOf(rules, ...)`, keyed by hunter species, so a human not in
+   * `HUNT_RULES` would be ignored by everything and M0's acceptance test
+   * ("walk toward a herd and it moves away") could not pass. The real design
+   * — PLAYER_INVENTORY.md's threat signature from speed, distance and posture
+   * — replaces this in M6. Until then the player reads as a mild predator.
+   *
+   * `moves` needs at least one real entry for `spawnAgent`'s eligible-move
+   * fallback to have something to fall back to; `tackle` is the plainest
+   * thing in the table. Player moves proper ("punch, kick, swing, yell")
+   * are their own later slice.
+   */
+  human: {
+    id: "human",
+    name: "Human",
+    spriteKey: "human",
+    placeholderColor: "#e8c39e",
+    homeLayer: "surface",
+    isPredator: true,
+    baseStats: { hp: 45, attack: 28, defense: 25, spAttack: 20, spDefense: 25, speed: 40 },
+    types: ["normal"],
+    moves: ["tackle"],
+    activityPattern: "diurnal",
+  },
   bulbasaur: speciesFromDex("BULBASAUR", {
     spriteKey: "bulbasaur",
     placeholderColor: "#78c850",

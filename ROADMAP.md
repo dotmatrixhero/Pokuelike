@@ -79,6 +79,24 @@ Build:
 
 **Done when:** you walk toward a herd and it moves away from you.
 
+**STATUS: DONE.** Live in the app via `?player=1`: the tick sat at 0 for 3s
+with no input, one keypress advanced 4 ticks (speed 9 against a threshold
+of 40), eleven keypresses 47 ticks, camera followed, no page errors. The
+flee itself was proven in node against the real `createPlayerDemoWorld`:
+with the player two tiles from bulbasaur-0, it goes `idle → flee` on the
+second turn, 17 flee events over six turns. 7 engine tests.
+
+Two findings on the way, both recorded in code:
+- `canEnterTile` is **occupancy only**. The first draft of the player move
+  used it alone and walked through walls — caught by a test. Fix was to
+  export the real step predicate (`movement.ts`'s new `canStepTo`: walkable
+  or flyer, water, land, capacity) and have both the sim and the player use
+  it, so the "forgot to wire the water check" class of bug the file warns
+  about is closed for the player too.
+- The browser check for the flee read `document.body.innerText`, which
+  skips hidden elements; the Events tab was hidden, so it reported no flee
+  while 17 had fired. Measuring nothing again. Verified in node instead.
+
 Honest note on that test: prey flee via `isPreyOf(rules, …)`, which is keyed
 by hunter species. A human is not in `HUNT_RULES`, so nothing will flee from
 it by default. For M0, mark `human` as a hunter so the loop can be proven —

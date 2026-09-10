@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World } from "@pokuelike/engine";
-import { createDemoWorld, createDemoMacroWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, type PlayerAction } from "@pokuelike/engine";
+import { createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -158,6 +158,12 @@ let intervalId: number | undefined;
 /** True while a battle owns ticking via its own fixed `BATTLE_STEP_INTERVAL_MS` cadence instead of the ordinary speed slider — see `scheduleLoop` and the `enterBattleStep`/`exitBattleStep` host methods below. */
 let battleStepMode = false;
 let selectedAgentId: string | undefined;
+/**
+ * ROADMAP.md M0: when true, the world advances only when the player acts —
+ * the free-running tick interval is never scheduled, and keyboard input
+ * drives `advancePlayerTurn`. Entered via `?player=1`.
+ */
+let playerMode = false;
 let lastLoggedEventCount = 0;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
@@ -325,6 +331,70 @@ function loadWorld(seed: number): void {
 }
 
 /**
+ * ROADMAP.md M0 — the plain demo world plus a player-controlled human, with
+ * the free-running clock replaced by "advance when the player acts." The
+ * macro grid is deliberately off here: M0 proves the turn gate against a
+ * world already known to be alive, and one new thing at a time is the point.
+ */
+function loadPlayerWorld(seed: number): void {
+  macroWorld = undefined;
+  playerMode = true;
+  setPlaying(false);
+  world = createPlayerDemoWorld(seed);
+  log = new EventLog();
+  registerHerdsForFirstFrame();
+  resetUiForNewWorld();
+  seedInput.value = String(seed);
+  seedChipLabel.textContent = String(seed);
+  const player = findPlayer(world);
+  if (player) {
+    selectAgent(player);
+    focusCameraOn(player.pos);
+  }
+}
+
+/**
+ * One player turn: queue the action and run world ticks until the player's
+ * action energy comes round and it is applied — a slow human lets more of
+ * the world move between steps than a fast one, same rules as every agent.
+ * Then the ordinary post-tick display pipeline, and the camera follows.
+ */
+function playerAct(action: PlayerAction): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
+  afterTick();
+  focusCameraOn(player.pos);
+}
+
+const PLAYER_KEYS: Record<string, PlayerAction> = {
+  ArrowUp: { kind: "move", dx: 0, dy: -1 },
+  ArrowDown: { kind: "move", dx: 0, dy: 1 },
+  ArrowLeft: { kind: "move", dx: -1, dy: 0 },
+  ArrowRight: { kind: "move", dx: 1, dy: 0 },
+  k: { kind: "move", dx: 0, dy: -1 },
+  j: { kind: "move", dx: 0, dy: 1 },
+  h: { kind: "move", dx: -1, dy: 0 },
+  l: { kind: "move", dx: 1, dy: 0 },
+  y: { kind: "move", dx: -1, dy: -1 },
+  u: { kind: "move", dx: 1, dy: -1 },
+  b: { kind: "move", dx: -1, dy: 1 },
+  n: { kind: "move", dx: 1, dy: 1 },
+  ".": { kind: "wait" },
+  " ": { kind: "wait" },
+};
+
+window.addEventListener("keydown", (e) => {
+  if (!playerMode) return;
+  // Typing in the seed box or any input must not walk the player.
+  if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
+  const action = PLAYER_KEYS[e.key];
+  if (!action) return;
+  e.preventDefault();
+  playerAct(action);
+});
+
+/**
  * Direct ask: "I want to be able to see the overworld stuff... visualize
  * overworld." See macroMap.ts for the single pannable/zoomable canvas this
  * drives. `seed` (default: the same `SCENARIO_SEED` `createDemoMacroWorld`
@@ -375,6 +445,16 @@ function step(): void {
   } else {
     tickWorld(world, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   }
+  afterTick();
+}
+
+/**
+ * Everything `step()` does after the world has advanced — feeding the new
+ * events to every display consumer and dirtying the inspector. Split out so
+ * the player turn gate (`playerAct`, ROADMAP.md M0) can advance the world by
+ * its own route and still run exactly this pipeline, rather than a copy.
+ */
+function afterTick(): void {
   // Only the events since the last step are new; EventLog is append-only for the life of a world.
   const newEvents = log.events.slice(lastLoggedEventCount);
   // A finishing-blow `fought` hit (predation.ts's `finishingPool` mechanic —
@@ -432,6 +512,8 @@ function scheduleLoop(): void {
     clearInterval(intervalId);
     intervalId = undefined;
   }
+  // The world waits for the player. See `playerAct`.
+  if (playerMode) return;
   if (!playing) return;
 
   if (battleStepMode) {
@@ -1164,7 +1246,12 @@ const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) :
 // the old flat single-map default (see `enterOverworldMode`'s own doc
 // comment for the reasoning). The plain `loadWorld` path (no macro grid at
 // all) is still reachable any time via the "Overworld: Off" toggle.
-enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
+if (new URLSearchParams(location.search).get("player") === "1") {
+  // ROADMAP.md M0. The plain demo world with a player, no macro grid.
+  loadPlayerWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
+} else {
+  enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
+}
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
 
 function frame(): void {

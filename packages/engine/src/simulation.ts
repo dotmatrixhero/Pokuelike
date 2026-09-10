@@ -19,6 +19,7 @@ import { statStageMultiplier } from "./combat.js";
 import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
 import { recordDeathWitnesses } from "./witness.js";
+import { applyPlayerAction, findPlayer } from "./player.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { canFlyOverObstacle } from "./movement.js";
 
@@ -257,6 +258,39 @@ function isDead(agent: Agent): boolean {
 }
 
 /**
+ * The turn gate — ROADMAP.md's M0. Queues `action` on the player and runs
+ * world ticks until it has been consumed, i.e. until the player's action
+ * energy came round. A fast human spends one tick per step; a slow one lets
+ * the world move several ticks between its steps. Other agents act at their
+ * own rates inside those ticks, unchanged.
+ *
+ * `maxTicks` is a guard, not a tuning knob: with `ACTION_THRESHOLD` = 40 and
+ * any sane speed the action lands within a handful of ticks, so hitting the
+ * cap means something is wrong (a dead player, a zero speed) and the caller
+ * should not spin. Returns the number of ticks advanced.
+ */
+export function advancePlayerTurn(
+  world: World,
+  action: import("./types.js").PlayerAction,
+  log?: EventLog,
+  rules?: HuntRules,
+  ctx?: LevelingContext,
+  rng: () => number = world.rng,
+  immigration?: ImmigrationContext,
+  maxTicks = 50,
+): number {
+  const player = findPlayer(world);
+  if (!player) return 0;
+  player.queuedAction = action;
+  let ticks = 0;
+  while (player.queuedAction && ticks < maxTicks && player.alive !== false) {
+    tickWorld(world, log, rules, ctx, rng, immigration);
+    ticks++;
+  }
+  return ticks;
+}
+
+/**
  * Advances the whole world by one tick. Shared by the browser app and the
  * headless runner. A truly-dead agent (see predation.ts's `resolveHit` —
  * `alive: false`, the finishing pool exhausted) is NOT pruned this tick;
@@ -352,7 +386,20 @@ export function tickWorld(
     const before = { x: agent.pos.x, y: agent.pos.y };
     const beforeLayer = agent.layer;
     const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
-    tickAgentAction(world, agent, log, rules, ctx, rng, regionDispersal);
+    if (agent.controlledBy === "player") {
+      // Input decides, not the behaviour tree — see player.ts. If nothing is
+      // queued the turn is simply held: energy stays banked at threshold
+      // (accumulateActionEnergy caps it), so the world is effectively paused
+      // for this agent until the UI queues something and ticks again.
+      if (agent.queuedAction) {
+        applyPlayerAction(world, agent, agent.queuedAction);
+        agent.queuedAction = undefined;
+      } else {
+        agent.actionEnergy = ACTION_THRESHOLD;
+      }
+    } else {
+      tickAgentAction(world, agent, log, rules, ctx, rng, regionDispersal);
+    }
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
       const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
       agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");

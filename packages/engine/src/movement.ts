@@ -50,16 +50,31 @@ function candidatesToward(pos: Vec2, dx: number, dy: number): Vec2[] {
  * `mover` to stay capacity-blind while still passing `agent` for the water
  * check, which is exactly the split this second parameter exists to allow.
  */
+/**
+ * The single "may `agent` step onto `pos`" predicate: in bounds, walkable
+ * (or the agent flies over obstacles), the water and land gates, and — when
+ * `mover` is given — tile capacity. This is the whole chain `firstWalkable`
+ * has always applied, exported so the player (`player.ts`, ROADMAP.md M0)
+ * uses exactly it rather than a partial copy. The first draft of the player
+ * move checked only `canEnterTile`, which is occupancy alone, and walked
+ * straight through walls — the "forgot to wire the water check" class of bug
+ * this file's own doc comment warns about, caught by a test.
+ */
+export function canStepTo(world: World, agent: Agent, layer: Layer, pos: Vec2, mover?: Agent): boolean {
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile) return false;
+  if (!tile.walkable && !canFlyOverObstacle(agent, layer)) return false;
+  if (!canEnterWater(world, agent, layer, pos)) return false;
+  if (!canEnterLand(world, agent, layer, pos)) return false;
+  if (mover && !canEnterTile(world, mover, layer, pos)) return false;
+  return true;
+}
+
 function firstWalkable(world: World, layer: Layer, pos: Vec2, candidates: Vec2[], agent: Agent, mover?: Agent, avoid?: Vec2): Vec2 {
   for (const candidate of candidates) {
     if (candidate.x === pos.x && candidate.y === pos.y) continue;
     if (avoid && candidate.x === avoid.x && candidate.y === avoid.y) continue;
-    const tile = tileAt(world, layer, candidate.x, candidate.y);
-    if (!tile) continue;
-    if (!tile.walkable && !canFlyOverObstacle(agent, layer)) continue;
-    if (!canEnterWater(world, agent, layer, candidate)) continue;
-    if (!canEnterLand(world, agent, layer, candidate)) continue;
-    if (mover && !canEnterTile(world, mover, layer, candidate)) continue;
+    if (!canStepTo(world, agent, layer, candidate, mover)) continue;
     return candidate;
   }
   return pos;

@@ -525,6 +525,15 @@ export type BehaviorKind =
   | "train"
   | "socialize";
 
+/**
+ * What a player can do on a turn — ROADMAP.md's M0 vocabulary, deliberately
+ * tiny. `move` is one of the eight neighbours (dx/dy each in -1..1, not both
+ * zero); `wait` spends the turn standing still, which is a real choice in a
+ * world that keeps moving. Everything in PLAYER_ACTIONS.md (examine, search,
+ * craft, the time-spends) lands in later milestones as further variants.
+ */
+export type PlayerAction = { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 } | { kind: "wait" };
+
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
 export interface InventoryItem {
   itemKey: string;
@@ -541,6 +550,23 @@ export interface Agent {
   homeLayer: Layer;
   needs: Needs;
   behavior: BehaviorKind;
+  /**
+   * `"player"` when this agent's actions come from input rather than from
+   * the behaviour tree — ROADMAP.md's M0. Everything else about the agent
+   * is unchanged: needs decay, action energy accrues, predators can see it,
+   * rapport edges form against it. Design decision recorded in DESIGN.md
+   * ("the player is just another agent to the sim") — this field is that
+   * decision made literal. Absent for every sim-driven agent.
+   */
+  controlledBy?: "player";
+  /**
+   * The action a player-controlled agent will take on its next turn. Set by
+   * the UI, consumed by `tickWorld` on the tick this agent's action energy
+   * crosses `ACTION_THRESHOLD` — so a slow human waits more world-ticks per
+   * step than a fast one, exactly like every other agent. Cleared once
+   * applied. Ignored on a sim-driven agent.
+   */
+  queuedAction?: PlayerAction;
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
   /**
