@@ -8649,3 +8649,29 @@ fields, so **24 of the 40 shipped nodes using one rendered blank**; and
 - Stale comment on `MoveSpec.accuracy` claims stages "are always passed as 0 —
   no agent carries stages yet." Both `predation.ts` and `herdConflict.ts` pass
   real stages now.
+
+## HUD decluttering, round two: icons instead of text labels
+
+Direct ask: *"Clean up hud further. Put a backpack emoji 🎒 for pack on
+the top right. Swords cross for attack. Like make it not so big and
+bulky."*
+
+- **Pack** moved out of the `hud-pad` button row entirely, to its own
+  small 🎒 button anchored top-right of the `#player-hud` panel itself
+  (a real layout row, `margin-left: auto`, not absolutely-positioned
+  over the needs bars — that would have overlapped the HP row).
+- **Attack** now reads ⚔️. The rest of the row went icon-only too, for a
+  consistent look rather than one emoji button next to five text ones:
+  Wait ⏱️, Drink 💧, Look 👁️, Gather 🌿, Crouch 🧎.
+- `#hud-pad button`'s desktop CSS: `min-height` 36px → 28px, tighter
+  padding/gap, `font-size` bumped to 15px (emoji legibility at the
+  smaller box). Mobile's 44px tap-target minimum (`@media (max-width:
+  768px)`) left untouched — that one's an accessibility floor, not
+  bulk.
+- `main.ts`'s click-handler selector widened to `#hud-pad button,
+  #hud-pack-btn` so the relocated Pack button still fires through the
+  same handler (`data-act="pack"` unchanged).
+
+Live-verified (Playwright): all 6 row buttons render as the intended
+emoji, the corner Pack button opens the same Pack menu as before, no
+console errors. Full suite green (1435 engine / 387 data tests).
