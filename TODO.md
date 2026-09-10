@@ -9286,3 +9286,35 @@ and the missing button).
 Full suite after the fix: engine 1497/1497 (12 new in `cooking.test.ts`),
 data 393/393, web build clean (`tsc --noEmit && vite build`), runner
 typecheck clean.
+
+## Built: wild humans feel like a threat despite weak stats, plus valuable loot — see DESIGN.md
+
+- [x] Direct ask: "make the humans feel a little more like a threat
+      despite having weak stat blocks. plus having valuable loot." Widened
+      the player-only threat-signature system (`threat.ts`) to any human —
+      an armed wild hunter now gives nearby prey the same real flee-radius
+      bump an armed player does, purely from held/worn gear, no stat
+      retuning. Hunter's weapon is now a weighted roll (flintKnife/club
+      common, machete uncommon, axe rare) using the crafting table's own
+      real cost ladder as the rarity signal; merchant gets a real 30%
+      chance at a bonus finished item on top of its trade goods. Verified:
+      full suites green (engine 1533/1533, data 468/468), all packages
+      typecheck/build clean, `validateHumanArchetypes.ts` rewritten (400
+      rolls) to assert the weapon→move mapping, the weapon-tier
+      distribution, the merchant bonus rate, and that an armed hunter's
+      threat signature actually reads above baseline while an unarmed
+      wanderer doesn't.
+- [ ] **Making a hunter an actual predator of other creatures was NOT
+      built.** `HUNT_RULES` is a static species-wide table
+      (`SPECIES.isPredator` at module load), not a per-agent flag —
+      setting `agent.isPredator` on one wild human instance does nothing.
+      Making hunters real hunters would mean either flagging the whole
+      `human` species predator (too broad) or restructuring
+      `isHunterSpecies`/`HUNT_RULES` to take a per-agent override — a
+      bigger, separate change if wanted later.
+- [ ] The threat-signature widening was verified at the function level
+      (`threatSignatureOf` directly), not with a fresh live-tick scenario
+      watching real prey flee farther from an armed wild hunter than an
+      unarmed wanderer in an actual running sim. The underlying formula
+      was already live-validated for the player (`validateBond.ts`); that
+      specific live check was not re-run for a wild human this round.

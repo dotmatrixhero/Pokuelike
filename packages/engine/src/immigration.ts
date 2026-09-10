@@ -109,6 +109,23 @@ export interface ImmigrationContext {
 
 const HUMAN_ARCHETYPES = ["hunter", "forager", "traveler", "merchant", "wanderer"] as const;
 
+type StartingGear = { held?: string; worn?: string; carry?: [string, number][] };
+
+/**
+ * Picks one entry from `weights` (`[value, weight]` pairs) — a plain
+ * weighted roll, same shape `immigration.ts`'s own species-roster picks
+ * already use elsewhere in this file.
+ */
+function weightedPick<T>(weights: [T, number][], rng: () => number): T {
+  const total = weights.reduce((sum, [, w]) => sum + w, 0);
+  let roll = rng() * total;
+  for (const [value, w] of weights) {
+    roll -= w;
+    if (roll <= 0) return value;
+  }
+  return weights[weights.length - 1]![0];
+}
+
 /**
  * Starting loadout per archetype, drawn from the real `@pokuelike/data`
  * `ITEMS` catalog via `ImmigrationContext.itemCatalog` — direct ask: "can
@@ -118,22 +135,48 @@ const HUMAN_ARCHETYPES = ["hunter", "forager", "traveler", "merchant", "wanderer
  * corpse-loot mechanic already transfers a fainted agent's `inventory` to
  * whoever loots it, no new mechanic needed.
  *
- * Equal odds across all five, picked as a simple starting default per
- * HUMANS_DESIGN.md's open-questions convention — not a tuned balance
- * decision, just what "spawn with different types" needs to be visible at
- * all. Reweight later once a real run shows the mix.
+ * Hunter and merchant roll a weighted weapon/wares tier rather than a
+ * single fixed item — direct follow-up ask: "plus having valuable loot."
+ * The tiers are the crafting table's own real cost ladder (`crafting.ts`'s
+ * `RECIPES` turn counts): axe (14 turns, the single most expensive recipe
+ * in the game) and machete (11 turns + cordage) are rare, genuinely worth
+ * killing a hunter for; club/flint knife (6-10 turns) are the common case.
+ * Forager/traveler/wanderer stay fixed — this ask was specifically about
+ * hunter's weapon and, by extension, what's worth looting, not a rarity
+ * pass on every archetype.
  */
-const ARCHETYPE_STARTING_GEAR: Record<(typeof HUMAN_ARCHETYPES)[number], { held?: string; worn?: string; carry?: [string, number][] }> = {
-  // Weapon in hand — "hunter (ex. weapons, can use more moves)".
-  hunter: { held: "flintKnife" },
+const MERCHANT_BONUS_WARES = ["poultice", "foragePouch", "camouflageCloak"] as const;
+
+const ARCHETYPE_STARTING_GEAR: Record<(typeof HUMAN_ARCHETYPES)[number], (rng: () => number) => StartingGear> = {
+  // Weapon in hand — "hunter (ex. weapons, can use more moves)". Mostly
+  // the common two; axe/machete are the rare, valuable finds.
+  hunter: (rng) => ({
+    held: weightedPick(
+      [
+        ["flintKnife", 35],
+        ["club", 35],
+        ["machete", 18],
+        ["axe", 12],
+      ],
+      rng
+    ),
+  }),
   // Forage pouch plus a couple of already-gathered berries — "collects crops, puts in inventory, waterskin, etc."
-  forager: { carry: [["foragePouch", 1], ["food", 2]] },
+  forager: () => ({ carry: [["foragePouch", 1], ["food", 2]] }),
   // Camouflage cloak, not a weapon — moves light and unseen rather than armed.
-  traveler: { worn: "camouflageCloak" },
-  // Raw materials to trade, not tools — no trading mechanic exists yet, but the goods are real and lootable.
-  merchant: { carry: [["fiber", 3], ["cordage", 2]] },
+  traveler: () => ({ worn: "camouflageCloak" }),
+  // Raw goods every time, plus a real chance of one finished, more valuable
+  // piece of wares on top — a trader who's actually made a sale recently.
+  merchant: (rng) => {
+    const wares: [string, number][] = [["fiber", 3], ["cordage", 2]];
+    if (rng() < 0.3) {
+      const bonus = MERCHANT_BONUS_WARES[Math.floor(rng() * MERCHANT_BONUS_WARES.length)]!;
+      wares.push([bonus, 1]);
+    }
+    return { carry: wares };
+  },
   // Owns nothing — the plainest read of "wanderer".
-  wanderer: {},
+  wanderer: () => ({}),
 };
 
 /**
@@ -159,7 +202,7 @@ export function assignHumanArchetype(agent: Agent, ctx: ImmigrationContext, rng:
   agent.archetype = archetype;
   const catalog = ctx.itemCatalog;
   if (!catalog) return;
-  const gear = ARCHETYPE_STARTING_GEAR[archetype];
+  const gear = ARCHETYPE_STARTING_GEAR[archetype](rng);
   const weightOf = (key: string): number => catalog.items[key]?.weight ?? MATERIALS[key as MaterialId]?.weight ?? 1;
   if (gear.held) {
     addItem(agent, gear.held, 1, weightOf(gear.held));

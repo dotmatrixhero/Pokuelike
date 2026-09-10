@@ -60,9 +60,9 @@ function pronoun(agent: Agent): string {
 export function hasNoticed(world: World, agent: Agent, observer: Agent): boolean {
   if (agent.layer !== observer.layer) return false;
   if (agent.asleep || agent.fainted || agent.alive === false) return false;
-  // ROADMAP.md M6: for the player, "noticed" is the threat-signature radius
+  // ROADMAP.md M6: for a human, "noticed" is the threat-signature radius
   // predation uses, so "has seen you" still means "will react to you".
-  const radius = observer.controlledBy === "player" ? Math.max(1, playerFleeRadius(world, observer, FLEE_DETECT_RADIUS, agent)) : FLEE_DETECT_RADIUS;
+  const radius = observer.species === "human" ? Math.max(1, playerFleeRadius(world, observer, FLEE_DETECT_RADIUS, agent)) : FLEE_DETECT_RADIUS;
   if (Math.hypot(agent.pos.x - observer.pos.x, agent.pos.y - observer.pos.y) > radius) return false;
   const elevation = tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.elevation ?? 0;
   return hasLineOfSight(world, agent.layer, agent.pos, observer.pos, elevation);

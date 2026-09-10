@@ -15739,3 +15739,61 @@ archetype feature's own code survived intact, then full typecheck (all 4
 packages) + `vite build` + full test suites both times. Final state:
 engine 1533/1533, data 468/468, `validateHumanArchetypes.ts` still passes
 identically post-merge (same 200-roll distribution).
+
+## Humans feel like a threat despite weak stats, plus valuable loot
+
+Direct ask, follow-up to the archetype work: "make the humans feel a
+little more like a threat despite having weak stat blocks. plus having
+valuable loot."
+
+**The real lever, found by reading the code, not guessing.** `human`'s
+base stats (species.ts) are genuinely weak next to a real Pokémon's, and
+there's no cheap way to make a specific archetype an active hunter of
+other creatures: `HUNT_RULES` (data/predation.ts) is a static table built
+once from `SPECIES.isPredator` at module load — a per-agent `isPredator`
+flag on one wild human instance does nothing, `isHunterSpecies` only ever
+reads the species-wide table. Making one archetype a real predator would
+mean either flagging the whole `human` species predator (too broad — every
+wanderer too) or restructuring `isHunterSpecies`/`HUNT_RULES` to accept a
+per-agent override, a materially bigger change than this ask needs. Not
+built; flagged here rather than silently skipped.
+
+**What was built instead — real, and already proven.** `threat.ts`'s
+signature system (crouched ×0.5, held-item `+threat`, worn-item
+`×(1+threat)`, clamped 0..2) was player-only
+(`agent.controlledBy !== "player"` gated it) even though it reads
+`agent.equipment`/`agent.posture`, fields any human can have. Widened the
+gate to `agent.species !== "human"` in `threat.ts` and its three real call
+sites (`predation.ts` x2 — the sleep-threat check and the active
+flee/mob-target scan — plus `tells.ts`'s `hasNoticed`). An armed wild
+hunter now reads to nearby prey exactly like an armed player does: a flint
+knife/club/axe/machete adds real `threat` to their signature, so prey give
+them a bigger flee radius purely from what's in their hand — no stat
+retuning, same coefficients this whole session already validated. An
+unarmed wanderer still reads as harmless.
+
+**Valuable loot.** Hunter's weapon is now a weighted roll instead of
+always a flint knife — `crafting.ts`'s own recipe cost ladder set the
+weights: flintKnife/club common (35/35, 6-10 turns to craft), machete
+uncommon (18, 11 turns + cordage), axe rare (12, 14 turns — the single
+most expensive recipe in the game). Merchant keeps its base trade goods
+(fiber/cordage) but now has a real 30% chance of one finished, more
+valuable piece of wares on top (poultice/forage pouch/camouflage cloak) —
+a trader who's actually made a sale.
+
+**Verification.** All 3 packages typecheck, `vite build` clean, engine
+1533/1533, data 468/468 — no regressions from widening the threat gate.
+Rewrote `validateHumanArchetypes.ts` (400 rolls) to also assert: every
+hunter's rolled weapon grants the matching real move (knife→Scratch,
+club→Pound, axe→Fell, machete→Clear), all 4 weapon tiers appear across
+400 rolls (real distribution: flintKnife 31, club 31, machete 14, axe 8 —
+close to the 35/35/18/12 target), merchant bonus-wares rate lands at
+30.4% (24/79, target ~30%), an armed hunter's `threatSignatureOf` reads
+above 1 (more threatening than baseline) while an unarmed wanderer reads
+at exactly 1 (baseline, unchanged). This is real function-level
+verification of the exact code the engine calls — it does NOT include a
+fresh full-tick scenario watching real prey actually flee farther from a
+wild hunter than a wild wanderer in a live sim; that would reuse the same
+already-live-validated mechanism (`validateBond.ts` proved this formula
+against the player), so it wasn't rebuilt here, but it also wasn't
+watched directly this round. Said plainly rather than implied.

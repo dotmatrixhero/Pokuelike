@@ -525,7 +525,7 @@ export function hasNearbyThreat(world: World, agent: Agent, rules: HuntRules): b
     // creature awake; a bonded creature sleeps beside a standing one. This
     // is the Presence verb's precondition — traced: with the flat radius
     // no creature would ever fall asleep within watch range of the player.
-    if (other.controlledBy === "player") return manhattan(agent.pos, other.pos) <= playerFleeRadius(world, other, FLEE_DETECT_RADIUS, agent);
+    if (other.species === "human") return manhattan(agent.pos, other.pos) <= playerFleeRadius(world, other, FLEE_DETECT_RADIUS, agent);
     return isGenuineThreat(rules, agent, other);
   });
 }
@@ -2102,11 +2102,15 @@ export function applyPredationInstincts(
   const threats = agent.asleep
     ? []
     : agentsWithin(world, agent, wideFleeRadius).filter((other) => {
-        // ROADMAP.md M6: the player is not a predator by flag any more.
-        // Prey read the player's threat signature (threat.ts) — a crouched,
-        // unarmed, still human is half the ordinary radius; a running one
-        // with a club is well past it. Under 1 tile reads as no threat.
-        if (other.controlledBy === "player") {
+        // ROADMAP.md M6: a human is not a predator by flag. Prey read the
+        // human's threat signature (threat.ts) — a crouched, unarmed,
+        // still human is half the ordinary radius; a running one with a
+        // club is well past it. Under 1 tile reads as no threat. Widened
+        // from player-only to any human: direct ask, "make the humans
+        // feel a little more like a threat despite having weak stat
+        // blocks" — an armed wild hunter now reads exactly like an armed
+        // player.
+        if (other.species === "human") {
           const radius = playerFleeRadius(world, other, baseFleeRadius, agent);
           return radius >= 1 && isDetectable(world, agent.pos, other, radius);
         }
