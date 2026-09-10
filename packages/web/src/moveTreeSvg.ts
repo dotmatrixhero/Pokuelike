@@ -272,21 +272,32 @@ function pct(v: number): string {
 function signed(v: number): string {
   return `${v > 0 ? "+" : ""}${v}`;
 }
-function conditionLabel(c: string): string {
-  const labels: Record<string, string> = {
-    targetLowHp: "at or below half HP",
-    flanking: "caught off guard (flanking)",
-    night: "it's night",
-    elevation: "the user is standing higher up",
-    concealed: "the user is concealed in a bush",
-    coldSnap: "there's a cold snap",
-    storm: "there's a storm",
-    drought: "there's a drought",
-    rain: "it's raining",
-    targetBurning: "burning",
-    targetStatused: "already statused",
+/**
+ * The whole "when ..." clause for one `SituationalCondition`, not just a
+ * fragment. It used to return a fragment that every call site pasted after a
+ * hardcoded "when the target is", which produced real nonsense for the eight
+ * conditions that are about the WORLD or the USER rather than the target —
+ * "×1.4 damage when the target is it's raining", "when the target is the
+ * user is concealed in a bush". Shipped trees (Twineedle's `concealed`
+ * ladder, Sludge's `rain` bridge, every `elevation` node) all read that way.
+ * `rallyMarked` was also missing outright and fell through to its raw key.
+ */
+function situationalClause(c: string): string {
+  const clauses: Record<string, string> = {
+    targetLowHp: "when the target is at or below half HP",
+    flanking: "when the target is caught off guard (flanking)",
+    night: "at night",
+    elevation: "when the user is standing higher up than the target",
+    concealed: "when the user is concealed in a bush",
+    coldSnap: "during a cold snap",
+    storm: "in a storm",
+    drought: "in a drought",
+    rain: "in the rain",
+    targetBurning: "when the target is burning",
+    targetStatused: "when the target already carries a status",
+    rallyMarked: "when the target is marked as the herd's priority",
   };
-  return labels[c] ?? c;
+  return clauses[c] ?? `when ${c}`;
 }
 function shapeLabel(shape: { kind: string; length?: number; width?: number; radius?: number }): string {
   if (shape.kind === "point") return "a point-blank hit";
@@ -315,9 +326,9 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("hits")) lines.push(`Strikes ${delta.hits.min === delta.hits.max ? `${delta.hits.min} times` : `${delta.hits.min}–${delta.hits.max} times`} per use.`);
   if (has("hitsBonus")) lines.push(`${signed(delta.hitsBonus)} strike${Math.abs(delta.hitsBonus) === 1 ? "" : "s"} per use, on top of however many it already makes.`);
   if (has("lockTicks")) lines.push(`Locks the user out of acting ${signed(delta.lockTicks)} extra tick${Math.abs(delta.lockTicks) === 1 ? "" : "s"} after use.`);
-  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage when the target is ${conditionLabel(delta.situationalBonus.condition)}.`);
+  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage ${situationalClause(delta.situationalBonus.condition)}.`);
   for (const sb of (delta.situationalBonuses ?? []) as any[]) {
-    lines.push(`×${sb.multiplier} damage when the target is ${conditionLabel(sb.condition)} — stacks with this move's other conditions.`);
+    lines.push(`×${sb.multiplier} damage ${situationalClause(sb.condition)} — stacks with this move's other conditions.`);
   }
   if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
   for (const sc of [...(delta.statChangeOnHit ? [delta.statChangeOnHit] : []), ...((delta.statChangesOnHit ?? []) as any[])]) {
@@ -362,10 +373,16 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
-    const mover = fm.mover === "attacker" ? "The user" : "The target";
-    const dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
+    // Phrased from the two real parties, not "the other side" — a reader
+    // could not tell who "the other side" was, which is MOVES_DESIGN.md's own
+    // complaint about this vocabulary ("It should be phrased around
+    // repositioning based on a specific target").
+    const attackerSide = fm.mover === "attacker";
+    const who = attackerSide ? "The user" : "The target";
+    const verb = fm.direction === "closer" ? (attackerSide ? "lunges" : "is dragged") : attackerSide ? "retreats" : "is shoved";
+    const dir = fm.direction === "closer" ? (attackerSide ? "toward the target" : "toward the user") : attackerSide ? "away from the target" : "away from the user";
     const timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
-    lines.push(`${mover} moves ${fm.tiles} tile${fm.tiles === 1 ? "" : "s"} ${dir}, ${timing}.`);
+    lines.push(`${who} ${verb} ${fm.tiles} tile${fm.tiles === 1 ? "" : "s"} ${dir}, ${timing}.`);
   }
   if (has("chargeAttack")) {
     const ca = delta.chargeAttack;
@@ -387,7 +404,61 @@ function capitalize(s: string): string {
 const ADDITIVE_FIELDS = [
   "power", "accuracy", "cooldownTicks", "statusChance", "defensePenetration", "lockTicks",
   "critRateStage", "lifestealFraction", "recoilFraction", "jamCooldownTicks", "positionSwapPull", "gatherBurst",
+  // The additive FORMS were missing here while `applyMoveTree` summed them,
+  // so a build with three `rangeBonus: 1` nodes summarised as "+1 tile of max
+  // reach" while its real spec showed +3. Measured on a rolled psybeam build
+  // (seed 42, build 2): summary "+1 tile of max reach", real spec range 2->5.
+  "rangeBonus", "hitsBonus", "areaBonus", "rallyCallTicks",
 ] as const;
+/** Fields `applyMoveTree` APPENDS to a list rather than overwriting — see `MoveSpec.situationalBonuses`. Concatenated here for the same reason. */
+const APPEND_FIELDS = ["situationalBonuses", "statChangesOnHit", "allyEffects"] as const;
+
+/**
+ * Collapses one appended list the way the engine's own resolver does at the
+ * moment of the hit, so the summary reports what a build actually GETS rather
+ * than everything it bought. Every one of these lists is authored as a ladder
+ * (concealed 1.25 -> 1.4 -> 1.7 on one chain), and printing the whole ladder
+ * reads as three separate stacking bonuses when the engine keeps one.
+ *
+ * Mirrors `resolveSituationalBonuses` (strongest per condition),
+ * `resolveStatChangesOnHit` (strongest |stage| per target+stat) and
+ * `resolveAllyEffect` (largest heal, strongest buff per stat) — all in
+ * engine/moves.ts.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveAppended(field: string, entries: any[]): any[] {
+  if (field === "situationalBonuses") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const best = new Map<string, any>();
+    for (const e of entries) {
+      const cur = best.get(e.condition);
+      if (!cur || e.multiplier > cur.multiplier) best.set(e.condition, e);
+    }
+    return [...best.values()];
+  }
+  if (field === "statChangesOnHit") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const best = new Map<string, any>();
+    for (const e of entries) {
+      const key = `${e.target}:${e.stat}`;
+      const cur = best.get(key);
+      if (!cur || Math.abs(e.stage) > Math.abs(cur.stage)) best.set(key, e);
+    }
+    return [...best.values()];
+  }
+  // allyEffects: one heal (the largest) plus one buff per stat (the strongest).
+  let heal: number | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const buffs = new Map<string, any>();
+  for (const e of entries) {
+    if (e.healFraction !== undefined && (heal === undefined || e.healFraction > heal)) heal = e.healFraction;
+    if (e.buff) {
+      const cur = buffs.get(e.buff.stat);
+      if (!cur || Math.abs(e.buff.stage) > Math.abs(cur.buff.stage)) buffs.set(e.buff.stat, { buff: e.buff });
+    }
+  }
+  return [...(heal !== undefined ? [{ healFraction: heal }] : []), ...buffs.values()];
+}
 /** OR-merge boolean fields — once any chosen node turns one on, it stays on for the whole build. */
 const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset", "spawnsRain"] as const;
 
@@ -412,6 +483,8 @@ function combineDeltas(tree: Record<string, MoveTreeNode>, chosenIds: readonly s
       if (v === undefined) continue;
       if ((ADDITIVE_FIELDS as readonly string[]).includes(k)) {
         result[k] = (result[k] ?? 0) + v;
+      } else if ((APPEND_FIELDS as readonly string[]).includes(k)) {
+        result[k] = resolveAppended(k, [...(result[k] ?? []), ...v]);
       } else if ((OR_MERGE_FIELDS as readonly string[]).includes(k)) {
         result[k] = result[k] || v;
       } else {

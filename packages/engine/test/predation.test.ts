@@ -1493,6 +1493,63 @@ describe("situational bonus wired into real combat (resolveHit)", () => {
   });
 });
 
+describe("chargeAttack silently voids hitsArea (regression)", () => {
+  /**
+   * `resolveHit` commits a charge and RETURNS before it ever reaches its own
+   * `if (move.hitsArea)` branch, and `resolveChargedAttack` then calls
+   * `resolveHitAgainstTarget` directly. So a move carrying both resolves as a
+   * single-target hit and the area is lost — with no error and nothing in
+   * `check-proposed-trees.ts` able to see it.
+   *
+   * Real exposure, measured: three shipped trees let ONE build hold both a
+   * charge node and an area node — tackle (full_tilt + tremor_break), slash
+   * (the_long_moment + cleaving_slash), body_slam (the_reckoning + avalanche).
+   * Peck carries a charge and a `line` shape, which is reach rather than
+   * area, so it is NOT affected.
+   *
+   * The control is the same move with the charge removed: that one must hit
+   * the bystander, which is what makes the charged case's miss meaningful
+   * rather than just an AoE that never worked.
+   */
+  const AREA_MOVE: MoveSpec = {
+    ...TEST_MOVE,
+    id: "charge-area-move",
+    shape: { kind: "ring", radius: 1 },
+    hitsArea: true,
+  };
+  const CHARGED_AREA_MOVE: MoveSpec = {
+    ...AREA_MOVE,
+    id: "charge-area-move-charged",
+    chargeAttack: { ticks: 1, bonusPower: 10, leapTiles: 1 },
+  };
+
+  function bystandersHit(move: MoveSpec): string[] {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    // Default prey() maxHp (10) on purpose: predator() only treats an agent
+    // as prey below its own maxHp * PREY_POWER_RATIO, so inflating maxHp to
+    // survive more ticks makes the hunt never start and BOTH cases come back
+    // empty — a test that fails for the wrong reason.
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary" });
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander" });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { moves: [move] });
+    world.agents.push(hunter, primaryTarget, bystander);
+    const log = new EventLog();
+    // Several ticks so a charge has time to commit AND resolve.
+    for (let t = 0; t < 6; t++) tickWorld(world, log, RULES);
+    return log.events.filter((e) => e.kind === "fought").map((e) => (e as { defenderId: string }).defenderId);
+  }
+
+  it("CONTROL: the same area move without a charge does hit the bystander", () => {
+    expect(bystandersHit(AREA_MOVE)).toContain("bulbasaur-bystander");
+  });
+
+  it("a charged area move hits only its primary target — the area is silently lost", () => {
+    const hit = bystandersHit(CHARGED_AREA_MOVE);
+    expect(hit).toContain("bulbasaur-primary");
+    expect(hit).not.toContain("bulbasaur-bystander");
+  });
+});
+
 describe("multi-target/AoE resolution wired into real combat (resolveHit)", () => {
   it("a hitsArea move (Growl-shaped: ring around the attacker) hits every agent in its shape, not just the picked target", () => {
     const GROWL_LIKE_MOVE: MoveSpec = {

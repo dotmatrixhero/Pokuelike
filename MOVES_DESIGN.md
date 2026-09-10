@@ -7387,3 +7387,71 @@ change:
 
 The 40/60 stand/run split is a good sign (a weighted roll that always lands
 the same way is a lookup table), but on N=10 it is not yet evidence.
+
+## Ice Beam's v4 tree, and what `freeze` actually does — Shipped
+
+Ice Beam had no tree. It has 45 nodes now, built to the two-lane standard and
+clean on `check-proposed-trees.ts --shipped`. The design started from reading
+`status.ts`/`needs.ts` rather than from the word "freeze," and freeze turned
+out to be **weaker than the name suggests**, in five specific ways worth
+writing down because every one of them would have produced a wrong node:
+
+| | |
+|---|---|
+| effect | `isFrozen` gates `tickAgentAction` exactly like fainted/asleep — **no action at all**, and nothing else |
+| damage | **zero**. `severityMultiplier` is only read inside `tickStatusEffects`' burn/poison branch, so `statusSeverity` is **dead content** on this move |
+| duration | `FREEZE_THAW_CHANCE` 0.2 rolled **every world tick** — mean ~5 ticks, can end on the first |
+| base chance | 0.1 |
+| hard counter | any landed **Fire-type hit** clears it (`maybeThawOnFireHit`), on the first hit that connects |
+| immunity | Ice types are immune — and **all four learners** (Seel, Dewgong, Lapras, Jynx) are Ice-typed, so Ice Beam can never freeze another Ice Beam user |
+
+So freeze is a coin-flip pin worth about five ticks. The tree never treats it
+as the payoff on its own. Its reliable cousin is a **Speed stage on the
+defender** (`statChangesOnHit`), which `actionSpeedOf` really multiplies by —
+the thing slows down whether or not the freeze lands, and that is visible on
+the map, which a status flag is not.
+
+**Checked at the call site and NOT buildable, so it is not in the tree:**
+
+- **Freezing a lake into a walkway.** `terrainFill` only converts
+  `TERRAIN_FILLABLE` = floor/sand/mud (predation.ts). Water is not in that
+  set, so an Ice Beam cannot freeze water — even though an "ice" tile is
+  exactly the walkable-over-water bridge `TerrainKind`'s own doc comment
+  describes. **Real engine gap, logged not faked.**
+- `statusImmunityAura`/`selfHeal`/`spawnsRain` all require `utilityMove`,
+  which Ice Beam is not.
+- `terrainBurn` is no longer a "strip the bush" lever: it calls `igniteNear`
+  and lights a real spreading fire. On this move that would thaw its own
+  freezes. (Twineedle's High Pass comment still describes the old behaviour.)
+
+**What `terrainFill: "ice"` does do, spelled out:** the target's tile becomes
+walkable ice, and out of winter `advanceWaterCycle` thaws it back to **water**
+at 1/30 per tick. A herd built around Glazed Ground leaves meltwater behind
+it. Deliberate and visible; same class as Water Gun's own puddle. Note
+`resolveHitAgainstTarget` also calls `waterSoil` on every `terrainFill`,
+whose comment still assumes the field is exclusive to Water Gun — so an ice
+fill fertilises the tile too.
+
+### Two describers were out of date, and it was measurable
+
+Building this surfaced a real defect in the review tooling itself, not in the
+tree. The **Move Tree Atlas's own `describeDelta`** (the template's copy) had
+never been taught **any** of the seven additive/append delta fields that
+shipped with "the additive fields ship" — `rangeBonus`, `hitsBonus`,
+`areaBonus`, `rallyCallTicks`, `situationalBonuses`, `statChangesOnHit`,
+`allyEffects` — nor `excludesAllies` or `terrainBurn`, which its own
+build-a-spec code right below reads.
+
+| | |
+|---|---|
+| shipped nodes using an additive field | 40 |
+| of those, rendering **completely blank** in the atlas | 24 |
+
+Both copies also printed `"×1.7 damage when the target is the user is
+standing higher up"`: `conditionLabel` returned a fragment slotted into a
+hardcoded "when the target is …", grammatical for only 4 of the 12
+`SituationalCondition`s — the rest are facts about the attacker or the
+weather. `rallyMarked` had no entry at all and printed the raw key. Both are
+now `conditionClause`, which returns the whole clause. `forcedMovement`'s
+`"toward the other side"` named neither party and now says who is dragged
+toward whom.
