@@ -1,6 +1,7 @@
 import type { ActivityPattern, Agent, HuntRules, InventoryItem, Layer, TerrainKind, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
-import type { MoveSpec } from "./moves.js";
+import type { AllyBuff, MoveSpec } from "./moves.js";
+import { resolveAllyEffect } from "./moves.js";
 import { logBehaviorChange } from "./events.js";
 import { stepToward } from "./movement.js";
 import { tileAt } from "./world.js";
@@ -686,7 +687,13 @@ export function applyHerdSupport(world: World, agent: Agent, log?: EventLog, nee
  * heal/buff math and emit the exact same event shape, rather than two
  * copies that could quietly drift apart.
  */
-export function applyAllyEffect(world: World, supporter: Agent, target: Agent, effect: NonNullable<MoveSpec["allyEffect"]>, log?: EventLog): void {
+export function applyAllyEffect(
+  world: World,
+  supporter: Agent,
+  target: Agent,
+  effect: { healFraction?: number; buffs: AllyBuff[] },
+  log?: EventLog
+): void {
   let healed = false;
   let buffed = false;
 
@@ -694,9 +701,13 @@ export function applyAllyEffect(world: World, supporter: Agent, target: Agent, e
     target.hp = Math.min(target.maxHp, target.hp + target.maxHp * effect.healFraction);
     healed = true;
   }
-  if (effect.buff) {
+  // Every buff the resolved payload carries, not just one: a build that paid
+  // for a Speed buff on one node and a Defense buff on another gets both.
+  // `resolveAllyEffect` (moves.ts) has already kept the strongest per stat,
+  // so this can never stack two grants of the SAME stat.
+  for (const buff of effect.buffs) {
     target.statStages = target.statStages ?? [];
-    target.statStages.push({ stat: effect.buff.stat, stage: effect.buff.stage, ticksRemaining: effect.buff.ticks });
+    target.statStages.push({ stat: buff.stat, stage: buff.stage, ticksRemaining: buff.ticks });
     buffed = true;
   }
 
@@ -750,7 +761,7 @@ export function nearestAllyEffectTarget(world: World, agent: Agent, move: MoveSp
  * function only ever covers the dedicated idle-tick use.
  */
 export function applySupportMove(world: World, agent: Agent, log?: EventLog): boolean {
-  const supportMoves = (agent.moves ?? []).filter((m) => m.targetsAlly && m.allyEffect && !agent.moveCooldowns?.[m.id]);
+  const supportMoves = (agent.moves ?? []).filter((m) => m.targetsAlly && resolveAllyEffect(m) && !agent.moveCooldowns?.[m.id]);
   if (supportMoves.length === 0) return false;
 
   for (const move of supportMoves) {
@@ -758,7 +769,7 @@ export function applySupportMove(world: World, agent: Agent, log?: EventLog): bo
     if (!target) continue;
 
     useMove(agent, move, world.tick);
-    applyAllyEffect(world, agent, target, move.allyEffect!, log);
+    applyAllyEffect(world, agent, target, resolveAllyEffect(move)!, log);
     return true;
   }
   return false;

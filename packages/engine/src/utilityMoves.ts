@@ -1,5 +1,6 @@
 import type { Agent, World } from "./types.js";
-import type { StatKey } from "./nature.js";
+import type { MoveSpec } from "./moves.js";
+import { resolveStatChangesOnHit } from "./moves.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { useMove } from "./combat.js";
@@ -70,8 +71,8 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
       }
     }
 
-    if (move.statChangeOnHit?.target === "self") {
-      applyStatStage(agent, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+    for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+      applyStatStage(agent, change.stat, change.stage, change.ticks);
     }
 
     if (move.statusImmunityAura) {
@@ -132,12 +133,12 @@ const COMBAT_MAX_SELF_BUFF_STAGES = 2;
  * because bracing and heavy hits both already talk to the stat-stage system,
  * not because anything pairs the two moves together.
  */
-function worthAnActionInCombat(agent: Agent, move: { selfHeal?: unknown; statChangeOnHit?: { target?: string; stat: StatKey; stage: number }; statusImmunityAura?: unknown }): boolean {
+function worthAnActionInCombat(agent: Agent, move: MoveSpec): boolean {
   if (move.selfHeal && agent.hp !== undefined && agent.maxHp !== undefined && agent.maxHp > 0) {
     if (agent.hp / agent.maxHp <= COMBAT_HEAL_HP_FRACTION) return true;
   }
-  const change = move.statChangeOnHit;
-  if (change?.target === "self" && change.stage > 0) {
+  for (const change of resolveStatChangesOnHit(move)) {
+    if (change.target !== "self" || change.stage <= 0) continue;
     // Only while the buff is still buying something. Re-applying a stat the
     // agent has already stacked is the classic "AI wastes its whole fight
     // on setup" failure, and it is a real one here: `applyStatStage` PUSHES
@@ -193,8 +194,8 @@ export function maybeUseUtilityMoveInCombat(
     if (move.selfHeal.sunbeamBonus && isNearSunbeam(world, agent.pos)) fraction += move.selfHeal.sunbeamBonus;
     agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
   }
-  if (move.statChangeOnHit?.target === "self") {
-    applyStatStage(agent, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+    applyStatStage(agent, change.stat, change.stage, change.ticks);
   }
   if (move.statusImmunityAura) {
     const { ticks, radius } = move.statusImmunityAura;

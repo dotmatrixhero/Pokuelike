@@ -49,6 +49,33 @@ export type MoveShape =
   | { kind: "ring"; radius: number }
   | { kind: "burst"; radius: number };
 
+/** One condition -> damage-multiplier pair. See `MoveSpec.situationalBonus(es)`. */
+export interface SituationalBonus {
+  condition: SituationalCondition;
+  multiplier: number;
+}
+
+/** One stat-stage change applied on use/hit. See `MoveSpec.statChangeOnHit`/`statChangesOnHit`. */
+export interface StatChangeOnHit {
+  target: "self" | "defender";
+  stat: StatKey;
+  stage: number;
+  ticks?: number;
+}
+
+/** One temporary stat buff handed to an ally. See `MoveSpec.allyEffect(s)`. */
+export interface AllyBuff {
+  stat: StatKey;
+  stage: number;
+  ticks?: number;
+}
+
+/** A heal and/or a buff handed to an ally. See `MoveSpec.allyEffect`/`allyEffects`. */
+export interface AllyEffect {
+  healFraction?: number;
+  buff?: AllyBuff;
+}
+
 const DIRECTION_VECTORS: Record<Direction, Vec2> = {
   N: { x: 0, y: -1 },
   S: { x: 0, y: 1 },
@@ -173,6 +200,25 @@ export interface MoveSpec {
    */
   situationalBonus?: { condition: SituationalCondition; multiplier: number };
   /**
+   * The STACKING form of `situationalBonus`, and the one a tree writes into
+   * (`MoveTreeNode.delta.situationalBonuses` appends rather than overwrites).
+   * Resolution (`resolveSituationalBonuses`) is deliberately two-rule, and
+   * both rules come straight from how these trees are authored:
+   *
+   * - **Different conditions compose** — a build that pays for "hits harder
+   *   from high ground" AND "hits harder from a flank" gets both when both
+   *   hold. This is the whole point: "I like the idea of ADDING modifiers so
+   *   you can stack your build, not setting them."
+   * - **Same condition: the strongest wins, it does not multiply.** Every
+   *   ladder in the roster restates a full value rather than a delta
+   *   (concealed 1.25 -> 1.4 -> 1.7 on one chain), so multiplying a ladder
+   *   would silently hand out 2.98x where the designer wrote 1.7x.
+   *
+   * The result is order-independent either way, which is the actual defect
+   * being fixed — `situationalBonus` alone was last-writer-wins.
+   */
+  situationalBonuses?: SituationalBonus[];
+  /**
    * A flat multiplier on this move's *scoring* (not its actual damage) in
    * `pickBestMove` (combat.ts) when `condition` holds against the attacker's
    * own current state — `"selfLowHp"`: the attacker itself is at or below
@@ -192,6 +238,17 @@ export interface MoveSpec {
    * this move never touches stat stages, the default.
    */
   statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+  /**
+   * The STACKING form of `statChangeOnHit` (`delta.statChangesOnHit`
+   * appends). Same two rules as `situationalBonuses`: different
+   * `target`+`stat` pairs compose — a move can drop the defender's Speed
+   * AND raise its own Defense — while two entries on the same pair resolve
+   * to the strongest stage rather than summing, because the roster's
+   * ladders restate full values (defense +1 -> +2 on one chain).
+   * `resolveStatChangesOnHit` is the single reader; nothing outside it
+   * should look at `statChangeOnHit` directly.
+   */
+  statChangesOnHit?: StatChangeOnHit[];
   /** Attacker and defender swap tiles on a landed, non-killing hit — a Bodyblock-style position swap. Absent = no swap, the default. */
   positionSwap?: boolean;
   /**
@@ -211,6 +268,16 @@ export interface MoveSpec {
   targetsAlly?: boolean;
   /** What a `targetsAlly`/`allyEffectOnAttack` move does to the ally it resolves against — a heal, a buff, or both. */
   allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+  /**
+   * The STACKING form of `allyEffect` (`delta.allyEffects` appends). Resolved
+   * by `resolveAllyEffect` into ONE payload: the largest `healFraction` any
+   * entry asks for, plus the strongest buff PER STAT — so a heal node and a
+   * Speed-buff node taken together do both, while a heal ladder
+   * (0.08 -> 0.20 on one chain) lands on 0.20 rather than 0.28. Same
+   * compose-across-keys / strongest-within-a-key rule as
+   * `situationalBonuses` and `statChangesOnHit`.
+   */
+  allyEffects?: AllyEffect[];
   /**
    * A second, independent way `allyEffect` can fire, on top of (not instead
    * of) `targetsAlly`'s dedicated idle-tick support use: every time this
@@ -544,8 +611,24 @@ export interface MoveTreeNode {
    */
   leaning?: keyof Disposition;
   delta: {
+    /**
+     * Overwrite, and deliberately staying that way: a cone genuinely is not
+     * a ring plus a line, so a move has exactly one FORM. Rival forms must
+     * `excludes` each other (enforced by check-proposed-trees.ts). Area SIZE
+     * is `areaBonus`, which is additive.
+     */
     shape?: MoveShape;
+    /**
+     * Additive, like `power` — how much BIGGER this move's area gets: `+N`
+     * on a ring/burst radius, or on a line/cone length. A `point` shape
+     * becomes a burst of radius N. Also turns on `hitsArea`, since an area
+     * this size that doesn't hit an area would be dead weight.
+     */
+    areaBonus?: number;
+    /** Overwrite. Prefer `rangeBonus`: two independent nodes setting this silently race, and "+1 Range" nodes are the roster's most duplicated shape. */
     range?: Partial<MoveRange>;
+    /** Additive, like `power` — `+N` tiles onto the move's current `range.max`. */
+    rangeBonus?: number;
     power?: number;
     accuracy?: number;
     cooldownTicks?: number;
@@ -554,16 +637,31 @@ export interface MoveTreeNode {
     forcedMovement?: ForcedMovement;
     /** Additive, like `power`. */
     defensePenetration?: number;
-    /** Overwrite, like `shape` — a move has at most one multi-hit spec at a time. */
+    /** Overwrite, like `shape` — a move has at most one multi-hit spec at a time. Prefer `hitsBonus`: two independent nodes setting this silently race. */
     hits?: { min: number; max: number };
+    /**
+     * Additive, like `power` — the STACKING form of `hits`. `+N` means N more
+     * strikes than the move currently makes, so two nodes that each add a
+     * needle really do add two. A move with no base `hits` counts as one
+     * strike, so `hitsBonus: 2` on a single-hit move makes it a 3-hit move.
+     */
+    hitsBonus?: number;
     /** Additive, like `power` — a move that's already locking can lock longer. */
     lockTicks?: number;
-    /** Overwrite, like `shape` — a move has at most one situational condition at a time. */
+    /** Overwrite, like `shape`. Prefer `situationalBonuses`: two independent nodes setting this silently race. */
     situationalBonus?: { condition: SituationalCondition; multiplier: number };
+    /**
+     * APPENDS to `MoveSpec.situationalBonuses` rather than overwriting — the
+     * stacking form. Different conditions compose; the strongest entry wins
+     * within one condition (see `MoveSpec.situationalBonuses`).
+     */
+    situationalBonuses?: SituationalBonus[];
     /** Overwrite, like `shape`. */
     selfStateBonus?: { condition: "selfLowHp"; multiplier: number };
-    /** Overwrite, like `shape` — a move has at most one stat-change-on-hit effect at a time. */
+    /** Overwrite, like `shape`. Prefer `statChangesOnHit`: two independent nodes setting this silently race. */
     statChangeOnHit?: { target: "self" | "defender"; stat: StatKey; stage: number; ticks?: number };
+    /** APPENDS to `MoveSpec.statChangesOnHit` rather than overwriting — the stacking form. */
+    statChangesOnHit?: StatChangeOnHit[];
     /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
     positionSwap?: boolean;
     targetsAlly?: boolean;
@@ -572,8 +670,10 @@ export interface MoveTreeNode {
     excludesAllies?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
-    /** Overwrite, like `shape`. */
+    /** Overwrite, like `shape`. Prefer `allyEffects`: two independent nodes setting this silently race. */
     allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
+    /** APPENDS to `MoveSpec.allyEffects` rather than overwriting — the stacking form. */
+    allyEffects?: AllyEffect[];
     /** Overwrite, like `shape`. */
     weightScaling?: { factor: number };
     /** Additive, like `power`. */
@@ -590,8 +690,10 @@ export interface MoveTreeNode {
     resistanceBreaker?: { multiplier: number };
     /** Overwrite, like `shape`. */
     selfCostPerUse?: { need: "energy" | "hunger"; amount: number };
-    /** Overwrite, like `shape`. */
+    /** Overwrite, like `shape`. Prefer `rallyCallTicks`. */
     rallyCall?: { ticks: number };
+    /** Additive, like `power` — the STACKING form of `rallyCall`: `+N` ticks onto however long this move's mark already lasts. */
+    rallyCallTicks?: number;
     /** OR-merge, like a boolean flag being turned on for good once any node sets it. */
     critCooldownReset?: boolean;
     /** Additive, like `power` — meaningless without `positionSwap` also set by some node in the chosen set. */
@@ -696,6 +798,90 @@ export function resolveShape(shape: MoveShape, origin: Vec2, facing: Direction):
 }
 
 /**
+ * Grows a shape by `bonus` (`delta.areaBonus`) — radius for a ring/burst,
+ * length for a line/cone, and a `point` becomes a burst of that radius,
+ * since "make the area bigger" on something with no area has to start one.
+ * Area SIZE is additive on purpose while `shape` (the FORM) stays an
+ * overwrite: "Hits area should be additive. Make it scalar with range of
+ * area. Agreed on shape though."
+ */
+function growShape(shape: MoveShape, bonus: number | undefined): MoveShape {
+  if (bonus === undefined) return shape;
+  switch (shape.kind) {
+    case "point":
+      return { kind: "burst", radius: bonus };
+    case "line":
+      return { kind: "line", length: shape.length + bonus };
+    case "cone":
+      return { kind: "cone", length: shape.length + bonus, width: shape.width };
+    case "ring":
+      return { kind: "ring", radius: shape.radius + bonus };
+    case "burst":
+      return { kind: "burst", radius: shape.radius + bonus };
+  }
+}
+
+/**
+ * The single reader of a move's situational damage bonuses — folds the
+ * legacy singular `situationalBonus` together with the stacking
+ * `situationalBonuses` list and collapses it to one entry per condition,
+ * keeping the strongest multiplier. See `MoveSpec.situationalBonuses` for
+ * why "strongest" rather than "product". Order-independent by construction.
+ */
+export function resolveSituationalBonuses(move: MoveSpec): SituationalBonus[] {
+  const all = [...(move.situationalBonus ? [move.situationalBonus] : []), ...(move.situationalBonuses ?? [])];
+  const best = new Map<SituationalCondition, SituationalBonus>();
+  for (const bonus of all) {
+    const current = best.get(bonus.condition);
+    if (!current || bonus.multiplier > current.multiplier) best.set(bonus.condition, bonus);
+  }
+  return [...best.values()];
+}
+
+/**
+ * The single reader of a move's stat-stage changes — folds the legacy
+ * singular `statChangeOnHit` together with the stacking `statChangesOnHit`
+ * list, keeping the largest-magnitude stage per `target`+`stat` pair (a
+ * ladder restates a full value, so +1 then +2 is +2, not +3). Different
+ * targets or different stats all survive and all apply.
+ */
+export function resolveStatChangesOnHit(move: MoveSpec): StatChangeOnHit[] {
+  const all = [...(move.statChangeOnHit ? [move.statChangeOnHit] : []), ...(move.statChangesOnHit ?? [])];
+  const best = new Map<string, StatChangeOnHit>();
+  for (const change of all) {
+    const key = `${change.target}:${change.stat}`;
+    const current = best.get(key);
+    if (!current || Math.abs(change.stage) > Math.abs(current.stage)) best.set(key, change);
+  }
+  return [...best.values()];
+}
+
+/**
+ * The single reader of a move's ally payload — folds the legacy singular
+ * `allyEffect` together with the stacking `allyEffects` list into ONE
+ * application: the largest heal any entry asks for, plus the strongest buff
+ * per stat. `undefined` when the move has no ally payload at all, which is
+ * what the `targetsAlly` call sites gate on.
+ */
+export function resolveAllyEffect(move: MoveSpec): { healFraction?: number; buffs: AllyBuff[] } | undefined {
+  const all = [...(move.allyEffect ? [move.allyEffect] : []), ...(move.allyEffects ?? [])];
+  if (all.length === 0) return undefined;
+
+  let healFraction: number | undefined;
+  const buffs = new Map<StatKey, AllyBuff>();
+  for (const effect of all) {
+    if (effect.healFraction !== undefined && (healFraction === undefined || effect.healFraction > healFraction)) {
+      healFraction = effect.healFraction;
+    }
+    if (effect.buff) {
+      const current = buffs.get(effect.buff.stat);
+      if (!current || Math.abs(effect.buff.stage) > Math.abs(current.stage)) buffs.set(effect.buff.stat, effect.buff);
+    }
+  }
+  return { healFraction, buffs: [...buffs.values()] };
+}
+
+/**
  * Derives a new `MoveSpec` by applying a chosen set of a move's tree nodes,
  * in the given order, on top of `base`. Never mutates `base` — every field
  * (including nested `range`) is copied into a fresh object as it's touched,
@@ -722,6 +908,14 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
 
   const chosen = new Set<string>();
   let result: MoveSpec = { ...base, range: base.range ? { ...base.range } : undefined };
+  // Area SIZE is accumulated separately from area FORM, and applied once at
+  // the end. Growing the shape in place would lose the bonus the moment a
+  // later node overwrote `shape` — which made the result depend on whether
+  // the form node or the size node was bought first, the exact defect this
+  // whole pass exists to remove. Measured: form-then-size gave radius 2,
+  // size-then-form gave radius 1.
+  let areaBonusTotal = 0;
+  let formShape = base.shape;
 
   for (const nodeId of chosenNodeIds) {
     const node = tree[nodeId];
@@ -755,32 +949,47 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
     const { delta } = node;
     result = {
       ...result,
-      shape: delta.shape ?? result.shape,
+      hitsArea: delta.areaBonus !== undefined ? true : delta.hitsArea ?? result.hitsArea,
       power: delta.power !== undefined ? result.power + delta.power : result.power,
       accuracy: delta.accuracy !== undefined ? result.accuracy + delta.accuracy : result.accuracy,
       cooldownTicks:
         delta.cooldownTicks !== undefined ? Math.max(0, result.cooldownTicks + delta.cooldownTicks) : result.cooldownTicks,
       statusChance:
         delta.statusChance !== undefined ? (result.statusChance ?? 0) + delta.statusChance : result.statusChance,
-      range: delta.range
-        ? { min: delta.range.min ?? result.range?.min ?? 0, max: delta.range.max ?? result.range?.max ?? 1 }
+      range: delta.rangeBonus !== undefined || delta.range
+        ? {
+            min: delta.range?.min ?? result.range?.min ?? 0,
+            max: (delta.range?.max ?? result.range?.max ?? 1) + (delta.rangeBonus ?? 0),
+          }
         : result.range,
       forcedMovement: delta.forcedMovement ?? result.forcedMovement,
       defensePenetration:
         delta.defensePenetration !== undefined ? (result.defensePenetration ?? 0) + delta.defensePenetration : result.defensePenetration,
-      hits: delta.hits ?? result.hits,
+      hits:
+        delta.hitsBonus !== undefined
+          ? {
+              min: (delta.hits?.min ?? result.hits?.min ?? 1) + delta.hitsBonus,
+              max: (delta.hits?.max ?? result.hits?.max ?? 1) + delta.hitsBonus,
+            }
+          : delta.hits ?? result.hits,
       lockTicks: delta.lockTicks !== undefined ? (result.lockTicks ?? 0) + delta.lockTicks : result.lockTicks,
       situationalBonus: delta.situationalBonus ?? result.situationalBonus,
+      situationalBonuses: delta.situationalBonuses
+        ? [...(result.situationalBonuses ?? []), ...delta.situationalBonuses]
+        : result.situationalBonuses,
       selfStateBonus: delta.selfStateBonus ?? result.selfStateBonus,
       statChangeOnHit: delta.statChangeOnHit ?? result.statChangeOnHit,
+      statChangesOnHit: delta.statChangesOnHit
+        ? [...(result.statChangesOnHit ?? []), ...delta.statChangesOnHit]
+        : result.statChangesOnHit,
       positionSwap: delta.positionSwap ?? result.positionSwap,
       targetsAlly: delta.targetsAlly ?? result.targetsAlly,
       allyEffectOnAttack: delta.allyEffectOnAttack ?? result.allyEffectOnAttack,
-      hitsArea: delta.hitsArea ?? result.hitsArea,
       excludesAllies: delta.excludesAllies ?? result.excludesAllies,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,
       allyEffect: delta.allyEffect ?? result.allyEffect,
+      allyEffects: delta.allyEffects ? [...(result.allyEffects ?? []), ...delta.allyEffects] : result.allyEffects,
       weightScaling: delta.weightScaling ?? result.weightScaling,
       critRateStage: delta.critRateStage !== undefined ? (result.critRateStage ?? 0) + delta.critRateStage : result.critRateStage,
       lifestealFraction:
@@ -791,7 +1000,10 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       bonusVsType: delta.bonusVsType ?? result.bonusVsType,
       resistanceBreaker: delta.resistanceBreaker ?? result.resistanceBreaker,
       selfCostPerUse: delta.selfCostPerUse ?? result.selfCostPerUse,
-      rallyCall: delta.rallyCall ?? result.rallyCall,
+      rallyCall:
+        delta.rallyCallTicks !== undefined
+          ? { ticks: (delta.rallyCall?.ticks ?? result.rallyCall?.ticks ?? 0) + delta.rallyCallTicks }
+          : delta.rallyCall ?? result.rallyCall,
       critCooldownReset: delta.critCooldownReset ?? result.critCooldownReset,
       positionSwapPull:
         delta.positionSwapPull !== undefined ? (result.positionSwapPull ?? 0) + delta.positionSwapPull : result.positionSwapPull,
@@ -807,9 +1019,11 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       spawnsRain: delta.spawnsRain ?? result.spawnsRain,
       gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
+    if (delta.shape) formShape = delta.shape;
+    if (delta.areaBonus !== undefined) areaBonusTotal += delta.areaBonus;
   }
 
-  return result;
+  return { ...result, shape: areaBonusTotal === 0 ? formShape : growShape(formShape, areaBonusTotal) };
 }
 
 /** Sum of the chosen nodes' own `cost` fields — what `applyMoveTreeWithSpend` actually charges. */

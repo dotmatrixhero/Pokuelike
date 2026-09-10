@@ -5,8 +5,8 @@ import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical, rollHitCount } from "./combat.js";
 import { elevationAccuracyMultiplier } from "./elevation.js";
-import type { Direction } from "./moves.js";
-import { resolveShape } from "./moves.js";
+import type { Direction, SituationalBonus } from "./moves.js";
+import { resolveShape, resolveAllyEffect, resolveSituationalBonuses, resolveStatChangesOnHit } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
@@ -946,8 +946,17 @@ function isBeingHunted(world: World, agent: Agent): boolean {
  * `situationalBonus`, or its condition doesn't currently hold.
  */
 function situationalMultiplier(world: World, attacker: Agent, defender: Agent, move: MoveSpec): number {
-  const bonus = move.situationalBonus;
-  if (!bonus) return 1;
+  // Every bonus whose condition currently holds multiplies in — a build that
+  // paid for "hits harder from high ground" AND "hits harder from a flank"
+  // gets both. `resolveSituationalBonuses` (moves.ts) has already collapsed
+  // same-condition ladders to their strongest entry, so this is a product
+  // over DISTINCT conditions and cannot double-count one of them.
+  let total = 1;
+  for (const bonus of resolveSituationalBonuses(move)) total *= oneSituationalMultiplier(world, attacker, defender, bonus);
+  return total;
+}
+
+function oneSituationalMultiplier(world: World, attacker: Agent, defender: Agent, bonus: SituationalBonus): number {
   switch (bonus.condition) {
     case "targetLowHp":
       return defender.hp !== undefined && defender.maxHp !== undefined && defender.maxHp > 0 && defender.hp / defender.maxHp <= 0.5
@@ -1294,8 +1303,8 @@ function resolveHitAgainstTarget(
     if (move.statusSpreads && defender.status) {
       maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
     }
-    if (move.statChangeOnHit?.target === "defender") {
-      applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+    for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "defender")) {
+      applyStatStage(defender, change.stat, change.stage, change.ticks);
     }
     if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
     if (move.positionSwap) {
@@ -1484,17 +1493,17 @@ function resolveHit(
 
   // A self-side stat change (e.g. a windup buff) always applies the moment
   // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
-  if (move.statChangeOnHit?.target === "self") {
-    applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+    applyStatStage(attacker, change.stat, change.stage, change.ticks);
   }
 
   // `allyEffectOnAttack`: the ally-effect piggybacks on a hostile attack,
   // additively — same "the moment the move is used" timing as the self-side
   // stat change above, independent of whether this attack itself lands. A
   // no-op if no eligible herd-mate is in range this tick.
-  if (move.allyEffectOnAttack && move.allyEffect) {
+  if (move.allyEffectOnAttack && resolveAllyEffect(move)) {
     const ally = nearestAllyEffectTarget(world, attacker, move);
-    if (ally) applyAllyEffect(world, attacker, ally, move.allyEffect, log);
+    if (ally) applyAllyEffect(world, attacker, ally, resolveAllyEffect(move)!, log);
   }
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);

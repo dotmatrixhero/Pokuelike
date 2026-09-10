@@ -6427,3 +6427,210 @@ tests that mention `vine_whip` (`leveling.test.ts`, `moveCap.test.ts`) both
 build their own synthetic spec and never touch the shipped tree, and
 `moveTrees.test.ts`'s vine-whip coverage is generic-across-the-roster rather
 than path-specific. No assertion's meaning changed.
+
+## The additive fields ship: "you don't know how they will interact"
+
+> "I like the idea of ADDING modifiers so you can stack your build, not
+> setting them. Because with the latter you don't know how they will interact
+> with each other."
+
+The earlier pass wrote the additive shapes into `proposed-trees.ts` as a
+draft. This pass built them in the engine, migrated the shipped trees that
+were actually colliding, and measured each one against the real combat
+pipeline.
+
+### The measured scope, first
+
+The collision list is derived by reading `applyMoveTree` itself — every field
+it writes with `delta.X ?? result.X`, minus the booleans (those OR-merge:
+once a node turns `terrainBurn` on, nothing turns it back off, so two setters
+agree by construction). Ancestry-aware, `excludes`-aware, all 17 shipped
+trees:
+
+| tree | field | colliding pairs | independent setters |
+|---|---|---|---|
+| wing_attack | `forcedMovement` | 7 | 5 |
+| solar_beam | `situationalBonus` | 4 | 5 |
+| rock_slide | `weightScaling` | 4 | 5 |
+| solar_beam | `range` | 3 | 3 |
+| hydro_pump | `range` | 3 | 3 |
+| hydro_pump | `situationalBonus` | 1 | 2 |
+| wing_attack | `situationalBonus` | 1 | 2 |
+| | **23 pairs** | **4 trees** | |
+
+That is the whole real surface — smaller than the 39 pairs the first audit
+counted, because the v4 conversions have been clearing them tree by tree
+since. Two things about this list are worth saying plainly:
+
+- **`weightScaling` was invisible to the checker.** It is an overwrite field
+  in `applyMoveTree` and was simply not in `check-proposed-trees.ts`'s
+  `OVERWRITE` list, so rock_slide shipped six independently-takeable setters
+  of it (0.08 to 0.25) and nothing said a word. The list is now the full
+  derived surface, not a hand-maintained subset.
+- **The same list expansion surfaced two collisions in the DRAFTS.** Not
+  shipped, so not fixed here, but they were invisible for the same reason:
+  `growth` has **14** co-takeable `fertilityBoost` pairs and `poison_sting`
+  **8** on `statusSeverity`. Both fields are plain scalars underneath and are
+  the obvious next additive candidates.
+- **`hits`, `statChangeOnHit`, `rallyCall` and `allyEffect` have zero shipped
+  collisions today.** They were built anyway, because the drafts author in
+  those shapes and because they are the fields the next conversions will
+  need.
+
+### What is additive now, and what it means
+
+| was (overwrite) | now | resolution rule |
+|---|---|---|
+| `range: {max}` | `rangeBonus: +N` | sums |
+| `hits: {min,max}` | `hitsBonus: +N` | sums; no base `hits` counts as one strike |
+| `rallyCall: {ticks}` | `rallyCallTicks: +N` | sums |
+| `hitsArea` + `shape.radius` | `areaBonus: +N` | sums, and turns `hitsArea` on |
+| `situationalBonus` | `situationalBonuses[]` | different conditions multiply; same condition takes the strongest |
+| `statChangeOnHit` | `statChangesOnHit[]` | different target+stat both apply; same pair takes the strongest |
+| `allyEffect` | `allyEffects[]` | strongest heal, plus the strongest buff per stat |
+
+**Why "strongest wins" inside one key rather than multiplying.** Every ladder
+in this roster restates a full value instead of an increment — Twineedle's
+concealed chain is 1.25 → 1.4 → 1.7, Solar Beam's low-HP chain is 1.3 → 1.6,
+Leech Seed's self-Attack chain is +1 → +2. Multiplying a ladder would hand
+out 2.98x where the designer wrote 1.7x. So distinct keys compose (that is
+the stacking the ask is about) and one key escalates (that is what a chain
+already meant). Both rules are order-independent, which is the actual defect:
+`situationalBonus` alone was last-writer-wins.
+
+**`shape` stays an overwrite, deliberately.** A cone is not a ring plus a
+line. Rival forms must `excludes` each other, and the checker enforces it.
+Only the SIZE became additive.
+
+**`areaBonus` accumulates separately from `shape`, and that was a real bug in
+the first cut.** Growing the shape in place lost the bonus the moment a later
+node overwrote `shape`: measured, buying the form first gave radius 2 and
+buying the size first gave radius 1 — the same order-dependence this pass
+exists to delete, reintroduced by the fix. It now sums across the whole
+selection and is applied once at the end.
+
+### Verified against the real engine, not by reading the code
+
+Every field below was driven through `applyMoveTree` and then through
+`tickWorld` → `applyPredationInstincts` → `resolveHit`, with damage read off
+the real `fought` events. BEFORE is the overwrite form in both purchase
+orders; CONTROL is the same measurement where it should show nothing.
+
+| field | BEFORE (overwrite) | AFTER (additive) | control |
+|---|---|---|---|
+| `rangeBonus` | 3 nodes, both orders: max **5** | max **7** either order | one node: 5. Real hits on a target 5 tiles out: **0** at range 4, **14** at range 5 |
+| `situationalBonuses` | order A **31** dmg (1.29x), order B **33** (1.38x) | **43** (1.79x) either order | flanking alone 33, elevation alone 31, neither 24. Ladder 1.3→1.6 on one condition: **38**, i.e. 1.6x, not 2.08x |
+| `hitsBonus` | order A 3 hits, order B 2 hits | **4** hits either order | real damage 336 → 672 (2.00x) → 1344 (4.00x); overwrite both = 1008 (3.00x) |
+| `rallyCallTicks` | order A 30 ticks, order B 20 | **50** either order | no node: unmarked. Real mark on the defender: 19 / 49 |
+| `statChangesOnHit` | order A defender Speed −1 only, order B self Defense +1 only | **both**, real stages on both agents | each alone applies only its own |
+| `allyEffects` | order A buff only (ally hp 2700), order B heal only (hp 5000, no stages) | **hp 5000 AND Defense +2** | heal-only and buff-only each do exactly one |
+| `areaBonus` | — | radius 1 → 2 → 3, same either order | real bystanders caught: 0 (no area) → 0 (radius 1, `hitsArea` off) → **4** → **6** |
+
+The range measurement needed a control of its own: a range-**20** move also
+lands 0 hits on a target 6 tiles away, so beyond 5 tiles the ceiling is the
+hunter's own detection radius and not the move's range. Without that, the
+zeroes further out would have read as a range result.
+
+### What was migrated, and what was left alone
+
+`hydro_pump` and `solar_beam` are at **0 checker problems** (from 2 and 3).
+15 shipped nodes moved to the additive forms: the three `+1 Range` nodes on
+Hydro Pump and three `+2 Range` on Solar Beam, and every `situationalBonus`
+setter on Hydro Pump, Solar Beam, Wing Attack and Scratch.
+
+The point-economy consequence is the reason to do it at all: a Hydro Pump
+build that buys all three `+1 Range` nodes used to pay three points for
+**+1** tile. It now gets **+3** (max 4 → 7). Solar Beam's three `+2` nodes go
+from +2 to +6 (max 5 → 11). Those are real balance changes and they are the
+literal content of the ask — flagging them rather than burying them.
+
+**Left as overwrite, on purpose:**
+
+- **`forcedMovement`** (wing_attack, 7 pairs). There is no sensible sum: the
+  fields are `mover`, `direction`, `timing`. "Drag them closer before the
+  hit" plus "shove them away after it" is not a bigger effect, it is two
+  different effects. This wants `excludes` between rival displacements, which
+  is a tree decision belonging to wing_attack's own v4 conversion (still
+  pre-v4 at 39 nodes), not an engine change.
+- **`weightScaling`** (rock_slide, 4 pairs). This one genuinely could be
+  additive — `factor` is a scalar. It is left alone because making it so
+  sums six setters into as much as +0.9 max-HP-scaled power, which is a
+  balance decision, not a cleanup. Reported, with the checker now able to see
+  it, rather than decided unilaterally.
+
+### One thing this pass changed that it did not have to
+
+Solar Beam's last non-collision problem was principle 13: the bridge filler
+*Deeper Shade* shared no lever with its crosslink *Shared Shade*. That is a
+collision between two rules, not an oversight — the node's own comment
+records that it was deliberately moved OFF healing to keep the tree under the
+10%/tick per-move healing budget (it sits at 9.4%, with 0.25 regenFlat of
+headroom). Deepening the crosslink's healing lever would break the cap.
+Resolved by giving *Shared Shade* the cover lever as a second passive
+(`defenseBoost` 0.03) so the filler deepens something the crosslink actually
+has. Solar Beam was using 0% of a 20% damage-reduction-style budget. The
+alternative — put regen back on Deeper Shade and raise the healing cap — is a
+balance call and was not taken.
+
+### The related finding: purchase ORDER, not depth, still decides every remaining overwrite field
+
+Not fixed here. This is a decision, not a cleanup.
+
+`maybeAutoRespec` appends each bought node to `moveTreeChoices` in the order
+it buys them, and `applyMoveTree` applies them in exactly that order. Because
+`prerequisitesAnyOf` bridges let an agent reach a deep node early, a build can
+buy the DEEP node first and a SHALLOW one later, and the shallow one wins.
+The checker's "ancestrally related ⇒ safe" test cannot see this: ancestry is
+a route, not a purchase order.
+
+Re-measured after this pass, driving the real `maybeAutoRespec` to a full
+build on all 17 trees at 3 rng seeds, comparing the bought order against the
+same node set sorted by depth:
+
+| tree | field | bought order | depth order |
+|---|---|---|---|
+| flamethrower | `allyEffect` | heal 0.15 + spAttack +1 | heal 0.05 + attack +1 |
+| rock_throw | `resistanceBreaker` | ×1.25 | ×2 |
+| water_gun | `allyEffect` | buff only | heal 0.25 + buff (30 ticks) |
+| hydro_pump | `forcedMovement` | attacker, closer, beforeHit | defender, away, onHit |
+| rock_slide | `weightScaling` | 0.15 | 0.25 |
+| wing_attack | `forcedMovement` | attacker, closer, 2 | attacker, away, 1 |
+| leech_seed | `statChangeOnHit` | self attack +1, 45t | self attack +2, 80t |
+| leech_seed | `fertilityBoost` | 0.4 / r2 | 0.5 / r3 |
+| leech_seed | `allyEffect` | heal only | heal + defense +1 |
+
+**7 of 17 trees drift.** Every drifting field is one still on the overwrite
+path. The additive fields do NOT drift: Solar Beam dropped off this list
+entirely, and its `situationalBonuses` array does come out in a different
+ORDER depending on what was bought first — but `resolveSituationalBonuses`
+collapses by condition and keeps the strongest, so nothing in the sim can
+observe the difference. That is the interesting half of the result: making a
+field additive fixes the order problem for that field as a side effect,
+because a sum and a max are both commutative.
+
+**The proposed fix is one line** — sort `chosenNodeIds` by depth inside
+`applyMoveTree` (or in `maybeAutoRespec` before applying). The argument for
+it: a build should land on the deepest node it actually bought, every time,
+and today an agent can pay for *Insatiable* and end up with *Wider Reach*
+because of what order the rng happened to hand out points in. The argument
+against, and why it is not in this commit: it changes the resolved spec of 7
+of 17 shipped trees in ways nobody has balanced, always in the direction of
+"the deeper, stronger node wins" — so it is a global power increase on top of
+the ones this pass already made, and it silently retires whatever balance
+those trees currently have.
+
+Three ways to take it, if it is wanted:
+
+1. **Sort by depth in `applyMoveTree`.** One line, deterministic, always the
+   deepest. Changes 7 trees at once.
+2. **Convert the remaining fields instead.** `weightScaling` is a trivially
+   additive scalar; `allyEffect` and `statChangeOnHit` are already plural in
+   the engine and only need the shipped nodes migrated. That leaves
+   `forcedMovement`, `resistanceBreaker` and `fertilityBoost` — which is a
+   short enough list to fix with `excludes` forks, one tree at a time, on
+   each tree's own conversion.
+3. **Both, in that order** — convert what converts, then sort what is left.
+
+Option 2 is the one that matches how this roster has been fixed so far, and
+it is the one I would take: every conversion is a tree-sized change with its
+own before/after, where the sort is a roster-sized change with none.

@@ -4330,7 +4330,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["envenomed", "ambush_claws"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.3 }] },
       },
       wrong_side: {
         id: "wrong_side",
@@ -5881,7 +5881,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // how far the resolved blast itself reaches. A target at the new,
         // farther edge of range won't necessarily end up inside the cone.
         // See MOVES_DESIGN.md's "range vs. shape are decoupled" note.
-        delta: { range: { max: 5 } },
+        delta: { rangeBonus: 1 },
       },
       pressure_holds: {
         id: "pressure_holds",
@@ -6007,7 +6007,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["undertow_anchor"],
         leaning: "boldness",
-        delta: { range: { max: 5 } },
+        delta: { rangeBonus: 1 },
       },
       narrow_the_stream: {
         id: "narrow_the_stream",
@@ -6044,7 +6044,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["bracing_wave"],
         leaning: "boldness",
         // Punishes whoever tries to catch it off guard mid-channel.
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.4 }] },
       },
       fouling_backwash: {
         id: "fouling_backwash",
@@ -6129,7 +6129,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["wake_rally"],
         leaning: "sociability",
-        delta: { range: { max: 5 } },
+        delta: { rangeBonus: 1 },
       },
       fuller_wash: {
         id: "fuller_wash",
@@ -6330,7 +6330,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // The pod's own convergence is the real payoff here, not a flat
         // power bolt-on — a target the herd has flagged gets hit hardest
         // once the current actually catches it.
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.4 } },
+        delta: { situationalBonuses: [{ condition: "rallyMarked", multiplier: 1.4 }] },
       },
     },
   },
@@ -6417,7 +6417,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // reaches into Aggression (Rooted Assault's and Territorial
         // Flare's own chains).
         leaning: "aggression",
-        delta: { range: { max: 7 } },
+        delta: { rangeBonus: 2 },
       },
       withering_glare: {
         id: "withering_glare",
@@ -6428,7 +6428,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // Catches a challenger off guard, before it's even noticed the
         // light gathering.
-        delta: { cooldownTicks: -1, situationalBonus: { condition: "flanking", multiplier: 1.4 } },
+        delta: { cooldownTicks: -1, situationalBonuses: [{ condition: "flanking", multiplier: 1.4 }] },
       },
       overwhelming_beam: {
         id: "overwhelming_beam",
@@ -6507,7 +6507,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // reaches into Boldness (Rooted Assault's and Shared Shade's own
         // chains).
         leaning: "boldness",
-        delta: { range: { max: 7 } },
+        delta: { rangeBonus: 2 },
       },
       guardians_ground: {
         id: "guardians_ground",
@@ -6517,7 +6517,7 @@ export const MOVES: Record<string, MoveSpec> = {
         excludes: ["verdant_wall"],
         leaning: "boldness",
         // Holds the high, defensible ground rather than turtling in place.
-        delta: { cooldownTicks: -1, situationalBonus: { condition: "elevation", multiplier: 1.3 } },
+        delta: { cooldownTicks: -1, situationalBonuses: [{ condition: "elevation", multiplier: 1.3 }] },
       },
       verdant_wall: {
         id: "verdant_wall",
@@ -6586,7 +6586,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "+2 Range",
         cost: 1,
         leaning: "sociability",
-        delta: { range: { max: 7 } },
+        delta: { rangeBonus: 2 },
       },
       grove_muster: {
         id: "grove_muster",
@@ -6705,7 +6705,7 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         leaning: "sociability",
         // Bridge filler — deepens Territorial Flare's own condition lever.
-        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.3 } },
+        delta: { situationalBonuses: [{ condition: "targetLowHp", multiplier: 1.3 }] },
       },
       sunspot: {
         id: "sunspot",
@@ -6715,7 +6715,7 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "aggression",
         // BRIDGE NOTABLE. The flare escalated into a held burn on whatever
         // strayed into the grove's ground.
-        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.6 }, critRateStage: 1 },
+        delta: { situationalBonuses: [{ condition: "targetLowHp", multiplier: 1.6 }], critRateStage: 1 },
       },
       eternal_grove: {
         id: "eternal_grove",
@@ -6771,7 +6771,19 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Shared Shade",
         cost: 1,
         leaning: "boldness",
-        grantsPassive: { kind: "regenFlat", value: 1.5 },
+        // Two passives, because this bridge had a rule collision underneath
+        // it: principle 13 wants the filler (Deeper Shade) to deepen this
+        // crosslink's own lever, but Deeper Shade was deliberately moved OFF
+        // healing to keep solar_beam under the 10%/tick per-move healing
+        // budget (it sits at 9.4% with 0.25 regenFlat of headroom left), so
+        // the two rules could not both hold on the healing lever. Adding the
+        // cover lever HERE is what makes the bridge legal on its own terms:
+        // shade is cover, Deeper Shade deepens the cover. Costs 3% of a 20%
+        // damage-reduction-style budget the tree was not using at all.
+        grantsPassives: [
+          { kind: "regenFlat", value: 1.5 },
+          { kind: "defenseBoost", value: 0.03 },
+        ],
         delta: {},
       },
       // Bridge tail: extends Shared Shade into Boldness's and
@@ -6811,7 +6823,7 @@ export const MOVES: Record<string, MoveSpec> = {
         name: "Territorial Flare",
         cost: 1,
         leaning: "sociability",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.3 }] },
       },
       // Bridge tail: extends Territorial Flare into Sociability's and
       // Aggression's own pre-fork nodes (Grove Precision / Widening Beam).
@@ -8126,7 +8138,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // AoE cone, undoing everything the branch just built. This one
         // stays single-target and finishes what the stoop started: a real
         // predator's kill shot against something already reeling.
-        delta: { power: 10, situationalBonus: { condition: "targetLowHp", multiplier: 1.5 } },
+        delta: { power: 10, situationalBonuses: [{ condition: "targetLowHp", multiplier: 1.5 }] },
       },
       // Crosslink: Aggression <-> Boldness — rides the same current that
       // keeps it airborne straight into range before the target can react.
@@ -8222,7 +8234,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // damage-reduction stand-in — this branch's whole point is air
         // superiority, not raw bulk, and flat mitigation IS raw bulk.
         // Real turbulence to fly through, not around.
-        delta: { situationalBonus: { condition: "storm", multiplier: 1.4 }, accuracy: -5 },
+        delta: { situationalBonuses: [{ condition: "storm", multiplier: 1.4 }], accuracy: -5 },
       },
       sky_dominance: {
         id: "sky_dominance",

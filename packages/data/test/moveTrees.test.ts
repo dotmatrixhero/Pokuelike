@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMoveTree, resolveShape } from "@pokuelike/engine";
+import { applyMoveTree, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
 import type { MoveSpec, MoveTreeNode } from "@pokuelike/engine";
 import { MOVES } from "../src/moves.js";
 
@@ -1337,5 +1337,137 @@ describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
     expect(applyMoveTree(ember, [...bridge, "kindled_spirits"]).allyEffect).toEqual({
       buff: { stat: "spAttack", stage: 1, ticks: 15 },
     });
+  });
+});
+
+describe("additive delta fields: a build that pays twice gets twice", () => {
+  // The bug these exist for, in the user's words: "If you got both, would it
+  // just do nothing? [...] I like the idea of ADDING modifiers so you can
+  // stack your build, not setting them." Two co-takeable nodes on one
+  // OVERWRITE field used to resolve to whichever `applyMoveTree` reached
+  // LAST — so the second point bought nothing, and which one won depended on
+  // purchase order. Each case below asserts the stack AND asserts that
+  // reversing the order changes nothing.
+  const hydroPump = MOVES.hydro_pump;
+  const solarBeam = MOVES.solar_beam;
+
+  /** A legal chosen-node order reaching every one of `targets`, prerequisites first. */
+  const buildFor = (tree: Record<string, MoveTreeNode>, targets: string[]) => {
+    const into = new Set<string>();
+    for (const t of targets) resolveChosenSetFor(tree, t, into);
+    return [...into];
+  };
+
+  it("Hydro Pump's three independent '+1 Range' nodes now add up to +3, not +1", () => {
+    // Bought one at a time they were each `range: { max: 5 }` on a base of 4,
+    // so three points bought one tile between them.
+    expect(hydroPump.range).toEqual({ min: 0, max: 4 });
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, ["widening_main"])).range).toEqual({ min: 0, max: 5 });
+
+    const targets = ["widening_main", "channel_grip", "pod_reach"];
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, targets)).range).toEqual({ min: 0, max: 7 });
+    // A different — still legal — purchase order resolves identically. That
+    // is the property the overwrite form did not have.
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, [...targets].reverse())).range).toEqual({ min: 0, max: 7 });
+  });
+
+  it("Solar Beam's flanking and elevation bonuses both survive a build that takes both", () => {
+    const targets = ["withering_glare", "guardians_ground"];
+    const conditionsOf = (ids: string[]) =>
+      resolveSituationalBonuses(applyMoveTree(solarBeam, ids)).map((b) => `${b.condition}:${b.multiplier}`).sort();
+
+    const conditions = conditionsOf(buildFor(solarBeam.tree!, targets));
+    expect(conditions).toContain("flanking:1.4");
+    expect(conditions).toContain("elevation:1.3");
+    // Reversed purchase order, same resolved set — not merely the same count.
+    expect(conditionsOf(buildFor(solarBeam.tree!, [...targets].reverse()))).toEqual(conditions);
+  });
+
+  it("a same-condition ladder escalates to its strongest step, it does not multiply", () => {
+    // flare_wider (1.3) -> sunspot (1.6) on one chain. Multiplying a ladder
+    // would hand out 2.08x where the designer wrote 1.6x, and every ladder in
+    // this roster restates a full value rather than an increment.
+    const respec = applyMoveTree(solarBeam, [...resolveChosenSetFor(solarBeam.tree!, "sunspot")]);
+    const lowHp = resolveSituationalBonuses(respec).filter((b) => b.condition === "targetLowHp");
+    expect(lowHp).toEqual([{ condition: "targetLowHp", multiplier: 1.6 }]);
+  });
+
+  it("resolveStatChangesOnHit composes different stats and escalates the same one", () => {
+    const base: MoveSpec = { ...MOVES.tackle, statChangeOnHit: undefined, statChangesOnHit: undefined };
+    const compose = {
+      ...base,
+      statChangesOnHit: [
+        { target: "self" as const, stat: "defense" as const, stage: 1, ticks: 50 },
+        { target: "defender" as const, stat: "speed" as const, stage: -1, ticks: 50 },
+      ],
+    };
+    expect(resolveStatChangesOnHit(compose)).toHaveLength(2);
+
+    const ladder = {
+      ...base,
+      statChangesOnHit: [
+        { target: "self" as const, stat: "defense" as const, stage: 1, ticks: 50 },
+        { target: "self" as const, stat: "defense" as const, stage: 2, ticks: 80 },
+      ],
+    };
+    expect(resolveStatChangesOnHit(ladder)).toEqual([{ target: "self", stat: "defense", stage: 2, ticks: 80 }]);
+  });
+
+  it("resolveAllyEffect takes the strongest heal and every distinct buff", () => {
+    const base: MoveSpec = { ...MOVES.tackle, allyEffect: undefined };
+    const merged = resolveAllyEffect({
+      ...base,
+      allyEffects: [
+        { healFraction: 0.08 },
+        { healFraction: 0.2 },
+        { buff: { stat: "speed", stage: 1, ticks: 40 } },
+        { buff: { stat: "defense", stage: 2, ticks: 40 } },
+      ],
+    })!;
+    expect(merged.healFraction).toBe(0.2);
+    expect(merged.buffs.map((b) => b.stat).sort()).toEqual(["defense", "speed"]);
+    // A move with no ally payload at all still reads as absent — that is what
+    // the `targetsAlly` call sites gate on.
+    expect(resolveAllyEffect(base)).toBeUndefined();
+  });
+
+  it("areaBonus sums and turns on hitsArea, whichever order form and size are bought in", () => {
+    const move: MoveSpec = {
+      ...MOVES.tackle,
+      shape: { kind: "point" },
+      hitsArea: undefined,
+      tree: {
+        form: { id: "form", name: "Form", cost: 1, delta: { shape: { kind: "burst", radius: 1 } } },
+        wider: { id: "wider", name: "Wider", cost: 1, delta: { areaBonus: 1 } },
+        widest: { id: "widest", name: "Widest", cost: 1, delta: { areaBonus: 1 } },
+      },
+    };
+    // Form alone is not an area move — `areaBonus` is what turns that on.
+    expect(applyMoveTree(move, ["form"]).hitsArea).toBeUndefined();
+    const grown = applyMoveTree(move, ["form", "wider", "widest"]);
+    expect(grown.shape).toEqual({ kind: "burst", radius: 3 });
+    expect(grown.hitsArea).toBe(true);
+    // Size bought BEFORE the form: this was genuinely broken in the first cut
+    // (the bonus was applied at the node that carried it, so a later `shape`
+    // overwrite threw it away) and is the regression this line guards.
+    expect(applyMoveTree(move, ["widest", "wider", "form"]).shape).toEqual({ kind: "burst", radius: 3 });
+  });
+
+  it("hitsBonus and rallyCallTicks sum instead of racing", () => {
+    const move: MoveSpec = {
+      ...MOVES.tackle,
+      hits: undefined,
+      rallyCall: undefined,
+      tree: {
+        a: { id: "a", name: "A", cost: 1, delta: { hitsBonus: 1, rallyCallTicks: 20 } },
+        b: { id: "b", name: "B", cost: 1, delta: { hitsBonus: 2, rallyCallTicks: 30 } },
+      },
+    };
+    // No base `hits` counts as one strike, so +1 makes it a 2-hit move.
+    expect(applyMoveTree(move, ["a"]).hits).toEqual({ min: 2, max: 2 });
+    expect(applyMoveTree(move, ["a", "b"]).hits).toEqual({ min: 4, max: 4 });
+    expect(applyMoveTree(move, ["b", "a"]).hits).toEqual({ min: 4, max: 4 });
+    expect(applyMoveTree(move, ["a", "b"]).rallyCall).toEqual({ ticks: 50 });
+    expect(applyMoveTree(move, ["b", "a"]).rallyCall).toEqual({ ticks: 50 });
   });
 });

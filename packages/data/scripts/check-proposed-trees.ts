@@ -77,6 +77,21 @@ function maxReachableTotal(nodes: ProposedNode[], valueOf: (n: ProposedNode) => 
   return total;
 }
 
+/**
+ * The additive/append field -> the overwrite field it replaces. Two names for
+ * one design lever, so anything keying on a delta's field name has to fold
+ * them together (see `canon`, principle 13).
+ */
+const ADDITIVE_TO_OVERWRITE: Record<string, string> = {
+  rangeBonus: "range",
+  hitsBonus: "hits",
+  areaBonus: "hitsArea",
+  rallyCallTicks: "rallyCall",
+  situationalBonuses: "situationalBonus",
+  statChangesOnHit: "statChangeOnHit",
+  allyEffects: "allyEffect",
+};
+
 function problems(move: ProposedMove): string[] {
   // With every node at 1 point, a notable is no longer marked by cost. What
   // actually MADE a node a notable is that routes converge on it — so that is
@@ -156,9 +171,16 @@ function problems(move: ProposedMove): string[] {
     }
     // The bridge's own filler must deepen the crosslink's own lever, not
     // reach for a generic stat (principle 13).
+    // An overwrite field and its additive form are the SAME design lever
+    // ("+1 Range" is a range node either way), so they have to canonicalise
+    // to one name. Without this, migrating half a tree to the additive form
+    // makes a bridge that shared a lever look like it stopped sharing one —
+    // which is what happened to scratch's frenzied_burrow/wrong_side bridge
+    // the moment its crosslink moved to `situationalBonuses`.
+    const canon = (k: string) => ADDITIVE_TO_OVERWRITE[k] ?? k;
     const lever = (n: ProposedNode) =>
       [...(n.grantsPassives ?? []), ...(n.grantsPassive ? [n.grantsPassive] : [])].map((p) => p.kind)
-        .concat(Object.keys(n.delta ?? {}));
+        .concat(Object.keys(n.delta ?? {}).map(canon));
     if (!lever(mid).some((k) => lever(cross).includes(k))) {
       out.push(`${mid.id}: bridge filler shares no lever with its crosslink ${cross.id} (principle 13)`);
     }
@@ -397,16 +419,37 @@ function problems(move: ProposedMove): string[] {
     for (const pre of [...(t[id]?.prerequisites ?? []), ...(t[id]?.prerequisitesAnyOf ?? []).flat()]) ancestorsOf(pre, seen);
     return seen;
   };
-  // The last five are the `utilityMove` effect fields. They overwrite in
-  // `applyMoveTree` exactly like the hit-pipeline ones above and were simply
-  // missing from this list, so nothing checked them — and the shipped
-  // leech_seed had a live instance: Boldness's *Twin Taproot* (drainNeeds on
-  // thirst) and Aggression's *Insatiable* (drainNeeds on hunger) were
-  // independently takeable, so a build with both got whichever the engine
-  // reached last and the fork's whole point evaporated.
+  // This list is now the FULL non-boolean overwrite surface of
+  // `applyMoveTree`, derived by reading the function rather than by adding
+  // fields as they bite: every field it writes with `delta.X ?? result.X`,
+  // minus the booleans (those OR-merge — once a node turns `terrainBurn` on
+  // nothing can turn it back off, so two setters agree by construction).
+  //
+  // It was previously a partial list, and the omissions were real: the
+  // shipped leech_seed's `drainNeeds` fork was found by hand, and
+  // `weightScaling` was invisible to this checker entirely while rock_slide
+  // carried five independently-takeable setters of it.
+  //
+  // NOT here, on purpose — the additive/append forms, which are the fix
+  // rather than the bug: `rangeBonus`, `hitsBonus`, `areaBonus`,
+  // `rallyCallTicks`, `situationalBonuses`, `statChangesOnHit`,
+  // `allyEffects`. `applyMoveTree` appends or sums those, so two co-takeable
+  // setters both count and the result does not depend on purchase order.
+  // Which additive field replaces which overwrite one, so the report says
+  // what to do rather than only what is wrong.
+  const ADDITIVE_FORM: Record<string, string> = {
+    range: "rangeBonus",
+    hits: "hitsBonus",
+    situationalBonus: "situationalBonuses",
+    statChangeOnHit: "statChangesOnHit",
+    rallyCall: "rallyCallTicks",
+    allyEffect: "allyEffects",
+  };
   const OVERWRITE = [
     "shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition",
     "drainNeeds", "selfHeal", "fertilityBoost", "statusImmunityAura", "matingRadiusBoost",
+    "weightScaling", "selfStateBonus", "bonusVsType", "resistanceBreaker", "selfCostPerUse",
+    "statusSeverity", "consumesOwnTerrain", "terrainFill", "chargeAttack",
   ];
   const excl = new Map(nodes.map((n) => [n.id, new Set(n.excludes ?? [])]));
   for (const field of OVERWRITE) {
@@ -420,7 +463,8 @@ function problems(move: ProposedMove): string[] {
       }
     }
     if (pairs.length) {
-      out.push(`"${field}" is an OVERWRITE field but ${setters.length} co-takeable nodes set it (${pairs.slice(0, 3).join(", ")}${pairs.length > 3 ? ` +${pairs.length - 3} more` : ""}) — a build taking both gets whichever the engine reaches last. Use the additive form, or make them mutually exclusive.`);
+      const fix = ADDITIVE_FORM[field];
+      out.push(`"${field}" is an OVERWRITE field but ${setters.length} co-takeable nodes set it (${pairs.slice(0, 3).join(", ")}${pairs.length > 3 ? ` +${pairs.length - 3} more` : ""}) — a build taking both gets whichever the engine reaches last. ${fix ? `Use \`${fix}\`` : "Use an additive form"}, or make them mutually exclusive.`);
     }
   }
 
@@ -536,14 +580,32 @@ if (selftest) {
       // failing case for the utility-move fields added to that list.
       { id: "d1", name: "D1", cost: 1, leaning: "boldness", delta: { drainNeeds: { need: "hunger", amount: 0.3, radius: 4 } } },
       { id: "d2", name: "D2", cost: 1, leaning: "boldness", delta: { drainNeeds: { need: "thirst", amount: 0.3, radius: 4 } } },
+      // `weightScaling` was in `applyMoveTree`'s overwrite set and NOT in this
+      // checker's list, which is exactly how rock_slide ended up shipping five
+      // co-takeable setters of it unreported. Its failing case, in the same
+      // commit that adds the rule.
+      { id: "w1", name: "W1", cost: 1, leaning: "aggression", delta: { weightScaling: { factor: 0.1 } } },
+      { id: "w2", name: "W2", cost: 1, leaning: "aggression", delta: { weightScaling: { factor: 0.2 } } },
+      // The CONTROL for the whole overwrite rule: the same two nodes written
+      // in the additive form must NOT be reported, or the fix would look
+      // identical to the bug. `expectClean` below asserts that.
+      { id: "r1", name: "R1", cost: 1, leaning: "boldness", delta: { rangeBonus: 1 } },
+      { id: "r2", name: "R2", cost: 1, leaning: "boldness", delta: { rangeBonus: 1 } },
+      { id: "b1", name: "B1", cost: 1, leaning: "boldness", delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.3 }] } },
+      { id: "b2", name: "B2", cost: 1, leaning: "boldness", delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.3 }] } },
     ]),
   };
+  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch", "damage reduction totals", "healing totals", "\"drainNeeds\" is an OVERWRITE field", "\"weightScaling\" is an OVERWRITE field"];
+  // The other half of the rule: the additive forms are the FIX, so reporting
+  // them would make the fix indistinguishable from the bug.
+  const expectClean = ["rangeBonus", "situationalBonuses", "r1+r2", "b1+b2"];
   const found = problems(broken);
-  const expect = ["spur, not bridge", "prerequisite \"nope\" does not exist", "missing leaning", "pure downside", "one lever answering the whole branch", "damage reduction totals", "healing totals", "\"drainNeeds\" is an OVERWRITE field"];
   const missed = expect.filter((e) => !found.some((f) => f.includes(e)));
+  const falsePositives = expectClean.filter((e) => found.some((f) => f.includes(e)));
   console.log(`selftest: ${found.length} problems found on a deliberately broken tree`);
   found.forEach((f) => console.log(`  - ${f}`));
   if (missed.length) { console.error(`SELFTEST FAILED — checker missed: ${missed.join("; ")}`); process.exit(1); }
+  if (falsePositives.length) { console.error(`SELFTEST FAILED — checker reported the additive FIX as a collision: ${falsePositives.join("; ")}`); process.exit(1); }
   console.log("selftest passed: the checker can actually fail.\n");
 }
 // The exclusion-reachability logic changed no shipped number when it landed,
