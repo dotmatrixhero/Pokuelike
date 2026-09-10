@@ -250,6 +250,7 @@ function problems(move: ProposedMove): string[] {
     "planted/duration": ["statChangeOnHit", "statChangesOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
     "healing": ["p:healAura", "p:regen", "p:regenFlat", "selfHeal", "herdForageBonus", "gatherBurst"],
     "no friendly fire": ["excludesAllies"],
+    "area status": ["areaStatus"],
     "rallying": ["rallyCall", "rallyCallTicks"],
     "ally buffing": ["targetsAlly", "allyEffect", "allyEffects", "allyEffectOnAttack", "p:herdHaste", "p:aquaticHaste"],
     "calming": ["p:calmingPresence", "p:nonTerritorial", "statusImmunityAura"],

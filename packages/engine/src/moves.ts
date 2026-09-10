@@ -486,6 +486,21 @@ export interface MoveSpec {
    * marks eligibility for the idle path, it carries no effect of its own.
    * Absent = never eligible for idle/stand-alone use, the default.
    */
+  /**
+   * Extends STATUS infliction (and `statusSpreads`) to every target caught in
+   * a `hitsArea` move's shape, not just the deliberately-picked one.
+   *
+   * Off by default, which is the base rule `resolveHitAgainstTarget` has
+   * always had and still has: a Growl-style blast damages everyone and
+   * statuses only who you aimed at. This exists so a skill tree can BUY that
+   * out — direct: "I do not like the aoe status thing. That's fine as a base
+   * but should be modified with notable nodes in the skill tree."
+   *
+   * Deliberately status-only. On-hit forced movement and `positionSwap` are
+   * defined relative to the one picked defender and stay primary-only.
+   */
+  areaStatus?: boolean;
+
   utilityMove?: boolean;
   /** Heals this fraction of the user's own maxHp — `sunbeamBonus`, if set, adds an extra fraction when used within `flora.ts`'s `SUNBEAM_RADIUS` of a real "sunbeam" tile (reuses the same terrain-scaled-healing idea `isNearSunbeam` already drives for germination). Requires `utilityMove`. Absent = no self-heal, the default. */
   selfHeal?: { fraction: number; sunbeamBonus?: number };
@@ -670,6 +685,7 @@ export interface MoveTreeNode {
     excludesAllies?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
+    areaStatus?: boolean;
     /** Overwrite, like `shape`. Prefer `allyEffects`: two independent nodes setting this silently race. */
     allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
     /** APPENDS to `MoveSpec.allyEffects` rather than overwriting — the stacking form. */
@@ -988,6 +1004,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       excludesAllies: delta.excludesAllies ?? result.excludesAllies,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,
+      areaStatus: delta.areaStatus ?? result.areaStatus,
       allyEffect: delta.allyEffect ?? result.allyEffect,
       allyEffects: delta.allyEffects ? [...(result.allyEffects ?? []), ...delta.allyEffects] : result.allyEffects,
       weightScaling: delta.weightScaling ?? result.weightScaling,

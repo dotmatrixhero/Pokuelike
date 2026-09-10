@@ -1383,7 +1383,26 @@ function resolveHitAgainstTarget(
     return false;
   }
 
-  if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
+  const landedCleanly = !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0;
+
+  // Status is the one on-hit effect a build can push out to the whole area.
+  // Base behaviour is unchanged — primary target only — and `areaStatus` is
+  // what a skill-tree notable sets to change it. Direct: "I do not like the
+  // aoe status thing. That's fine as a base but should be modified with
+  // notable nodes in the skill tree."
+  //
+  // Only status. Forced movement and `positionSwap` stay primary-only below,
+  // because their geometry is defined relative to the ONE deliberately-picked
+  // defender — "swap places with the target" has no meaning against five of
+  // them at once.
+  if (landedCleanly && !isPrimaryTarget && move.areaStatus) {
+    maybeInflictStatus(defender, attacker.id, move, world, log, rng);
+    if (move.statusSpreads && defender.status) {
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
+    }
+  }
+
+  if (isPrimaryTarget && landedCleanly) {
     // A landed, damaging, non-killing hit — the one place status, the
     // defender-side stat change, on-hit forced movement, and a position
     // swap get a chance to apply.

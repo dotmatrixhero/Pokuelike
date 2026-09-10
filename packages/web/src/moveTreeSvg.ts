@@ -392,6 +392,7 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("range")) lines.push(`Changes its max reach to ${delta.range.max != null ? `${delta.range.max} tiles` : JSON.stringify(delta.range)}.`);
   if (has("rangeBonus")) lines.push(`${signed(delta.rangeBonus)} tile${Math.abs(delta.rangeBonus) === 1 ? "" : "s"} of max reach.`);
   if (has("areaBonus")) lines.push(`${signed(delta.areaBonus)} to the size of its area, and it hits everyone caught in that area.`);
+  if (has("areaStatus") && delta.areaStatus) lines.push("Its status lands on everyone caught in its area, not just the one it was aimed at.");
   if (has("excludesAllies") && delta.excludesAllies) lines.push("Never affects a herd-mate, even if they'd otherwise be caught in its area.");
   if (has("terrainBurn") && delta.terrainBurn) lines.push("Sets fire to the terrain wherever it lands.");
   return lines;
