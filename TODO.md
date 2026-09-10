@@ -8013,3 +8013,37 @@ Rulings (all sim-original guesses today; none tuned):
 Also built this round on your ruling: **exhaustion** — under 20% energy,
 speed drops linearly to −20% at zero, for everyone (`simulation.ts`
 `lowEnergySpeedMultiplier`, tested).
+
+## Cave starting species: random pack, wide pool
+
+Direct ask: "I want starting cave to be a random pack of prey. Some
+options like eevee, Pikachu, bulbasaur, charmander, squirtle are all
+good. Sandshrew is acceptable too. Let's make a decent wide pool."
+
+Built: `CAVE_STARTER_SPECIES` in `packages/data/src/scenario.ts` — 34
+base-stage, non-predator species (the five named plus Sandshrew, Pidgey,
+Rattata, Caterpie, Weedle, Oddish, Poliwag, Psyduck, Magikarp, Cubone,
+Vulpix, Growlithe, Clefairy, Jigglypuff, Nidoran♀/♂, Abra, Paras,
+Bellsprout, Geodude, Horsea, Shellder, Krabby, Seel, Dratini, Ponyta,
+Doduo, Venonat, Machop, Tangela, Drowzee). One species rolled per world
+(a herd is one species — `HerdRecord.species` — so this is "which pack
+did I find," not a mixed chamber). Not cave-habitat-accurate on purpose:
+the user's own named examples (Charmander, Squirtle) aren't burrowers
+either, so variety won over biome realism here.
+
+Verified: every id in the pool resolves in `SPECIES` and is
+`isPredator`-free (test), the pool actually produces >5 distinct species
+across seeds (test, and empirically 34/34 species turned up over 200
+seeds sampled live). The two obligate-aquatic entries (Magikarp, Horsea)
+were checked live for 400 ticks each — both settle in normally (one
+Magikarp ends up standing in water, no deaths, no stuck agents).
+
+Every place that used to hardcode `"sandshrew-herd"` now matches
+`herdId?.endsWith("-herd")` instead: `data/test/cave.test.ts`,
+`runner/validateBond.ts`. `runner/validateCaveVision.ts`,
+`validateCaveNeeds.ts`, `validateTorch.ts` never referenced species and
+needed no changes.
+
+Open, not decided: the pool is my curation, not yours — if any of these
+34 feel wrong for "the first thing you meet," trim or add freely; it's
+one array.

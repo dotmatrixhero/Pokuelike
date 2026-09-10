@@ -223,6 +223,60 @@ export const CAVE_SPAWN_MAX_STEPS = 40;
 const CAVE_CHAMBER_RADIUS = 5;
 
 /**
+ * Who might be waiting in the chamber — direct ask: "I want starting cave
+ * to be a random pack of prey. Some options like eevee, Pikachu, bulbasaur,
+ * charmander, squirtle are all good. Sandshrew is acceptable too. Let's
+ * make a decent wide pool." One species is rolled per world (a herd is
+ * one species — `HerdRecord.species`, `herds.ts` — so this is "which pack
+ * did I find" rather than a mixed chamber), same 4-member herd shape
+ * Sandshrew always had. Every entry here is a base-stage, non-predator
+ * species (checked against `SPECIES`'s `isPredator` flags) — nothing
+ * that reads as a threat on the first thing the player ever meets, and
+ * nothing that's secretly a stronger evolved form at the same level 5.
+ * Not cave-habitat-accurate on purpose (Charmander/Squirtle aren't
+ * burrowers either) — the user's own named examples aren't, so variety
+ * wins over biome realism for this one chamber.
+ */
+export const CAVE_STARTER_SPECIES: readonly string[] = [
+  "eevee",
+  "pikachu",
+  "bulbasaur",
+  "charmander",
+  "squirtle",
+  "sandshrew",
+  "pidgey",
+  "rattata",
+  "caterpie",
+  "weedle",
+  "oddish",
+  "poliwag",
+  "psyduck",
+  "magikarp",
+  "cubone",
+  "vulpix",
+  "growlithe",
+  "clefairy",
+  "jigglypuff",
+  "nidoranf",
+  "nidoranm",
+  "abra",
+  "paras",
+  "bellsprout",
+  "geodude",
+  "horsea",
+  "shellder",
+  "krabby",
+  "seel",
+  "dratini",
+  "ponyta",
+  "doduo",
+  "venonat",
+  "machop",
+  "tangela",
+  "drowzee",
+];
+
+/**
  * ROADMAP.md M1 — Act 1, layer 1: a dark cave with one lit chamber. Not a
  * worldgen overhaul: `generateWorld` already carves cellular-automata caves
  * on the underground layer with a guaranteed water pocket and guaranteed
@@ -234,8 +288,9 @@ const CAVE_CHAMBER_RADIUS = 5;
  *   without this), with a little food and flora. CAMPAIGN_DESIGN.md: "an
  *   underground lake... with lots of sunlight and plants. It's peaceful,
  *   prey only, but herds."
- * - **One prey herd** at the chamber — Sandshrew, the roster's underground
- *   burrower (prey, `buildsShelter`).
+ * - **One prey herd** at the chamber — a random species from
+ *   `CAVE_STARTER_SPECIES` per world, so replaying with a new seed can
+ *   turn up an Eevee pack instead of Sandshrew.
  * - **The player in the dark**, `CAVE_SPAWN_MIN_STEPS`..`MAX` walking steps
  *   from the water by BFS over walkable underground tiles — so the light is
  *   reachable *by construction*, never by luck of the seed. The acceptance
@@ -272,10 +327,18 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
     }
   }
 
+  // One species rolled for the whole herd — a herd is one species
+  // (herds.ts's `HerdRecord.species`) — from the wide prey pool.
+  const startingSpecies = CAVE_STARTER_SPECIES[Math.floor(rng() * CAVE_STARTER_SPECIES.length)]!;
   const herd = Array.from({ length: 4 }, (_, i) => ({
-    ...spawnAgent("sandshrew", `sandshrew-${i}`, findWalkableNear(world, L, water.x + (i % 2 ? 2 : -2), water.y + (i < 2 ? -2 : 2)), 5, rng),
+    ...spawnAgent(startingSpecies, `${startingSpecies}-${i}`, findWalkableNear(world, L, water.x + (i % 2 ? 2 : -2), water.y + (i < 2 ? -2 : 2)), 5, rng),
     needs: createNeeds({ thirst: 0.5 + i * 0.1 }),
-    herdId: "sandshrew-herd",
+    herdId: `${startingSpecies}-herd`,
+    // Most of the pool lives on `surface` by species default (only
+    // Sandshrew's own `homeLayer` is underground) — the chamber is where
+    // this herd actually is, regardless of species norm.
+    layer: L,
+    homeLayer: L,
     sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
   }));
 

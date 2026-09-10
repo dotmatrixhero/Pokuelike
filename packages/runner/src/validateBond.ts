@@ -2,11 +2,12 @@
  * ROADMAP.md M6's acceptance — "something follows you out of the chamber"
  * — and the design's open question, as a number. A bot that does
  * everything right: walks to the chamber, gathers berries, picks the
- * nearest Sandshrew, crouches, approaches to 2 tiles, sets a berry down,
- * waits near it, repeats — then walks 25 tiles into the dark. On how many
- * of 5 seeds does a Sandshrew follow it out? If the answer is 0, the
- * premise is in trouble, and the user hears that before any overlay is
- * built (HANDOFF.md §4).
+ * nearest chamber creature (whichever species this seed's
+ * CAVE_STARTER_SPECIES roll turned up), crouches, approaches to 2 tiles,
+ * sets a berry down, waits near it, repeats — then walks 25 tiles into
+ * the dark. On how many of 5 seeds does it follow it out? If the answer
+ * is 0, the premise is in trouble, and the user hears that before any
+ * overlay is built (HANDOFF.md §4).
  *
  *   pnpm --filter @pokuelike/runner exec tsx src/validateBond.ts
  */
@@ -98,7 +99,7 @@ for (const seed of SEEDS) {
   // Chase a moving creature: re-plan from its CURRENT position every step,
   // standing while far (crouched steps cost 1.5 turns) and crouching once
   // within 5. The first bots walked to a stale position and never got
-  // closer than 12 tiles to a roaming Sandshrew.
+  // closer than 12 tiles to a roaming chamber creature.
   const approach = (who: Agent, stopAt: number, max: number) => {
     let n = 0;
     while (n++ < max && cheb(me.pos, who.pos) > stopAt && findPlayer(world) && who.alive !== false) {
@@ -110,14 +111,16 @@ for (const seed of SEEDS) {
       if (n % 10 === 0) upkeep();
     }
   };
-  // 2. Court the nearest Sandshrew.
+  // 2. Court the nearest chamber creature — now a random species per
+  // seed (CAVE_STARTER_SPECIES), so this is found by herdId shape, not a
+  // hardcoded species.
   let offers = 0;
   let eaten = 0;
   let bestScore = 0;
   let target: Agent | undefined;
   let followTick: number | undefined;
   while (keys < BUDGET_KEYS && findPlayer(world)) {
-    const herd = world.agents.filter((a) => a.herdId === "sandshrew-herd" && a.alive !== false && a.layer === "underground");
+    const herd = world.agents.filter((a) => a.herdId?.endsWith("-herd") && a.alive !== false && a.layer === "underground");
     if (herd.length === 0) break;
     target = herd.reduce((a, b) => (cheb(a.pos, me.pos) <= cheb(b.pos, me.pos) ? a : b));
     if (target.followingId === me.id) {
@@ -170,7 +173,7 @@ for (const seed of SEEDS) {
     }
   }
   // Across the whole herd, not just the last target — the bot switches targets.
-  const herdAll = world.agents.filter((a) => a.herdId === "sandshrew-herd");
+  const herdAll = world.agents.filter((a) => a.herdId?.endsWith("-herd"));
   eaten = herdAll.reduce((n, a) => n + (a.rapport?.[me.id]?.memories?.find((m) => m.reason === "receivedFood")?.count ?? 0), 0);
   const bestNow = herdAll.reduce((best, a) => Math.max(best, rapportScore(a, me.id, world.tick)), 0);
   bestScore = Math.max(bestScore, bestNow);

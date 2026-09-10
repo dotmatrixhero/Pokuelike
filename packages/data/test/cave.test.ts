@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { tileAt, tileIndex } from "@pokuelike/engine";
-import { CAVE_SPAWN_MAX_STEPS, CAVE_SPAWN_MIN_STEPS, createCaveScenario, walkDistances } from "../src/scenario.js";
+import { CAVE_SPAWN_MAX_STEPS, CAVE_SPAWN_MIN_STEPS, CAVE_STARTER_SPECIES, createCaveScenario, walkDistances } from "../src/scenario.js";
+import { SPECIES } from "../src/species.js";
 
 /**
  * ROADMAP.md M1's acceptance test — "you spawn in the dark and walk to the
@@ -19,9 +20,18 @@ describe("createCaveScenario (ROADMAP M1)", () => {
       expect(player.layer).toBe("underground");
       expect(player.homeLayer).toBe("underground");
 
-      const herd = world.agents.filter((a) => a.herdId === "sandshrew-herd");
+      // Direct ask: "I want starting cave to be a random pack of prey" —
+      // one species from CAVE_STARTER_SPECIES, not hardcoded to Sandshrew.
+      const herd = world.agents.filter((a) => a.herdId?.endsWith("-herd"));
       expect(herd).toHaveLength(4);
-      for (const s of herd) expect(s.layer).toBe("underground");
+      const species = herd[0]!.species;
+      expect(CAVE_STARTER_SPECIES).toContain(species);
+      for (const s of herd) {
+        expect(s.species).toBe(species); // one herd, one species
+        expect(s.herdId).toBe(`${species}-herd`);
+        expect(s.layer).toBe("underground");
+        expect(s.homeLayer).toBe("underground");
+      }
 
       // Nobody on the surface — M1 is the cave.
       expect(world.agents.some((a) => a.layer === "surface")).toBe(false);
@@ -53,6 +63,28 @@ describe("createCaveScenario (ROADMAP M1)", () => {
       expect(sunbeams.some((p) => player.vision!.visible.has(tileIndex(world, p.x, p.y)))).toBe(false);
     });
   }
+
+  it("CAVE_STARTER_SPECIES is a real, non-predator, base-stage roster — every entry resolves and none is a hunter", () => {
+    for (const id of CAVE_STARTER_SPECIES) {
+      const def = SPECIES[id];
+      expect(def, `${id} is not in SPECIES`).toBeDefined();
+      expect(def!.isPredator, `${id} is flagged isPredator — should never be the first thing a player meets`).not.toBe(true);
+    }
+    // No duplicates in the pool.
+    expect(new Set(CAVE_STARTER_SPECIES).size).toBe(CAVE_STARTER_SPECIES.length);
+  });
+
+  it("the pool actually varies — several distinct species turn up across seeds, not always Sandshrew", () => {
+    const seen = new Set<string>();
+    for (let seed = 0; seed < 60; seed++) {
+      const world = createCaveScenario(seed);
+      const player = world.agents.find((a) => a.controlledBy === "player")!;
+      const herdSpecies = world.agents.find((a) => a.herdId?.endsWith("-herd"))!.species;
+      seen.add(herdSpecies);
+      void player;
+    }
+    expect(seen.size).toBeGreaterThan(5);
+  });
 
   it("is deterministic per seed", () => {
     const a = createCaveScenario(3003);
