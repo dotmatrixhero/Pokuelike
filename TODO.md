@@ -9066,3 +9066,72 @@ Apple, Berry Stew, ...) each with their own exact ingredients, or one
 flexible recipe that accepts any two food-type items? (2) does the deployed
 fire have real fuel/burn out (reusing `FIRE_BURN_TICKS`), or is it a
 permanent placed structure once lit?
+
+## Cooking: built, tested, live-verified
+
+Answers to the two scoping questions above: *"Fixed named dishes
+(Recommended)"* — each dish keeps its own exact ingredient list, not a
+flexible any-two-foods combiner. Fire lifetime, a custom answer rather than
+either of my two presets: *"burns out but you can feed it more wood to
+increase fuel"* — real additive fuel, not a simple relight/refresh.
+
+**Lighting a fire.** New `PlayerAction` case `{ kind: "lightFire", dx, dy }`
+(`player.ts`). Requires a held torch (the tool) plus 2 carried deadwood (the
+fuel, consumed — the torch is not); ignites the targeted adjacent tile. If
+that tile is already burning, ADDS `FIRE_BURN_TICKS` to its remaining fuel
+rather than resetting it — the literal "feed it more wood to increase
+fuel" ask, deliberately diverging from `fire.ts`'s own `igniteTile` (which
+only refreshes an already-burning tile, fine for its existing combat-only
+callers, wrong for this one). Deliberately bypasses `fire.ts`'s
+`FLAMMABLE_TERRAIN` gate — a torch-lit campfire is fueled by the wood you're
+carrying, not by the ground catching, so it lights on bare floor; it still
+refuses water, wall, or any other non-walkable tile.
+
+**Cooking near a fire.** New `RecipeDef.requiresNearFire` flag, checked by a
+new `nearFire(world, agent)` export (`player.ts`, radius 2, mirroring the
+existing radius-1 `waterWithinReach`) inside the `"craft"` case. All 4 new
+dishes below carry it; nothing else does.
+
+**Four fixed named dishes** (`data/crafting.ts`): Roasted Apple (1 apple),
+Berry Stew (oran + pecha), Potato Mash (2 potato), Vegetable Stew (tomato +
+corn) — each a real `ItemDef` with its own `cooked: { healFraction,
+rapportMultiplier }` (0.15–0.2 heal, 2–2.5x rapport), each `knownAtStart:
+false` (discovered later, same as the game's other non-trivial recipes).
+
+**"Heals as well as satisfies hunger."** New `support.ts` export
+`healFromCookedFood(world, agent, itemOrFlavorKey)` — heals `maxHp *
+healFraction` if the key resolves to a cooked `ItemDef`. Wired into both of
+`player.ts`'s `eat` branches (carried item, and tile-underfoot) and into
+`needs.ts`'s wild-agent tile-consumption path, so any eater benefits, same
+"the player is just another agent" precedent as the thirst-crops round.
+`resolveFoodItem`/`isFoodItem` (`player.ts`) widened to recognize cooked
+`ItemDef`s, not just raw crop materials.
+
+**"Cooked food gets you more rapport when offered."** `needs.ts`'s
+`applyPlayerFeedingBonus` gained an optional `rapportMultiplier` param,
+computed from `world.items?.[tile.flavor]?.cooked?.rapportMultiplier ?? 1`
+at both of its real call sites — a cooked dish offered to a wild creature
+lands a proportionally bigger rapport gain than a raw berry would.
+
+**Bug found and fixed along the way, via live browser testing, not code
+review**: after building the whole engine/data side and unit-testing it (12
+new tests, `test/cooking.test.ts`, all passing), a live Playwright run —
+light a real fire, craft a real Roasted Apple through the real multi-turn
+craft UI — hit a dead end: the pack menu showed the Roasted Apple row with
+only a "Drop" button, no "Eat"/"Offer". Root cause: `web/main.ts`'s
+pack-menu row-rendering gated Eat/Offer on `FOOD_MATERIAL_IDS.includes(...)`
+alone, and was never updated to also recognize a cooked `ItemDef` the way
+the engine's own `isFoodItem` had been. Fixed with one added clause
+(`|| world.items?.[item.itemKey]?.cooked !== undefined`). Re-ran the same
+live scenario after the fix: Eat/Offer both now appear on Roasted Apple;
+captured hp immediately before the Eat click (16.08) and after (19, capped
+at maxHp) — a real ~2.9 hp gain from that one click, consistent with the
+dish's 0.15 healFraction × 19 maxHp ≈ 2.85, not incidental background regen
+from the craft activity's own ticking (the earlier, pre-fix run had wrongly
+looked like healing worked because hp rose during the multi-turn craft —
+it hadn't; the eat click never fired that time, confirmed via `ate: false`
+and the missing button).
+
+Full suite after the fix: engine 1497/1497 (12 new in `cooking.test.ts`),
+data 393/393, web build clean (`tsc --noEmit && vite build`), runner
+typecheck clean.

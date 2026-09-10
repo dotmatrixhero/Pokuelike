@@ -57,12 +57,12 @@ export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", ...CROP_IDS];
  * or the neutral 1x every eat-from-pack used before crops had distinct
  * items at all.
  */
-export function foodNutritionMultiplierOf(material: MaterialId): number {
+export function foodNutritionMultiplierOf(material: string): number {
   return material in FOOD_CROPS ? FOOD_CROPS[material as CropId].nutritionMultiplier : 1;
 }
 
-/** The carried-item counterpart to `flora.ts`'s `thirstReliefFactor` — see that function's own doc comment. */
-export function thirstReliefOf(material: MaterialId): number {
+/** The carried-item counterpart to `flora.ts`'s `thirstReliefFactor` — see that function's own doc comment. `material` is loosened to a bare `string` (not just `MaterialId`) since a cooked dish's own item key can reach this too, harmlessly falling through to 0. */
+export function thirstReliefOf(material: string): number {
   return material in FOOD_CROPS ? (FOOD_CROPS[material as CropId].thirstRelief ?? 0) : 0;
 }
 

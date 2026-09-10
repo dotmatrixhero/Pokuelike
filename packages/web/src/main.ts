@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -578,6 +578,12 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
     }
     case "drop":
       return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
+    case "lightFire": {
+      if (ok) return "You build up a fire.";
+      if (player.equipment?.held !== "torch") return "You need a torch in hand.";
+      if (countOf(player, "deadwood") < 2) return "Not enough deadwood — you need 2.";
+      return "Nowhere to put it there.";
+    }
   }
 }
 
@@ -680,8 +686,11 @@ function openPackMenu(): void {
     // thing" — gathering now hands back the specific crop (Potato, Apple,
     // ...), not just the old generic "food" — `FOOD_MATERIAL_IDS` (not a
     // bare `itemKey === "food"` check) is what still recognizes any of
-    // them as "a berry in the pack" for Eat/Offer.
-    if ((FOOD_MATERIAL_IDS as readonly string[]).includes(item.itemKey)) {
+    // them as "a berry in the pack" for Eat/Offer. A cooked dish (e.g.
+    // Roasted Apple) isn't in that material list at all — it's an
+    // `ItemDef` with a `cooked` marker — so it needs its own check here too,
+    // mirroring the engine's own `isFoodItem` (player.ts).
+    if ((FOOD_MATERIAL_IDS as readonly string[]).includes(item.itemKey) || world.items?.[item.itemKey]?.cooked !== undefined) {
       // Names the specific stack this row is for — with more than one kind
       // of food in the pack now (distinct crop items), a bare `{kind:
       // "eat"}` would silently eat whichever material happens to sort
@@ -702,7 +711,12 @@ function openPackMenu(): void {
   for (const r of known) {
     const missing = r.inputs.filter((i) => countOf(me, i.itemKey) < i.count).map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`);
     const inputs = r.inputs.map((i) => `${itemName(i.itemKey).toLowerCase()}${i.count > 1 ? ` ×${i.count}` : ""}`).join(" + ");
-    if (missing.length === 0) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · ${r.turns} turns · tap to make`, () => { playerAct({ kind: "craft", recipeId: r.id }); runActivity(); }));
+    // Direct ask: "while near you can craft with combos of crops and
+    // berries" — a cooking recipe also needs a real deployed fire nearby;
+    // says so in the same "here's what's missing" style as ingredients.
+    const needsFire = r.requiresNearFire && !nearFire(world, me);
+    if (missing.length === 0 && !needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · ${r.turns} turns · tap to make`, () => { playerAct({ kind: "craft", recipeId: r.id }); runActivity(); }));
+    else if (missing.length === 0 && needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · needs a fire nearby`));
     else packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · you have no ${missing.join(", ")}`));
   }
   packMenuEl.hidden = false;
@@ -919,6 +933,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "f") {
     e.preventDefault();
     attemptAttack();
+    return;
+  }
+  if (e.key === "v") {
+    e.preventDefault();
+    playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1246,6 +1265,7 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").f
       runActivity();
     } else if (act === "pack") openPackMenu();
     else if (act === "attack") attemptAttack();
+    else if (act === "lightFire") playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });

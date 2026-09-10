@@ -618,7 +618,24 @@ export type PlayerAction =
    */
   | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
   /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
-  | { kind: "drop"; itemKey: string };
+  | { kind: "drop"; itemKey: string }
+  /**
+   * Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
+   * something) to cook, and while near you can craft with combos of crops
+   * and berries" — and the scoping follow-up on how it burns: "burns out
+   * but you can feed it more wood to increase fuel." Requires a held torch
+   * and 2 carried deadwood (consumed — the torch itself stays equipped, as
+   * the tool, not the fuel); ignites the adjacent tile in the given
+   * direction, or — if that tile is already burning — adds another
+   * `FIRE_BURN_TICKS` worth of fuel to it rather than requiring it to burn
+   * out first. Unlike combat's own `terrainBurn`/`igniteNear` (fire.ts),
+   * this deliberately does NOT require the target tile's own terrain to be
+   * flammable: a torch-lit campfire is fueled by the wood you're carrying,
+   * not by the ground catching, so it can be lit on bare floor. Still
+   * fails against a wall, water, or anything else not walkable. Fails
+   * (still costs the turn) without a held torch or without 2 deadwood.
+   */
+  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -666,6 +683,15 @@ export interface RecipeDef {
   turns: number;
   /** "You are a human. These need no discovery." — CRAFTABLES_V1.md */
   knownAtStart: boolean;
+  /**
+   * Direct ask: "building a fire you can deploy... and while near you can
+   * craft with combos of crops and berries" — a cooking recipe needs a real
+   * "fire" tile within a few steps to start, checked by `player.ts`'s
+   * `craft` case (a small radius scan) alongside the ordinary
+   * `knowsRecipe`/`hasAll` checks. Absent/false for every non-cooking
+   * recipe, unchanged.
+   */
+  requiresNearFire?: boolean;
 }
 
 /** An item that can be carried, and maybe held or worn. Effects are read by the engine (a `light` lights you; `threat` feeds M6). */
@@ -692,6 +718,21 @@ export interface ItemDef {
   grantsMoves?: MoveSpec[];
   /** Extra carry capacity while carried (pouch, pack). */
   capacity?: number;
+  /**
+   * Direct ask: "cooked food gets you more rapport when offered. heals as
+   * well as satisfies hunger" — marks a crafted food item as a cooked dish
+   * (made near a deployed fire, see `RecipeDef.requiresNearFire`).
+   * `healFraction` restores that fraction of max HP on top of the ordinary
+   * hunger relief every food item already gives (`player.ts`'s `eat` case,
+   * both the carried-item and eat-off-a-tile branches). `rapportMultiplier`
+   * scales the rapport bonus a wild creature gets for eating one you set
+   * down (`needs.ts`'s `applyPlayerFeedingBonus`) — on top of, not instead
+   * of, that item's own `FOOD_CROPS` nutrition if any (cooked dishes are
+   * crafted items, not raw crops, so they carry no `nutritionMultiplier` of
+   * their own; this is the entire bonus). Absent for every raw/uncooked
+   * food item.
+   */
+  cooked?: { healFraction: number; rapportMultiplier: number };
 }
 
 /**

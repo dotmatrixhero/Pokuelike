@@ -103,10 +103,22 @@ export const ITEMS: Record<string, ItemDef> = {
   poultice: { key: "poultice", name: "Poultice", weight: 1 },
   foragePouch: { key: "foragePouch", name: "Forage pouch", weight: 1, capacity: 8 },
   camouflageCloak: { key: "camouflageCloak", name: "Camouflage cloak", weight: 2, slot: "worn", threat: -0.4 },
+  // Direct ask: "you know im gonna have to add cooking lol. building a fire
+  // you can deploy... to cook, and while near you can craft with combos of
+  // crops and berries. cooked food gets you more rapport when offered.
+  // heals as well as satisfies hunger." Fixed named dishes (the scoping
+  // ruling: "fixed named dishes... Recommended", over one flexible
+  // any-2-foods combiner) — each its own real ingredients, each a real
+  // `cooked` bonus on top of whatever nutrition its raw ingredients already
+  // carried. `RECIPES` below gates every one of these on `requiresNearFire`.
+  roastedApple: { key: "roastedApple", name: "Roasted Apple", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
+  berryStew: { key: "berryStew", name: "Berry Stew", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
+  potatoMash: { key: "potatoMash", name: "Potato Mash", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.2 } },
+  vegetableStew: { key: "vegetableStew", name: "Vegetable Stew", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.5 } },
 };
 
-function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1): RecipeDef {
-  return { id, name, inputs: inputs.map(([itemKey, count]) => ({ itemKey, count })), output: { itemKey: id, count: outputCount }, turns, knownAtStart };
+function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1, requiresNearFire = false): RecipeDef {
+  return { id, name, inputs: inputs.map(([itemKey, count]) => ({ itemKey, count })), output: { itemKey: id, count: outputCount }, turns, knownAtStart, requiresNearFire };
 }
 
 /** Keyed by id; a recipe's id is the item key it makes. */
@@ -132,6 +144,15 @@ export const RECIPES: Record<string, RecipeDef> = {
   // "early on" was this flag.
   foragePouch: recipe("foragePouch", "Forage pouch", [["cordage", 1], ["fiber", 1]], 6, true),
   camouflageCloak: recipe("camouflageCloak", "Camouflage cloak", [["fiber", 1], ["lichen", 1]], 8, false),
+  // Cooking — direct ask, "building a fire you can deploy... to cook, and
+  // while near you can craft with combos of crops and berries." Each needs
+  // a real nearby fire (`player.ts`'s "lightFire" action deploys one);
+  // `requiresNearFire: true` is the last positional arg on every one below.
+  // Not known at start, same as every other non-trivial recipe here.
+  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, false, 1, true),
+  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, false, 1, true),
+  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, false, 1, true),
+  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, false, 1, true),
 };
 
 export const KNOWN_AT_START: string[] = Object.values(RECIPES).filter((r) => r.knownAtStart).map((r) => r.id);

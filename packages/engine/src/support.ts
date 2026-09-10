@@ -144,6 +144,23 @@ export function carryCapacityOf(world: World, agent: Agent): number {
   return base + bonus;
 }
 
+/**
+ * Direct ask: "cooked food... heals as well as satisfies hunger." Shared by
+ * `player.ts`'s own `eat` (both branches) and `needs.ts`'s wild-agent tile
+ * consumption, since either kind of eater can end up eating a cooked dish
+ * (the player directly, or a wild creature eating one the player offered).
+ * `itemOrFlavorKey` is whatever the eaten thing's real item key was — a
+ * carried item's own key, or an offered tile's `flavor` (which, for a
+ * cooked dish, is set to that same key by `player.ts`'s `offer` case). A
+ * no-op for anything that isn't a real `ItemDef` with `cooked` set (every
+ * raw crop, and any tile with no flavor at all).
+ */
+export function healFromCookedFood(world: World, agent: Agent, itemOrFlavorKey: string | undefined): void {
+  const healFraction = itemOrFlavorKey ? world.items?.[itemOrFlavorKey]?.cooked?.healFraction : undefined;
+  if (!healFraction || agent.maxHp === undefined) return;
+  agent.hp = Math.min(agent.maxHp, (agent.hp ?? agent.maxHp) + agent.maxHp * healFraction);
+}
+
 function inventoryWeight(agent: Agent): number {
   return (agent.inventory ?? []).reduce((sum, item) => sum + item.weight * item.count, 0);
 }

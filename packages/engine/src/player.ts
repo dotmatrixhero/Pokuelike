@@ -1,13 +1,14 @@
 import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js";
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
-import { tileAt } from "./world.js";
+import { setTile, tileAt } from "./world.js";
+import { FIRE_BURN_TICKS } from "./fire.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, thirstReliefFactor } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
 import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, thirstReliefOf, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
-import { carryCapacityOf } from "./support.js";
+import { carryCapacityOf, healFromCookedFood } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, resolveHit } from "./predation.js";
@@ -111,6 +112,10 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         // the ordinary hunger relief above. 0 for anything that doesn't set it.
         const thirstRelief = thirstReliefFactor(tile);
         if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+        // A tile can carry a cooked dish's own flavor too (this same
+        // "offer" case sets it to whatever was offered) — "heals as well
+        // as satisfies hunger."
+        healFromCookedFood(world, agent, tile.flavor);
         tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
         recordGrazing(tile);
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
@@ -121,16 +126,19 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // you gather" — nothing underfoot, so eat a carried berry instead.
       // Any real food material (`FOOD_MATERIAL_IDS` — a specific crop now
       // that gathering hands those back distinctly, not just the old
-      // generic "food"), not literally the item key "food". `action.itemKey`
-      // names exactly which one (the pack menu's per-row Eat button) —
-      // falling back to "first one found" would silently eat a DIFFERENT
-      // carried food than the row the player actually tapped.
-      const carried = resolveFoodItem(agent, action.itemKey);
+      // generic "food") OR a cooked dish, not literally the item key
+      // "food". `action.itemKey` names exactly which one (the pack menu's
+      // per-row Eat button) — falling back to "first one found" would
+      // silently eat a DIFFERENT carried food than the row the player
+      // actually tapped.
+      const carried = resolveFoodItem(world, agent, action.itemKey);
       if (!carried) return false;
       removeItem(agent, carried, 1);
       consume(agent.needs, "seekFood", foodNutritionMultiplierOf(carried));
       const carriedThirstRelief = thirstReliefOf(carried);
       if (carriedThirstRelief > 0) consume(agent.needs, "seekWater", carriedThirstRelief);
+      // Direct ask: "cooked food... heals as well as satisfies hunger."
+      healFromCookedFood(world, agent, carried);
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
       return true;
@@ -151,6 +159,9 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     case "craft": {
       const recipe = world.recipes?.[action.recipeId];
       if (!recipe || !knowsRecipe(agent, recipe.id) || !hasAll(agent, recipe.inputs)) return false;
+      // Direct ask: "while near you can craft with combos of crops and
+      // berries" — a cooking recipe needs a real deployed fire nearby.
+      if (recipe.requiresNearFire && !nearFire(world, agent)) return false;
       agent.activity = { kind: "craft", recipeId: recipe.id, turnsLeft: recipe.turns, turnsTotal: recipe.turns };
       return true;
     }
@@ -246,7 +257,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       return agent.posture === "crouch";
     }
     case "offer": {
-      const offered = resolveFoodItem(agent, action.itemKey);
+      const offered = resolveFoodItem(world, agent, action.itemKey);
       if (!offered) return false;
       const spot = freeTileBeside(world, agent);
       if (!spot) return false;
@@ -280,6 +291,36 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       }
       return true;
     }
+    case "lightFire": {
+      // Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
+      // something) to cook." Torch is the tool (stays equipped), deadwood
+      // is the fuel actually spent.
+      if (agent.equipment?.held !== "torch" || countOf(agent, "deadwood") < 2) return false;
+      const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
+      if (!tile || !tile.walkable || tile.terrain === "water") return false;
+      removeItem(agent, "deadwood", 2);
+      if (tile.terrain === "fire") {
+        // Direct follow-up: "burns out but you can feed it more wood to
+        // increase fuel" — genuinely additive, not just a refresh-to-full
+        // (fire.ts's own `igniteTile`, used by combat's terrainBurn, resets
+        // an already-burning tile rather than stacking; deliberately
+        // different here, since this is a player choosing to keep a fire
+        // going, not a second hit landing on a burning target).
+        tile.burnTicksRemaining = (tile.burnTicksRemaining ?? 0) + FIRE_BURN_TICKS;
+      } else {
+        // Deliberately bypasses fire.ts's own FLAMMABLE_TERRAIN gate — a
+        // torch-lit campfire is fueled by the wood in your pack, not by the
+        // ground catching, so (unlike a combat-caused fire) it can be lit
+        // on bare floor, not just vegetation.
+        const from = tile.terrain;
+        setTile(world, agent.layer, targetPos.x, targetPos.y, "fire");
+        tileAt(world, agent.layer, targetPos.x, targetPos.y)!.burnTicksRemaining = FIRE_BURN_TICKS;
+        log?.record({ kind: "terrainChanged", tick: world.tick, layer: agent.layer, pos: targetPos, from, to: "fire", cause: "fire" });
+      }
+      invalidateResourceIndex(world);
+      return true;
+    }
   }
 }
 
@@ -301,11 +342,23 @@ const OFFERED_FOOD_STOCK = CONSUME_STOCK_AMOUNT * 2;
  * 'e' key/HUD button, with no specific row to name) keeps the original
  * "first one found" pick, in `FOOD_MATERIAL_IDS` order.
  */
-function resolveFoodItem(agent: Agent, itemKey: string | undefined): MaterialId | undefined {
+/**
+ * A cooked dish (`ItemDef.cooked`) is real food too — crafted, not a
+ * MaterialId, so it isn't in `FOOD_MATERIAL_IDS` at all. Checked alongside
+ * it here so a cooked dish gets Eat/Offer treatment the same as any raw
+ * crop.
+ */
+function isFoodItem(world: World, itemKey: string): boolean {
+  return (FOOD_MATERIAL_IDS as readonly string[]).includes(itemKey) || world.items?.[itemKey]?.cooked !== undefined;
+}
+
+function resolveFoodItem(world: World, agent: Agent, itemKey: string | undefined): string | undefined {
   if (itemKey !== undefined) {
-    return (FOOD_MATERIAL_IDS as readonly string[]).includes(itemKey) && countOf(agent, itemKey) > 0 ? (itemKey as MaterialId) : undefined;
+    return isFoodItem(world, itemKey) && countOf(agent, itemKey) > 0 ? itemKey : undefined;
   }
-  return FOOD_MATERIAL_IDS.find((id) => countOf(agent, id) > 0);
+  const firstRaw = FOOD_MATERIAL_IDS.find((id) => countOf(agent, id) > 0);
+  if (firstRaw) return firstRaw;
+  return (agent.inventory ?? []).find((i) => world.items?.[i.itemKey]?.cooked !== undefined)?.itemKey;
 }
 
 /** A walkable, empty floor tile among the eight around the player — the offering goes down beside you, not under you. */
@@ -371,6 +424,18 @@ export function waterWithinReach(world: World, agent: Agent): boolean {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "water") return true;
+    }
+  }
+  return false;
+}
+
+/** A deployed campfire's real cooking range — `RecipeDef.requiresNearFire`'s own precondition. A little wider than "adjacent" (`waterWithinReach`'s radius 1): you cook AROUND a fire, not standing in the one tile it occupies. */
+const NEAR_FIRE_RADIUS = 2;
+
+export function nearFire(world: World, agent: Agent): boolean {
+  for (let dy = -NEAR_FIRE_RADIUS; dy <= NEAR_FIRE_RADIUS; dy++) {
+    for (let dx = -NEAR_FIRE_RADIUS; dx <= NEAR_FIRE_RADIUS; dx++) {
+      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "fire") return true;
     }
   }
   return false;

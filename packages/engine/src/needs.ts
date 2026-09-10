@@ -52,7 +52,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -1390,12 +1390,16 @@ export const TREAT_SPILLOVER_FRACTION = 0.3;
  * offering was the nearest food. Levers 3/5/6 all live here so neither
  * path can drift out of sync with the other.
  */
-export function applyPlayerFeedingBonus(world: World, eater: Agent, giver: Agent, rng: () => number): void {
+export function applyPlayerFeedingBonus(world: World, eater: Agent, giver: Agent, rng: () => number, rapportMultiplier = 1): void {
   const priorTreats = eater.timesFedByPlayer ?? 0;
   const gapTicks = world.tick - (eater.lastTreatTick ?? -Infinity);
   const habituation = 1 + TREAT_HABITUATION_STEP * Math.min(priorTreats, TREAT_HABITUATION_CAP);
   const visit = gapTicks < TREAT_SAME_SITTING_TICKS ? TREAT_SAME_SITTING_MULTIPLIER : gapTicks > TREAT_RETURN_VISIT_TICKS ? TREAT_RETURN_VISIT_MULTIPLIER : 1;
-  const delta = RAPPORT_OFFERED_FOOD_DELTA * habituation * visit;
+  // Direct ask: "cooked food gets you more rapport when offered" —
+  // `rapportMultiplier` (default 1, unchanged) is a cooked dish's own
+  // `ItemDef.cooked.rapportMultiplier`, read by both real call sites below
+  // off whatever tile flavor the eater actually ate.
+  const delta = RAPPORT_OFFERED_FOOD_DELTA * habituation * visit * rapportMultiplier;
 
   strengthenRapportMutual(world, eater, giver, delta, "receivedFood", "gaveFood", rng);
   eater.timesFedByPlayer = priorTreats + 1;
@@ -1416,10 +1420,15 @@ export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rn
   if (best.d === 0) {
     const tile = tileAt(world, agent.layer, best.x, best.y)!;
     consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+    // Direct ask: "cooked food... heals as well as satisfies hunger" —
+    // whatever this treat's flavor names, a cooked dish's own healFraction.
+    healFromCookedFood(world, agent, tile.flavor);
     tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
     recordGrazing(tile);
     const giver = world.agents.find((a) => a.id === tile.offeredBy);
-    if (giver) applyPlayerFeedingBonus(world, agent, giver, rng);
+    // "cooked food gets you more rapport when offered" — the same tile
+    // flavor's own cooked.rapportMultiplier, 1 (unchanged) for anything else.
+    if (giver) applyPlayerFeedingBonus(world, agent, giver, rng, tile.flavor ? (world.items?.[tile.flavor]?.cooked?.rapportMultiplier ?? 1) : 1);
     tile.offeredBy = undefined;
     log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
     return true;
@@ -1972,6 +1981,8 @@ export function tickAgentAction(
           // set FoodCropDef.thirstRelief.
           const thirstRelief = thirstReliefFactor(targetTile);
           if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+          // Direct ask: "cooked food... heals as well as satisfies hunger."
+          healFromCookedFood(world, agent, targetTile?.flavor);
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
@@ -1986,7 +1997,12 @@ export function tickAgentAction(
             // creature notices it" case — a genuinely hungry agent that
             // happens onto an offered berry through ordinary seekFood is
             // still being fed by the player, levers 3/5/6 included.
-            if (giver && giver.id !== agent.id) applyPlayerFeedingBonus(world, agent, giver, rng);
+            // "cooked food gets you more rapport when offered" — same
+            // cooked.rapportMultiplier lookup as applyTreatSeeking's own.
+            if (giver && giver.id !== agent.id) {
+              const rapportMultiplier = targetTile?.flavor ? (world.items?.[targetTile.flavor]?.cooked?.rapportMultiplier ?? 1) : 1;
+              applyPlayerFeedingBonus(world, agent, giver, rng, rapportMultiplier);
+            }
             targetTile.offeredBy = undefined;
           }
           // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
