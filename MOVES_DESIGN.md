@@ -7326,3 +7326,64 @@ guards against that, both worth deciding:
 4. Should a **predator** ganged up on by prey (the mob-fight case) use the
    same rule? Right now it flees only when critically hurt, which is the
    thing that makes mobbing feel weightless.
+
+## Answered, and shipped
+
+Verbatim: *"3 attackers unless they're really weak like, more than 8 levels
+below. Choice is weighted roll. 6 actions. Yeah also flee when out numbered."*
+
+| question | answer | constant |
+|---|---|---|
+| trigger count | 3 attackers | `SURROUNDED_ATTACKER_COUNT = 3` |
+| who counts as an attacker | not the badly outmatched | `OUTMATCHED_ATTACKER_LEVEL_GAP = 8` |
+| decision | weighted roll | `applyFightOrFlight` |
+| commitment | 6 actions | `FIGHT_OR_FLIGHT_COMMIT_ACTIONS = 6` |
+| predators too | yes | headcount adds to the flight weight |
+
+The roll's weights, all reading off state that already existed:
+
+```
+fight  = aggression + boldness + (herd allies nearby x 0.4)
+flight = sociability + 0.5 + ((1 - hpFraction) x 1.5)
+                    + ((attackers - 3 + 1) x 0.5)
+```
+
+**One implementation decision worth writing down.** The first version set
+`behavior = "fight"` and then fell through to the normal threat path to
+carry the fight out. That silently undid the whole feature: the normal path
+re-decides on mob size and level gap every single action, so a commitment
+made on one action was overwritten on the next. `applyFightOrFlight` now
+carries out both branches itself and returns `true`, which is what makes the
+6-action commitment real rather than nominal.
+
+The commitment also drops the instant nothing is pointed at you any more —
+holding a flee for five more actions after the last attacker died would be
+running from nothing.
+
+### Measured on a real run
+
+6 seeds x 4000 ticks (`packages/runner/src/validateFightOrFlight.ts`):
+
+| | |
+|---|---|
+| commitments entered | **10** (4 stand / 6 run) |
+| ticks with anyone surrounded | 79 of 24,000 (0.33%) |
+| predator triggers | 1 |
+
+**Finding, flagged not fixed:** this fires *rarely*. The design pass above
+predicted it — 3 attackers was measured at 0.68% of agent-samples, and 3 was
+chosen with that number on the table — but 10 commitments per 24,000 ticks is
+close enough to the "unreachable content" line to be worth a decision rather
+than a shrug. Two seeds produced zero. Options, in order of how much they
+change:
+
+1. **Leave it.** It is a rare dramatic spike, which is what it was designed
+   to be. It just means most runs will not contain one.
+2. **Drop the trigger to 2 attackers.** ~7x more common (4.7% of samples).
+   Cheapest change; risks becoming prey's default answer.
+3. **Count near-misses** — attackers that fought you in the last few ticks,
+   not only ones targeting you at this instant. The current filter is a
+   snapshot, so three attackers alternating never registers as three.
+
+The 40/60 stand/run split is a good sign (a weighted roll that always lands
+the same way is a lookup table), but on N=10 it is not yet evidence.

@@ -1715,6 +1715,145 @@ function giveUpAndRelocate(world: World, agent: Agent, log: EventLog | undefined
  * `agent.relocateTarget`'s own persistence, unchanged by this) once thirst
  * is satisfied again.
  */
+/**
+ * Attackers whose level is more than this far BELOW the agent's don't count
+ * toward being surrounded. Direct: "3 attackers unless they're really weak
+ * like, more than 8 levels below."
+ *
+ * Deliberately wider than `GIANT_SLAYER_LEVEL_GAP` (5, notables.ts): that
+ * one asks "was this an upset?", this one asks "is this a threat at all?",
+ * and being mobbed by things you outclass should read as an annoyance rather
+ * than a crisis.
+ */
+export const OUTMATCHED_ATTACKER_LEVEL_GAP = 8;
+
+/** How many real attackers it takes to trigger fight-or-flight. */
+export const SURROUNDED_ATTACKER_COUNT = 3;
+
+/** Actions an agent sticks with its fight-or-flight choice before re-deciding. */
+export const FIGHT_OR_FLIGHT_COMMIT_ACTIONS = 6;
+
+/**
+ * Everything currently pointed at `agent` and worth worrying about — within
+ * `FLEE_DETECT_RADIUS`, targeting it by `huntTarget` or `fightTarget`, and
+ * not more than `OUTMATCHED_ATTACKER_LEVEL_GAP` levels beneath it.
+ *
+ * This is the number the sim never had. `isBeingHunted` is a BOOLEAN, so one
+ * hunter and five were the same value, and the only flee trigger was
+ * `isCriticallyHurt` — the sim's answer to being surrounded was to keep
+ * doing whatever you were doing until nearly dead.
+ */
+export function threateningAttackers(world: World, agent: Agent): Agent[] {
+  const myLevel = agent.level ?? 1;
+  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
+    (other) =>
+      other.alive !== false &&
+      (other.huntTarget === agent.id || other.fightTarget === agent.id) &&
+      (other.level ?? 1) >= myLevel - OUTMATCHED_ATTACKER_LEVEL_GAP
+  );
+}
+
+/**
+ * Surrounded: pick fight or flight, then COMMIT to it for a few actions.
+ *
+ * Weighted roll rather than a lookup, on request — a deterministic table
+ * would make one species always do one thing, and the variety is the point.
+ * The weights read off things that are already true and already visible: a
+ * bold or aggressive animal turns, a sociable one runs, herd-mates at your
+ * shoulder make standing look better, being hurt makes it look worse.
+ *
+ * Returns whether it took the agent's action.
+ */
+function applyFightOrFlight(
+  world: World,
+  agent: Agent,
+  log: EventLog | undefined,
+  ctx: LevelingContext | undefined,
+  rng: () => number
+): boolean {
+  const attackers = threateningAttackers(world, agent);
+
+  // The commitment ends the moment its reason does — nothing pointed at you
+  // is not a thing to keep running from.
+  if (attackers.length === 0) {
+    agent.fightOrFlightActionsLeft = 0;
+    agent.fightOrFlightChoice = undefined;
+    return false;
+  }
+
+  const committed = (agent.fightOrFlightActionsLeft ?? 0) > 0 && agent.fightOrFlightChoice !== undefined;
+
+  if (!committed) {
+    if (attackers.length < SURROUNDED_ATTACKER_COUNT) return false;
+
+    const disposition = agent.disposition;
+    // Standing weights: temperament, then the two facts that actually change
+    // whether standing is survivable.
+    let fightWeight = (disposition?.aggression ?? 0.5) + (disposition?.boldness ?? 0.5);
+    let flightWeight = (disposition?.sociability ?? 0.5) + 0.5;
+
+    const allies = countHerdAllies(
+      world,
+      agent.id,
+      agent.species,
+      agent.herdId,
+      agent.layer,
+      agent.pos,
+      FLEE_DETECT_RADIUS
+    );
+    fightWeight += allies * 0.4;
+
+    const hpFraction = agent.hp !== undefined && agent.maxHp ? agent.hp / agent.maxHp : 1;
+    flightWeight += (1 - hpFraction) * 1.5;
+
+    // Outnumbered is itself a reason to run, and it applies to PREDATORS too.
+    // Direct: "Yeah also flee when out numbered." Before this, a predator
+    // being mobbed only ever broke off when critically hurt, which is the
+    // thing that made mobbing feel weightless.
+    flightWeight += (attackers.length - SURROUNDED_ATTACKER_COUNT + 1) * 0.5;
+
+    agent.fightOrFlightChoice = rng() * (fightWeight + flightWeight) < flightWeight ? "flee" : "fight";
+    agent.fightOrFlightActionsLeft = FIGHT_OR_FLIGHT_COMMIT_ACTIONS;
+  }
+
+  agent.fightOrFlightActionsLeft = (agent.fightOrFlightActionsLeft ?? 1) - 1;
+
+  const target = nearest(agent, attackers);
+  if (!target) return false;
+
+  // Being surrounded wakes you.
+  agent.asleep = false;
+  agent.sleepTicks = 0;
+
+  if (agent.fightOrFlightChoice === "flee") {
+    logBehaviorChange(log, world, agent, "flee");
+    agent.behavior = "flee";
+    agent.huntTarget = undefined;
+    agent.fightTarget = undefined;
+    agent.pos = stepAway(world, agent.layer, agent.pos, target.pos, agent);
+    return true;
+  }
+
+  // Standing. Carried out here rather than by falling through to the normal
+  // threat path below, because that path re-decides on mob size and level
+  // gap every action and would simply undo the choice — the commitment is
+  // the whole feature. Non-lethal `"defeated"`, same as the mob-fight
+  // branch: a cornered animal that turns is making the fight cost
+  // something, not expected to win it.
+  const distance = manhattan(agent.pos, target.pos);
+  logBehaviorChange(log, world, agent, "fight");
+  agent.behavior = "fight";
+  agent.huntTarget = undefined;
+  agent.fightTarget = target.id;
+  if (canAttackFromHere(world, agent, target, distance)) {
+    resolveHit(world, agent, target, log, "defeated", ctx, distance, rng);
+  } else {
+    // stopAdjacent=true — see stepToward's doc comment.
+    agent.pos = stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
+  }
+  return true;
+}
+
 export function applyPredationInstincts(
   world: World,
   agent: Agent,
@@ -1747,6 +1886,13 @@ export function applyPredationInstincts(
   // logic would apply as if this feature didn't single it out. A
   // non-predator's priority is completely unchanged.
   if (!agent.isPredator && applyEggDefense(world, agent, ctx, log, rng)) return true;
+
+  // Surrounded — runs BEFORE the critically-hurt check on purpose. The old
+  // order meant the only trigger for changing your mind was already being
+  // nearly dead; being three-on-one is supposed to be the thing you react to
+  // *before* that. Skipped while asleep, like every other volitional branch
+  // here.
+  if (!agent.asleep && applyFightOrFlight(world, agent, log, ctx, rng)) return true;
 
   if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(

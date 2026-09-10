@@ -1245,6 +1245,22 @@ export interface Agent {
    */
   consecutiveMoveActions?: number;
 
+  /**
+   * Actions remaining on a fight-or-flight commitment — see predation.ts's
+   * `applyFightOrFlight`. While this is above 0 the agent sticks with
+   * whichever it chose instead of re-deciding every action.
+   *
+   * The commitment is the point, not the decision: re-rolling every action
+   * produces an agent that flips between running and turning and does
+   * neither, and it defeats `consecutiveMoveActions` by construction, since
+   * that streak resets the moment the agent does anything but move.
+   * Counted in the agent's OWN actions, same clock as everything else here.
+   */
+  fightOrFlightActionsLeft?: number;
+
+  /** Which way the fight-or-flight roll went, held for the length of the commitment. */
+  fightOrFlightChoice?: "fight" | "flee";
+
   // --- Shelter-building (see DESIGN.md's "Shelter-building" section, shelter.ts) ---
 
   /**
@@ -1722,6 +1738,12 @@ export interface RapportSubject {
   id?: string;
   /** Level where known — `rapport.ts` keeps the most notable subject, and this is how "notable" is judged. */
   level?: number;
+  /**
+   * What this was to the remembering agent — friend or foe. Direct note:
+   * "Get rid of it was none of herd. Just say foe or friend." The prose
+   * needs it to say "a foe Onix" rather than writing around the hole.
+   */
+  standing?: "friend" | "foe";
 }
 
 /**
