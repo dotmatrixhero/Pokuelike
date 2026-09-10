@@ -7681,6 +7681,88 @@ feature rather than a detail.
   fails a build on it yet. Worst live case today: thorns 65% (venusaur,
   ivysaur), damageReduction 42% (diglett, sandshrew).
 
+## Fixed: Battle Screen chip losing HP bar/level/herd/sprite, showing bare id — see DESIGN.md
+
+- [x] Direct report with screenshot: "Why did we lose hp bars and stuff
+      sometimes? On the battle renderer." Root cause (code-confirmed,
+      NOT live-reproduced despite heavy stress testing — see DESIGN.md's
+      honesty note): `applyCombatantState`'s `world.agents.find` lookup can
+      fail for an id a chip already painted (corpse pruned after
+      `CORPSE_PERSIST_TICKS`, or a mobile tab's rAF falling behind real
+      ticks), and every field degraded to its "no agent" branch at once —
+      bare id text, no sprite/level/herd/HP. Fixed by freezing an
+      already-painted chip on its last real state instead of stomping it,
+      using the same frame-to-frame persistence `combatantEls` already
+      relies on for the HP bar's CSS transition. Typecheck/build/full test
+      suites green; live stress-tested (thousands of ticks, dozens of real
+      battles) with zero regressions, but never actually caught the
+      original failure in the act — worth re-checking if it recurs, ideally
+      with a repro that's easier to force (e.g. throttling the tab).
+
+## Built: zone-level banding (safer near a Sanctuary, rising with distance) — see DESIGN.md
+
+- [x] Direct report + proposal: "Still got a lot of lvl 40+ slaughtering
+      low levels. Maybe certain zones (friendlier ones) don't have high
+      levels... spawn. We can have bands of acceptable level ranges per
+      zone and adjacent zones with changing normalized probability curves
+      with the median increasing or decreasing as you get further away
+      from a particular zone." Decision: distance from nearest Sanctuary,
+      soft re-center (not a hard clamp), spawn-time only. New
+      `distanceToNearestLandmark` (macroGrid.ts), `World.sanctuaryDistance`
+      (carried down at promotion, same as `territoryName`), and
+      `zoneLevelCenter` (immigration.ts) blend with the existing
+      `localAvgLevel` re-centering in `rollImmigrantLevel` — wired into
+      both live immigration AND a never-visited zone's initial invented
+      population (`estimateInitialAggregates`), so the effect isn't just on
+      later immigrants. Full engine suite (1267, 5 new) green. NOT yet
+      spot-checked live in the running app (Sanctuaries are sparse — a
+      handful per grid — so landing near one in a short session is luck of
+      the seed); worth a live check next time.
+- [x] Follow-up retune: "Maybe 5 should be 30, 8 like 35 and 12+ like 46.
+      Since levels get exponentially harder to gain as you get [higher].
+      More xp." Reshaped `zoneLevelCenter` from a flat per-step ramp into a
+      concave power curve (`floor + (cap-floor) * (dist/maxDist)^0.6`, ramp
+      cap raised 7 -> 12 steps, cap level set to 46) — fast climb near a
+      Sanctuary, flattening out further away, mirroring the sim's own
+      "later levels cost more XP" curve spatially. Real measured checkpoints
+      on a 60x60 grid, 6 seeds: dist 5 -> 29 avg (asked ~30), dist 8 -> 37
+      avg (asked ~35, the one anchor this curve can't hit exactly — the
+      three named anchors aren't fully consistent with any single smooth
+      curve), dist 12+ -> 46 avg (asked 46, exact). See DESIGN.md's full
+      table. Full engine suite (1267) green.
+- [ ] Follow-up not yet built (explicitly scoped OUT of this slice, per "spawn
+      time only"): a low-level zone's peace can still be broken by a
+      high-level predator WANDERING in from herdMigration.ts after
+      spawning elsewhere — same "40+ slaughtering low levels" symptom, a
+      different cause. Whether/how to also discourage that drift is a
+      separate design question for later.
+
+## Built: herd young-protection, pieces 1+2 (proactive guardian + age-based cohesion) — see DESIGN.md
+
+- [x] Direct question + decision: "do herds protect their young at all? I
+      don't seem to see it... needs more instinct to protect while alive,
+      stay closer, and avenge when dead" -> menu of 3 pieces -> "Sure."
+      Built 1 (proactive guardian trigger: `findHerdmateInDanger` now
+      notices a herd-mate a nearby predator has already committed to
+      hunting, `behavior === "hunt"` + matching `huntTarget`, not just one
+      already fleeing/fighting) and 2 (age-based tight cohesion:
+      `applyHerdCohesion`'s tighter leash now also fires on
+      `isJuvenile(agent)` directly, not only the level-gap proxy). Full
+      engine suite (1270, 5 new) green. Real before/after (8 seeds x 10,000
+      ticks each, same seeds, code swapped via `git stash` — not just two
+      unrelated runs): guardian-intervention rate on a juvenile death
+      roughly tripled, 17% -> 50%; juvenile deaths 6 -> 4, total deaths
+      250 -> 271 across the same 8 seeds (noted honestly as suggestive, not
+      a clean causal read — any behavior-timing change cascades the whole
+      shared-rng timeline from that point on, so per-seed numbers aren't
+      "the same encounters resolving differently"). See DESIGN.md's full
+      table and honesty note.
+- [ ] Piece 3 (avenge) intentionally NOT built yet — genuinely new
+      mechanic (temporary pursuit/aggression toward a still-nearby killer
+      after a herd death), no existing code to extend, needs its own
+      design/tuning pass rather than being bolted on blind. Still on the
+      menu, not decided against.
+
 
 ## Four-move cap, forgetting and the refund — BUILT
 

@@ -1,13 +1,13 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import { rollImmigrantLevel, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
+import { rollImmigrantLevel, zoneLevelCenter, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
 import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceIndex.js";
 import { mulberry32 } from "./rng.js";
-import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies, speciesFitsZone } from "./macroGrid.js";
+import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies, speciesFitsZone, distanceToNearestLandmark } from "./macroGrid.js";
 import { territoryAt } from "./territories.js";
 
 /**
@@ -386,6 +386,15 @@ function ensureTrackedRegion(mw: MacroWorld, row: number, col: number): Region {
 function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx: ImmigrationContext): Record<string, RegionAggregate> {
   const zone = zoneAt(mw.grid, row, col)!;
   const resourceIndex = estimateZoneResourceIndex(zone);
+  // Same zone-level banding a live immigrant's roll gets (see
+  // `promoteZone`'s own `sanctuaryDistance` assignment and
+  // `immigration.ts`'s `zoneLevelCenter`) — computed directly from `mw.grid`
+  // here since no `World.sanctuaryDistance` exists yet this early (this
+  // whole function runs BEFORE `promoteZone` generates one). A never-visited
+  // zone's estimated population is exactly as real a "spawn" as an
+  // immigrant group (see `avgLevel` below's own doc comment), so it gets the
+  // exact same zone-driven re-centering, not just zone-crossing immigrants.
+  const zoneCenter = zoneLevelCenter(distanceToNearestLandmark(mw.grid, row, col, "sanctuary"));
   const aggregates: Record<string, RegionAggregate> = {};
   for (const estimate of estimateZoneSpecies(zone, ctx.speciesRoster, mw.rng)) {
     aggregates[estimate.speciesId] = {
@@ -407,7 +416,7 @@ function estimateInitialAggregates(mw: MacroWorld, row: number, col: number, ctx
       // future tuning change to that one place automatically, instead of
       // silently drifting out of sync with it the way the old duplicated
       // formula eventually would have.
-      avgLevel: rollImmigrantLevel({ id: estimate.speciesId, homeLayer: estimate.homeLayer, minLevel: estimate.minLevel, singleStage: estimate.singleStage, isPredator: estimate.isPredator }, mw.rng),
+      avgLevel: rollImmigrantLevel({ id: estimate.speciesId, homeLayer: estimate.homeLayer, minLevel: estimate.minLevel, singleStage: estimate.singleStage, isPredator: estimate.isPredator }, mw.rng, undefined, zoneCenter),
       baseResourceIndex: resourceIndex,
       resourceIndex,
       lastEventPopulation: estimate.population,
@@ -549,6 +558,11 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
     // this zone can be named after a place that exists on the overworld
     // rather than an invented one (see herds.ts).
     region.world.territoryName = territoryAt(mw.grid, row, col)?.name;
+    // How many zone-steps this zone sits from the nearest Sanctuary — feeds
+    // immigration.ts's zone-level banding (see World.sanctuaryDistance's own
+    // doc comment). Same "carry it down once, at promotion" treatment as
+    // territoryName above, not a per-tick lookup.
+    region.world.sanctuaryDistance = distanceToNearestLandmark(mw.grid, row, col, "sanctuary");
   }
 
   const aggregates = region.aggregates ?? {};
