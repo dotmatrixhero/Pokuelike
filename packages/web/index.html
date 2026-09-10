@@ -393,6 +393,8 @@
       #player-hud .hud-fill.energy { background: #d9c94a; }
       #player-hud .hud-fill.low { background: #ff6b6b; }
       #player-hud .hud-num { width: 34px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+      #hud-pack-btn { display: block; margin: 0 0 6px auto; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
+      #hud-pack-btn:active { background: var(--accent); }
       #hud-message { margin-top: 6px; min-height: 15px; color: var(--text); }
       #hud-keys { margin-top: 4px; font-size: 10.5px; opacity: 0.7; }
       #hud-pack { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
@@ -413,15 +415,21 @@
       .pack-row-actions { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
       .pack-action-btn { flex: none; padding: 5px 10px; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.05); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
       .pack-action-btn:active { background: var(--accent); color: #06111f; }
-      #hud-pad { display: flex; gap: 6px; margin-top: 8px; }
+      /* Direct ask: "make it not so big and bulky." Icon-only now (Attack
+         reads as crossed swords, Pack moved out entirely to its own corner
+         button above) — a shorter, tighter row than the old full-width
+         text-label buttons. */
+      #hud-pad { display: flex; gap: 5px; margin-top: 6px; }
       #hud-pad button {
         flex: 1;
-        min-height: 36px;
+        min-height: 28px;
+        padding: 2px;
         border: 1px solid var(--panel-border);
-        border-radius: 8px;
+        border-radius: 7px;
         background: rgba(255, 255, 255, 0.06);
         color: var(--text);
-        font-size: 12px;
+        font-size: 15px;
+        line-height: 1;
         touch-action: manipulation;
       }
       #hud-pad button:active { background: var(--accent); color: #06111f; }
@@ -981,6 +989,11 @@
                the player's have to be there without clicking — you should
                never be surprised by starving. -->
           <div id="player-hud" hidden>
+            <!-- Direct ask: "clean up hud further. Put a backpack emoji
+                 for pack on the top right." Pulled out of the button row
+                 entirely and anchored to the HUD panel's own corner —
+                 one less thing crowding the row below. -->
+            <button id="hud-pack-btn" data-act="pack" title="What you carry, and what you can make">🎒</button>
             <div class="hud-rows">
               <div class="hud-row"><span class="hud-label">HP</span><span class="hud-bar"><span id="hud-hp" class="hud-fill hp"></span></span><span id="hud-hp-text" class="hud-num"></span></div>
               <div class="hud-row"><span class="hud-label">Hunger</span><span class="hud-bar"><span id="hud-hunger" class="hud-fill hunger"></span></span><span id="hud-hunger-text" class="hud-num"></span></div>
@@ -998,15 +1011,18 @@
                  let's make offer and eat only available from inventory
                  after you gather." The `e` key still eats (ground food
                  first, a carried berry otherwise); there's no keyboard
-                 shortcut for `offer` any more — it lives in Pack only. -->
+                 shortcut for `offer` any more — it lives in Pack only.
+                 Pack itself moved to the top-right corner button above;
+                 Attack reads as crossed swords, "make it not so big and
+                 bulky" — every button here is icon-plus-title now, not
+                 wide text. -->
             <div id="hud-pad">
-              <button data-act="wait" title="Wait one turn">Wait</button>
-              <button data-act="drink" title="Drink from water beside you">Drink</button>
-              <button data-act="look" title="Look at the next creature you can see">Look</button>
-              <button data-act="gather" title="Gather from the tile you stand on">Gather</button>
-              <button data-act="pack" title="What you carry, and what you can make">Pack</button>
-              <button data-act="crouch" title="Crouch: move slowly, read as less of a threat">Crouch</button>
-              <button data-act="attack" title="Swing at whatever's in the direction you last moved">Attack</button>
+              <button data-act="wait" title="Wait one turn">⏱️</button>
+              <button data-act="drink" title="Drink from water beside you">💧</button>
+              <button data-act="look" title="Look at the next creature you can see">👁️</button>
+              <button data-act="gather" title="Gather from the tile you stand on">🌿</button>
+              <button data-act="crouch" title="Crouch: move slowly, read as less of a threat">🧎</button>
+              <button data-act="attack" title="Swing at whatever's in the direction you last moved">⚔️</button>
             </div>
           </div>
 

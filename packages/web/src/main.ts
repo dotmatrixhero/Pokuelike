@@ -1084,7 +1084,10 @@ function travelTo(target: Vec2): void {
 }
 
 // The on-screen verbs. `click` is fine here: these buttons are never rebuilt.
-document.querySelectorAll<HTMLButtonElement>("#hud-pad button").forEach((btn) => {
+// `#hud-pack-btn` moved out of `#hud-pad` to its own corner (direct ask:
+// "Put a backpack emoji for pack on the top right"), so it's matched here
+// by its own id alongside the row.
+document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (!playerMode || playerDead) return;
     cancelTravel();

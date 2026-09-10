@@ -8650,6 +8650,32 @@ fields, so **24 of the 40 shipped nodes using one rendered blank**; and
   no agent carries stages yet." Both `predation.ts` and `herdConflict.ts` pass
   real stages now.
 
+## HUD decluttering, round two: icons instead of text labels
+
+Direct ask: *"Clean up hud further. Put a backpack emoji 🎒 for pack on
+the top right. Swords cross for attack. Like make it not so big and
+bulky."*
+
+- **Pack** moved out of the `hud-pad` button row entirely, to its own
+  small 🎒 button anchored top-right of the `#player-hud` panel itself
+  (a real layout row, `margin-left: auto`, not absolutely-positioned
+  over the needs bars — that would have overlapped the HP row).
+- **Attack** now reads ⚔️. The rest of the row went icon-only too, for a
+  consistent look rather than one emoji button next to five text ones:
+  Wait ⏱️, Drink 💧, Look 👁️, Gather 🌿, Crouch 🧎.
+- `#hud-pad button`'s desktop CSS: `min-height` 36px → 28px, tighter
+  padding/gap, `font-size` bumped to 15px (emoji legibility at the
+  smaller box). Mobile's 44px tap-target minimum (`@media (max-width:
+  768px)`) left untouched — that one's an accessibility floor, not
+  bulk.
+- `main.ts`'s click-handler selector widened to `#hud-pad button,
+  #hud-pack-btn` so the relocated Pack button still fires through the
+  same handler (`data-act="pack"` unchanged).
+
+Live-verified (Playwright): all 6 row buttons render as the intended
+emoji, the corner Pack button opens the same Pack menu as before, no
+console errors. Full suite green (1435 engine / 387 data tests).
+
 ## Fixed: auto-cam zooms out for a spread-out engagement (mobile) — see DESIGN.md
 
 - [x] Direct report: "On mobile, sometimes it's hard to see the auto cam
@@ -8679,3 +8705,15 @@ fields, so **24 of the 40 shipped nodes using one rendered blank**; and
       before/after, 8 seeds/8000 ticks: 1 agent stuck 10+ levels past its
       own threshold before the fix (a level-17 Weedle), 0 after. Full
       engine (1428) and data (383) suites green.
+
+## Flake noticed, not chased: simulation.test.ts's cooldown-gate test
+
+One post-merge full-suite run failed `simulation.test.ts`'s "cooldownTicks
+genuinely gates reuse across the owner's own action ticks" — passed in
+isolation and on an immediate full-suite re-run (1443/1443, 58/58). Not
+reproducible, and neither this session's HUD/moves work nor the merged
+evolution-decline changes touch `simulation.ts` or that test. Real
+finding (order-dependent tests mean some shared state is leaking
+somewhere — possibly `Math.random` used unseeded in a test that doesn't
+pass its own `rng`), just not one worth chasing mid-task; flagging for
+whoever next has reason to look at `simulation.test.ts`.
