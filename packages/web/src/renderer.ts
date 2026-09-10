@@ -283,6 +283,11 @@ function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, 
     ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
     ctx.fill();
     ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    // Colour-emoji glyphs ignore fillStyle's colour but keep its alpha, so
+    // the 0.22 backing fill above was also painting the crop at 22% (on top
+    // of the deliberate stock fade). Direct report: "Why are all our emoji
+    // sorta faded out opacity?" — this line was the answer. Opaque fill.
+    ctx.fillStyle = "#fff";
     ctx.fillText(cropEmoji, x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
     ctx.restore();
   } else if (plantSprite) {
@@ -294,6 +299,7 @@ function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, 
     ctx.save();
     ctx.globalAlpha = 0.55;
     ctx.font = `${TILE_SIZE * 0.55}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#fff"; // whatever translucent fill the tile loop left behind must not stack on the deliberate 0.55
     ctx.fillText("🌱", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
     ctx.restore();
   } else {
@@ -1127,6 +1133,7 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
   if (agent.controlledBy === "player") {
     // The player is 👱 in both render styles — see drawAgent's own branch.
     ctx.font = `${TILE_SIZE * 1.0}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#fff"; // the halo's 0.28-alpha fill would otherwise apply to the emoji
     ctx.fillText("👱", cx, cy);
   } else {
     const letter = agent.species.charAt(0).toUpperCase();
@@ -1218,6 +1225,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#fff"; // the backing circle's 0.28 alpha would otherwise apply to the egg — see the player branch
     ctx.fillText("🥚", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
   } else if (agent.controlledBy === "player") {
     // Direct ask: "change the player icon to a 👱 emoji." The human has no
@@ -1241,6 +1249,10 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = `${TILE_SIZE * 1.15}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    // Colour-emoji glyphs ignore fillStyle's colour but KEEP its alpha —
+    // the translucent disc fill above would paint the face at 55%. Direct
+    // report: "It's still semi transparent." Opaque fill before every emoji.
+    ctx.fillStyle = "#fff";
     ctx.fillText("👱", cx, cy);
   } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
