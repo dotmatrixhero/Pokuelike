@@ -5323,3 +5323,203 @@ conditions and inert everywhere else. The fix that actually made accuracy a
 real purchase was *Opportunist's Strike* taking the move to **85**, which is a
 genuine miss chance at any weather and finally gives Keen Eye's +15 something
 to cover.
+
+### Ember converted to v4 (Shipped) — "the first fire, and it catches"
+
+Eighth conversion, and the worst tree on the board going in: **35 nodes, 14
+checker problems**, the highest count in the roster. It was also the tree
+carrying the most *dead* content — three separate mechanics that had shipped,
+rendered, and never once done anything.
+
+**The fantasy, written before a node was touched**, and written against
+`flamethrower` rather than in isolation, because the brief was that Ember
+must not be a small Flamethrower:
+
+> Ember is the first fire a creature makes. Not a jet and not a beam — a
+> mouthful of coals spat one tile, by a throat still learning the trick.
+> Forty power: on its own it barely singes. What is dangerous about an ember
+> is that it does not stop when it lands. It **catches** — in the dry grass
+> behind the target, in the bush the thing was hiding in, in the next bush
+> over — and a dozen ticks later what is hurting you is the ground, not the
+> creature that spat at you. The same coal is also a hearth: the thing a herd
+> sleeps around. Fire has no allegiance, and the creature that threw it is
+> standing in the same dry grass.
+
+Flamethrower is one held breath aimed at one thing, and it is over when the
+breath runs out. Ember is one spark and no control over what happens next.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable |
+|---|---|---|---|
+| **Wildfire** (agg) | **the catch** — how many sparks and how hard what lands sticks (*Spit Coals*, the tree's only `hits` setter, then raw power) | **when it catches** — reach and opportunity (`defensePenetration`, *Fan the Flames* on an already-burning target, then the preserved reach-vs-intensity fork) | *Spreading Blaze* — the moment the fire stops being yours |
+| **Ring of Fire** (bold) | **the ring** — how far it reaches and who it spares (*Fill the Circle*, then *Never Ours*) | **the middle** — keeping the inside of it yours (*Give Ground*, then the preserved plant-vs-fireproof fork) | ***Take Up the Coals*** |
+| **Hearthfire** (soc) | **the hearth** — warmth given away (`allyEffectOnAttack`, then *Kindled Spirits*) | **the watch** — the fire as a signal (*Beacon Fire*'s `rallyCall`, then the preserved tend-vs-perform fork) | *Eternal Flame* |
+
+#### Three shipped bugs, all found by running the engine rather than reading it
+
+**1. `shape` does nothing without `hitsArea`, and the Boldness branch is
+named after its footprint.** `shape` is only ever read by `resolveShape`
+inside `resolveAreaHit`, which only runs for a `hitsArea` move. Ember had
+three `shape` nodes — `ring_of_fire`, `wide_ring`, and Aggression's `inferno`
+— and `hitsArea` on none of them. Measured on a real `tickWorld` with a body
+on each side of the caster:
+
+| | primary | second body |
+|---|---|---|
+| ring radius 1, no `hitsArea` | 13 | **0** |
+| ring radius 1, `hitsArea` (control) | 13 | **13** |
+
+**2. Which made `ring_of_fire` a pure-downside opener** (principle 4): it
+charged −10 power and +1 cooldown for a ring that never covered a tile, at
+the head of the branch built on it.
+
+**3. Ember was the only tree in the roster carrying cost-3 nodes.** This
+document already measured cost-3 as *unreachable outright* (0 of 4 distinct
+nodes ever picked across a living population; 2 of 4 after
+`SKILLPOINT_SAVE_CHANCE` was added). All four were fork tips — the branch's
+actual decision. Flattened to 2, the roster's own ceiling.
+
+And one bug introduced *by* fixing the first: a `ring` is a **hollow**
+Chebyshev shell in `resolveShape`, so `wide_ring`'s radius 2, the moment it
+became real, was a footprint a range-1 move can never fire into. Measured:
+radius-2 ring did 9 to a body two tiles out and **0 to the one standing next
+to the caster**. It is now `burst` radius 2 — the filled form, 13 tiles —
+renamed *Fill the Circle*, which is the escalation the name always described.
+
+#### The best node in the tree
+
+***Take Up the Coals*** — `consumesOwnTerrain: { terrain: "fire" }`. The
+caster is standing in a fire its own opener started, so it reaches down and
+throws it. Measured on a real `tickWorld`:
+
+| | damage | attacker's tile after |
+|---|---|---|
+| standing in fire, node taken | **14** | `fire` → **`floor`** |
+| standing in fire, node not taken (control) | 9 | `fire` |
+| node taken, not standing in fire (control) | 9 | `floor` |
+
+Water Gun's writeup records why Hydro Pump could **not** spend water this way:
+consuming a tile deletes a resource the sim meters. Fire is the one terrain
+where that objection does not apply — `tickFires` was going to leave that tile
+as scorched `"floor"` within `FIRE_BURN_TICKS` regardless. Spending it costs
+the map nothing it was not already about to lose.
+
+#### Fire is thin where Ember's own species live, and that is the point
+
+Measured over `createDemoWorld`, 3 seeds, and then measured again as ignition
+per landed `terrainBurn` hit against those exact fuel densities:
+
+| biome | fuel | ignition per landed hit |
+|---|---|---|
+| desert | 1.5% | 5% |
+| badlands | 2.0% | 8% |
+| grassland | 6.7% | 25% |
+| jungle (control, no Ember learner lives here) | 17.1% | 57% |
+
+Ember's learners are charmander/charmeleon (badlands), vulpix and magmar
+(desert/badlands), growlithe, ponyta/rapidash (grassland/highland). So fire on
+the map is **occasional and precious** for this move rather than constant —
+which is the argument for *Take Up the Coals* being a deep notable rather than
+a filler: the tree that makes fires is the one tree with a reason to spend one.
+
+#### Levers checked at the call site and rejected — unreachable content is a bug
+
+- **`terrainFill: { terrain: "fire" }`** — reads like a shortcut past the fuel
+  problem. `resolveHitAgainstTarget` calls `waterSoil(tile)` unconditionally
+  after any `terrainFill`, so it would have *fertilised* the ground it set
+  alight, and `TERRAIN_FILLABLE` is a dry-walkable set that has nothing to do
+  with flammability.
+- **`gatherBurst`** — the canopy-harvest path is the only one a non-`burrow`
+  damage move can feed, and the only canopy crop is Apple
+  (`eligibleBiomes: ["forest"]`). No Ember learner lives in forest. Same
+  rejection Rock Slide and Water Gun made, for the same reason.
+- **`drainNeeds`, `spawnsRain`, `fertilityBoost`, `statusImmunityAura`,
+  `selfHeal`** — every one is read only inside `maybeUseUtilityMove`, whose
+  candidate list is `agent.moves.filter(m => m.utilityMove)`. `spawnsRain` in
+  particular reads as an obvious Fire-tree capstone and would have been dead
+  the moment it shipped.
+- **A fourth `critRateStage` node.** `rollCritical` clamps the stage at 3, and
+  the Kindled Fury bridge plus *Wildfire Call* reach exactly 3. The bridge's
+  own notable therefore escalates the lever with `critCooldownReset` instead
+  of a stage the engine would throw away — the same discipline Water Gun's
+  writeup records.
+- **Three `+10 Accuracy` fillers on a 100-accuracy move.** `rollAccuracy`
+  only ever spends surplus through `stormAccuracyMultiplier` and the elevation
+  multiplier — and a **storm is the weather that puts fires out**
+  (`FIRE_RAIN_BURNOUT_MULTIPLIER`, and a rained-on fire does not spread at
+  all). Unlike Water Gun, where two of six were kept on purpose, none of
+  Ember's three were worth keeping: this move least wants to fight in the one
+  condition that surplus buys back. All three became real levers
+  (`excludesAllies`, `allyEffectOnAttack`, and a `defensePenetration` filler).
+
+#### Passives went DOWN, measured
+
+`passive-exposure.ts`, before → after, for every Ember learner:
+
+| species | damageReduction before | after |
+|---|---|---|
+| charmander, growlithe, vulpix, ponyta, magmar | 10% | **0%** |
+| charmeleon, rapidash | 18% | **8%** |
+
+Healing (`regen` + `healAura` + `regenFlat/43`) is **byte-identical** before
+and after, at 6.8%/tick for the tree — the roster-wide worst case is unchanged
+at 13.6%. Thorns unchanged. `charmeleon` drops out of the roster's top-12
+damageReduction table entirely.
+
+The change is *Searing Wall*, which was a flat `damageReduction: 0.1` — the
+lever this document has a whole section asking us to stop reaching for, and
+one of the two that stack uncapped into real invulnerability. It now grants
+**`fireproof: 0.5`**, which is the exact, bounded thing the node was already
+describing: `applyFireDamage` clamps it at 1 and it touches nothing but
+standing in a fire tile, which is precisely what a creature inside its own
+ring is doing. Fifth user of `fireproof` in the roster.
+
+#### Balance, with the roster as control
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **14** (worst in the roster) | **0** | — |
+| nodes | 35 | **45** | 45 |
+| distinct levers | 21 | **34** (joint 1st) | 24 |
+| colour-pie flavours | 9 | **14** (1st) | 11 |
+| tempo | 2.00x (cap 2.00) | **2.00x — unchanged** | 2.00x |
+| power | 2.38x | 2.75x | 2.20x |
+| cheapest capstone | 12 pts | 11 pts | 10 pts |
+
+**No cooldown number was moved.** Ember was already spending the full −2 the
+3x cap allows on a base-3 move, so there was no headroom to spend and none was
+taken. The one number that did move is power, 2.38x → 2.75x, which sits
+between Peck (2.57x) and Tackle (3.38x); an earlier draft read 3.13x and three
+`+5 power` riders were trimmed off notables to bring it back into the band.
+
+**The real balance change to look at is `ring_of_fire`'s `hitsArea`.** It is
+a bug fix by the letter — the node was charging for nothing — but a fully
+specced Boldness build now hits 13 tiles where it used to hit one, which no
+amount of "it was dead anyway" makes small. The one-line revert is removing
+`hitsArea: true`, which puts the branch back to what it has always actually
+done, i.e. nothing.
+
+#### Verified by running it, not by reading it
+
+Driving the engine's own `maybeAutoRespec` on a real Charmander with points
+to spend, once per disposition: **42 of 45 nodes bought in each case** (the
+missing three are the excluded fork sides), **all three capstones reached
+from every disposition**, and every new lever present on the resulting spec
+(`hits`, `hitsArea`, `burst`, `jamCooldownTicks 2`, `critRateStage 3` —
+exactly the engine's clamp). And driving `tickWorld` itself, with controls:
+
+| | measured | control |
+|---|---|---|
+| *Ring of Fire*, a body each side | 8 and **8** | base move: 9 and **0** |
+| *Fill the Circle*, bodies at 1 and 2 tiles | 9 and **9** | hollow ring r2: **0** and 9 |
+| *Never Ours*, herd-mate in the blast | foe 8, herd-mate **0** | without it: foe 8, herd-mate **8** |
+| *Take Up the Coals*, standing in fire | **14**, tile `fire`→`floor` | 9 off fire, 9 without the node |
+| *Beat At the Flames*, a target with a cooldown of 2 | **3** | without it: 1 |
+
+**An honest limit, stated plainly.** Reachability of *Take Up the Coals* in a
+real population is probabilistic and was **not** measured end-to-end: the
+mechanic is proven, and the ignition rates above bound how often a fire exists
+to stand in, but no long run was done to count how often a specced agent
+actually ends a turn on one. That is the same class of gap the Rock Slide and
+Peck conversions recorded for their own lone learners.

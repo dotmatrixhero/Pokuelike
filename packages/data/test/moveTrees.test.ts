@@ -1122,3 +1122,144 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(respec.lifestealFraction).toBeCloseTo(0.05);
   });
 });
+
+describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
+  const ember = MOVES.ember;
+
+  it("Ring of Fire finally covers tiles: shape is dead without hitsArea, and this branch is named after its footprint", () => {
+    // The bug this fixes: `shape` is only ever read by `resolveShape` inside
+    // `resolveAreaHit`, which only runs for a `hitsArea` move. The Boldness
+    // opener set a ring and never set `hitsArea`, so it charged -10 power
+    // and +1 cooldown for a footprint that did nothing — a pure-downside
+    // node (principle 4) at the head of the branch named for it.
+    const respec = applyMoveTree(ember, ["ring_of_fire"]);
+    expect(respec.hitsArea).toBe(true);
+    expect(respec.shape).toEqual({ kind: "ring", radius: 1 });
+    expect(respec.power).toBe(ember.power - 10);
+    expect(ember.hitsArea).toBeUndefined();
+  });
+
+  it("Fill the Circle is a filled burst, not a hollow ring the range-1 move could never fire into", () => {
+    // `resolveShape` builds a ring as a hollow shell at exactly that
+    // Chebyshev radius. Ember is aimed at range 1, so a radius-2 ring is a
+    // footprint the move can never reach — the node would have been dead the
+    // moment `hitsArea` made it real.
+    const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring"]);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 2 });
+    expect(respec.range).toEqual({ min: 0, max: 1 });
+  });
+
+  it("the whole tree has exactly one shape lineage, and it is Boldness's", () => {
+    const shapers = Object.values(ember.tree!).filter((n) => n.delta.shape !== undefined);
+    expect(shapers.map((n) => n.id)).toEqual(["ring_of_fire", "wide_ring"]);
+    // wide_ring descends from ring_of_fire, so the overwrite is escalation
+    // rather than a co-takeable collision.
+    expect(shapers.every((n) => n.leaning === "boldness")).toBe(true);
+  });
+
+  it("Take Up the Coals spends a fire tile the caster is standing in — the loop the opener's own terrainBurn feeds", () => {
+    const respec = applyMoveTree(ember, [
+      "ring_of_fire",
+      "banked_heat",
+      "slow_burn",
+      "wide_ring",
+      "never_ours",
+      "take_up_the_coals",
+    ]);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "fire", damageMultiplier: 1.6 });
+    // `wider_burn` is what puts those tiles on the map in the first place.
+    expect(ember.tree!.wider_burn.delta.terrainBurn).toBe(true);
+  });
+
+  it("Never Ours keeps the ring off the herd, and it lives under the node that grants hitsArea", () => {
+    // `excludesAllies` is only consulted inside `resolveAreaHit`, so putting
+    // it in Sociability would have been dead content for any build that
+    // skipped the branch carrying `hitsArea`.
+    const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring", "never_ours"]);
+    expect(respec.excludesAllies).toBe(true);
+    expect(respec.hitsArea).toBe(true);
+    expect(ember.tree!.never_ours.leaning).toBe("boldness");
+  });
+
+  it("Searing Wall answers 'standing inside your own fire' with fireproof, not another stacking damageReduction", () => {
+    expect(ember.tree!.searing_wall.grantsPassive).toEqual({ kind: "fireproof", value: 0.5 });
+    const drNodes = Object.values(ember.tree!).filter(
+      (n) => n.grantsPassive?.kind === "damageReduction" || (n.grantsPassives ?? []).some((g) => g.kind === "damageReduction")
+    );
+    expect(drNodes).toEqual([]);
+  });
+
+  it("Beat At the Flames is denial, not another damage number — jamCooldownTicks is additive", () => {
+    const respec = applyMoveTree(ember, [
+      "wider_burn",
+      "kindling",
+      "steady_flame",
+      "hot_coals",
+      "roaring_blaze",
+      "spreading_blaze",
+      "pyroclasm",
+      "beat_at_the_flames",
+    ]);
+    expect(respec.jamCooldownTicks).toBe(2);
+    expect(respec.statusSpreads).toBe(true);
+  });
+
+  it("Spit Coals is the tree's only hits setter, and the lane's answer to 'an ember is a spark'", () => {
+    const hitsNodes = Object.values(ember.tree!).filter((n) => n.delta.hits !== undefined);
+    expect(hitsNodes.map((n) => n.id)).toEqual(["hot_coals"]);
+    const respec = applyMoveTree(ember, ["wider_burn", "kindling", "steady_flame", "hot_coals"]);
+    expect(respec.hits).toEqual({ min: 1, max: 2 });
+  });
+
+  it("crit tops out at exactly rollCritical's clamp of 3 — no fourth crit node exists", () => {
+    const critTotal = Object.values(ember.tree!).reduce((sum, n) => sum + (n.delta.critRateStage ?? 0), 0);
+    expect(critTotal).toBe(3);
+  });
+
+  it("Inferno keeps only the half of itself that ever worked: reach, not a line it could not resolve", () => {
+    const respec = applyMoveTree(ember, ["wider_burn", "in_through_the_coat", "fan_the_flames", "inferno"]);
+    expect(respec.range).toEqual({ min: 0, max: 2 });
+    expect(respec.shape).toEqual({ kind: "point" });
+    expect(ember.tree!.inferno.excludes).toEqual(["wildfire_burst"]);
+  });
+
+  it("Nothing Left to Guard's bridge (Aggression<->Boldness) lands on one LANE NOTABLE in each branch it connects", () => {
+    const bridge = ["wider_burn", "ring_of_fire", "smoldering_ring", "scorched_ground", "nothing_left_to_guard"];
+
+    // Into Aggression: Fan the Flames without walking In Through the Coat.
+    const viaAggr = applyMoveTree(ember, [...bridge, "fan_the_flames"]);
+    expect(viaAggr.situationalBonus).toEqual({ condition: "targetBurning", multiplier: 2 });
+
+    // Into Boldness: Fill the Circle without walking Banked Heat / Slow Burn.
+    const viaBold = applyMoveTree(ember, [...bridge, "wide_ring"]);
+    expect(viaBold.shape).toEqual({ kind: "burst", radius: 2 });
+  });
+
+  it("Into the Coals' bridge (Boldness<->Sociability) deepens its own crosslink's swap rather than grabbing a stat", () => {
+    const bridge = ["ring_of_fire", "shared_warmth", "banked_embers", "change_places", "into_the_coals"];
+    const respec = applyMoveTree(ember, bridge);
+    expect(respec.positionSwap).toBe(true);
+    expect(respec.positionSwapPull).toBe(3); // 1 (Change Places) + 2 (Into the Coals)
+
+    // And it shortcuts into one lane notable of each branch it connects.
+    expect(applyMoveTree(ember, [...bridge, "give_ground"]).forcedMovement).toEqual({
+      mover: "defender",
+      direction: "away",
+      tiles: 1,
+      timing: "onHit",
+    });
+    expect(applyMoveTree(ember, [...bridge, "beacon_fire"]).rallyCall).toEqual({ ticks: 20 });
+  });
+
+  it("White Heat's bridge (Sociability<->Aggression) escalates crit without adding a stage the engine would clamp away", () => {
+    const bridge = ["shared_warmth", "wider_burn", "kindled_fury", "red_at_the_edges", "white_heat"];
+    const respec = applyMoveTree(ember, bridge);
+    expect(respec.critRateStage).toBe(2);
+    expect(respec.critCooldownReset).toBe(true);
+
+    expect(applyMoveTree(ember, [...bridge, "hot_coals"]).hits).toEqual({ min: 1, max: 2 });
+    expect(applyMoveTree(ember, [...bridge, "kindled_spirits"]).allyEffect).toEqual({
+      buff: { stat: "spAttack", stage: 1, ticks: 15 },
+    });
+  });
+});
