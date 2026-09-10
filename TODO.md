@@ -8047,3 +8047,47 @@ needed no changes.
 Open, not decided: the pool is my curation, not yours — if any of these
 34 feel wrong for "the first thing you meet," trim or add freely; it's
 one array.
+
+## M6 Bond, lever 1: slower decay for the edge toward the player
+
+Direct ask: "one lever at a time make us able to actually build a rapport
+with this thing."
+
+Built: `RapportEdge.towardPlayer` (types.ts), set automatically in
+`adjustRapport` (it already has `World` and `otherId`, so no call site
+anywhere had to learn about the player). `decayedRapportScore` reads it:
+`RAPPORT_PLAYER_EDGE_DECAY_PER_TICK` = 0.9995 (half-life ~1386 ticks) for
+an edge a creature holds toward the player, vs. the ordinary 0.9977
+(~300 ticks) for every other edge, including the player's own edges
+toward creatures — asymmetric on purpose, since nothing reads those
+behaviorally.
+
+Before/after, same bot, same 5 seeds:
+
+| seed | treats (before → after) | best trust (before → after) | stage (before → after) |
+|---|---|---|---|
+| 20260903 | 0 → 1 | 0.00 → 0.08 | wary → wary |
+| 11 | 1 → 3 | 0.14 → 0.21 | tolerant → tolerant\* |
+| 202 | 3 → 2 | 0.13 → 0.15 | tolerant → tolerant |
+| 3003 | 0 → 2 | 0.08 → 0.13 | tolerant → tolerant |
+| 40404 | 0 → 4 | 0.18 → 0.22 | tolerant → tolerant\* |
+
+\*Seeds 11 and 40404 both peaked *above* the 0.2 curious threshold during
+courting (0.21, 0.22) — real progress — but the printed "stage" is read
+after the bot's 25-tile walk away, and by then it had decayed back under
+0.2. **Still 0 of 5 followed**, for two compounding reasons, not one:
+
+1. Decay is still faster than the bot's real feeding cadence in the
+   worse seeds (thresholds not yet crossed at all: 20260903, 202, 3003).
+2. **Where it *did* cross 0.2, nothing was there to catch it.** The
+   follow roll (`trust.ts`'s `tickFollowers`) only fires while the
+   creature is `curious`+ AND within `FOLLOW_ENTRY_RADIUS` (3 tiles) of
+   the player — but the bot's own courting loop backs off 4 tiles right
+   after every offer (to stay outside flee range while the treat rule
+   works), which is also outside follow range. The two mechanics were
+   built to not interfere with each other and instead don't overlap in
+   time at all. This is a second, independent lever, not decay.
+
+Lever 1 alone is confirmed to move the number (treats and best-trust both
+up on 4 of 5 seeds) but is not sufficient by itself. See the follow-up
+message for the fuller lever menu, including this proximity-window gap.

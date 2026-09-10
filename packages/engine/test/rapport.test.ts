@@ -11,6 +11,7 @@ import {
   RAPPORT_HERD_CLASH_DELTA,
   RAPPORT_MAX_EDGES_PER_AGENT,
   RAPPORT_MOB_DEFENSE_DELTA,
+  RAPPORT_PLAYER_EDGE_DECAY_PER_TICK,
   RAPPORT_PRUNE_THRESHOLD,
   RAPPORT_REASON_MEMORY_INTERVAL,
   RAPPORT_RESCUE_DELTA,
@@ -96,6 +97,42 @@ describe("rapport: core data structure, decay, prune, cap", () => {
     expect(soon).toBeGreaterThan(later);
     expect(later).toBeGreaterThanOrEqual(0);
     expect(later).toBeLessThan(0.02);
+  });
+
+  it("ROADMAP M6: an edge toward the player decays slower — set automatically by adjustRapport, not by the caller", () => {
+    const world = createWorld(5, 5);
+    const critter = agent("critter");
+    const player = agent("player", { controlledBy: "player" });
+    const rival = agent("rival"); // an ordinary sim agent, same delta and elapsed time
+    world.agents.push(critter, player, rival);
+
+    adjustRapport(world, critter, "player", 0.3);
+    adjustRapport(world, critter, "rival", 0.3);
+
+    expect(critter.rapport!.player!.towardPlayer).toBe(true);
+    expect(critter.rapport!.rival!.towardPlayer).toBeUndefined();
+
+    const elapsed = 1000;
+    const towardPlayer = decayedRapportScore(critter.rapport!.player!, elapsed);
+    const towardRival = decayedRapportScore(critter.rapport!.rival!, elapsed);
+    expect(towardPlayer).toBeGreaterThan(towardRival);
+    expect(towardPlayer).toBeCloseTo(0.3 * RAPPORT_PLAYER_EDGE_DECAY_PER_TICK ** elapsed, 6);
+    expect(towardRival).toBeCloseTo(0.3 * RAPPORT_DECAY_PER_TICK ** elapsed, 6);
+
+    // rapportScore (the real read path) sees the same distinction.
+    expect(rapportScore(critter, "player", elapsed)).toBeCloseTo(towardPlayer, 6);
+  });
+
+  it("the flag is asymmetric: the player's OWN edge toward a creature decays at the ordinary rate", () => {
+    const world = createWorld(5, 5);
+    const critter = agent("critter");
+    const player = agent("player", { controlledBy: "player" });
+    world.agents.push(critter, player);
+
+    strengthenRapportMutual(world, critter, player, 0.3);
+
+    expect(critter.rapport!.player!.towardPlayer).toBe(true); // critter -> player: slow
+    expect(player.rapport!.critter!.towardPlayer).toBeUndefined(); // player -> critter: ordinary
   });
 
   it("a decayed score under the prune threshold is deleted entirely on read, not left at ~0 forever", () => {

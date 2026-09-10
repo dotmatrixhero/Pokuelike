@@ -409,6 +409,20 @@ crouch and treat paths were traced live in the cave. Rulings needed are
 in TODO.md: the three thresholds, the decay, the treat delta and cooldown,
 and whether a fainted player can be finished off.
 
+**Lever 1, pulled: slower decay for the edge toward the player**
+(`RapportEdge.towardPlayer`, `RAPPORT_PLAYER_EDGE_DECAY_PER_TICK` = 0.9995,
+~1386-tick half-life vs. the ordinary 300). Re-measured, same bot, same 5
+seeds: treats and best-trust both up on 4 of 5 (e.g. seed 40404: 0→4
+treats, 0.18→0.22 best trust). **Still 0/5 followed.** Two seeds (11,
+40404) actually crossed the 0.2 curious threshold mid-courting — but the
+follow roll only fires within 3 tiles of the player, and the bot backs off
+4 tiles right after every offer (to stay outside flee range while the
+treat cooldown runs), so the trust window and the proximity window never
+overlapped. Full before/after table in TODO.md's "M6 Bond, lever 1"
+section. Decay was a real, necessary lever; on its own it isn't
+sufficient — the proximity-window gap is a second, independent bug/lever,
+not more of the same one.
+
 **This is where the design's open question gets answered.** If a player who
 has never read a design doc can work out that moving slowly, feeding, and
 staying near a sleeping creature earns its trust — from tells alone — the

@@ -42,6 +42,26 @@ import type { Agent, RapportEdge, RapportMemory, RapportReason, RapportSubject, 
 export const RAPPORT_DECAY_PER_TICK = 0.9977;
 
 /**
+ * The slower decay rate for a wild creature's edge TOWARD THE PLAYER
+ * specifically (`RapportEdge.towardPlayer`, set in `adjustRapport`) —
+ * ~1386-tick half-life (`0.5 ** (1/1386) ≈ 0.9995`) versus the ordinary
+ * 300-tick one. ROADMAP.md M6, the user's own words: "we just have to
+ * let them actually grow bond." `runner/validateBond.ts`'s bot — doing
+ * everything right (gather, court, crouch, offer, back off, wait out the
+ * treat cooldown) — earned a follower on 0 of 5 seeds under
+ * `RAPPORT_DECAY_PER_TICK`: its real cadence between successful treats
+ * (restocking berries, drinking, chasing a roaming target) ran many
+ * hundreds of ticks, and ordinary decay erased most of each gain before
+ * the next one landed. A wild animal's memory of every OTHER wild animal
+ * still decays at the ordinary rate — only "how it feels about the one
+ * consistently strange, slow-moving thing that keeps leaving food" gets
+ * to be stickier. First lever pulled on this problem; TODO.md tracks the
+ * before/after table and the levers still on the table if this alone
+ * isn't enough.
+ */
+export const RAPPORT_PLAYER_EDGE_DECAY_PER_TICK = 0.9995;
+
+/**
  * Once a decayed score's absolute value drops below this, the edge is
  * deleted outright rather than left sitting at a value indistinguishable
  * from "never interacted" forever — the pruning half of the sparsity
@@ -452,7 +472,8 @@ function withMemory(
 export function decayedRapportScore(edge: RapportEdge, tick: number): number {
   const elapsed = Math.max(0, tick - edge.lastInteractionTick);
   if (elapsed === 0) return edge.score;
-  return edge.score * Math.pow(RAPPORT_DECAY_PER_TICK, elapsed);
+  const rate = edge.towardPlayer ? RAPPORT_PLAYER_EDGE_DECAY_PER_TICK : RAPPORT_DECAY_PER_TICK;
+  return edge.score * Math.pow(rate, elapsed);
 }
 
 /**
@@ -565,8 +586,15 @@ export function adjustRapport(
 
   if (!existing) evictWeakestEdge(agent, world.tick, rng);
   const memories = reason ? withMemory(existing?.memories, reason, world.tick, subject) : existing?.memories;
+  // ROADMAP.md M6: recomputed on every write (not just once at edge
+  // creation) — cheap (one `find` over living agents, and `adjustRapport`
+  // fires far less often than `decayedRapportScore` reads), and correct
+  // even in the edge case of a fresh edge appearing after `otherId`
+  // stopped being the controlled agent. See RapportEdge.towardPlayer.
+  const towardPlayer = world.agents.find((a) => a.id === otherId)?.controlledBy === "player";
   const edge: RapportEdge = { score: next, lastInteractionTick: world.tick };
   if (memories?.length) edge.memories = memories;
+  if (towardPlayer) edge.towardPlayer = true;
   rapport[otherId] = edge;
 }
 

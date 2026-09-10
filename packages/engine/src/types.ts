@@ -1939,6 +1939,21 @@ export interface RapportEdge {
    * does not keep its grievances.
    */
   memories?: RapportMemory[];
+  /**
+   * True when the OTHER side of this edge is the player — set at write
+   * time in `rapport.ts`'s `adjustRapport` (it already has `World` and
+   * `otherId`, so no call site elsewhere had to learn about the player to
+   * make this work). `decayedRapportScore` reads it to pick a slower decay
+   * rate for a wild creature's opinion of the player than for its opinion
+   * of another wild agent — ROADMAP.md M6: "we just have to let them
+   * actually grow bond," after a bot earned a follower on 0 of 5 seeds
+   * because ordinary decay outpaced how often a player can realistically
+   * feed one individual. Only ever true on the edge a creature holds
+   * TOWARD the player (`agent.rapport[player.id]`), never on the player's
+   * own edges toward creatures — those decay normally, since nothing reads
+   * them behaviorally.
+   */
+  towardPlayer?: boolean;
 }
 
 /**
