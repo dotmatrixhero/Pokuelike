@@ -1114,10 +1114,16 @@ function drawAgentGlyph(ctx: CanvasRenderingContext2D, agent: Agent, cx: number,
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  const letter = agent.species.charAt(0).toUpperCase();
-  ctx.font = `bold ${TILE_SIZE * 0.78}px ui-monospace, "SF Mono", Consolas, monospace`;
-  ctx.fillStyle = rgbToCss(color);
-  ctx.fillText(letter, cx, cy);
+  if (agent.controlledBy === "player") {
+    // The player is 👱 in both render styles — see drawAgent's own branch.
+    ctx.font = `${TILE_SIZE * 0.8}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText("👱", cx, cy);
+  } else {
+    const letter = agent.species.charAt(0).toUpperCase();
+    ctx.font = `bold ${TILE_SIZE * 0.78}px ui-monospace, "SF Mono", Consolas, monospace`;
+    ctx.fillStyle = rgbToCss(color);
+    ctx.fillText(letter, cx, cy);
+  }
   ctx.restore();
 
   if (isSelected) {
@@ -1203,6 +1209,19 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     ctx.textBaseline = "middle";
     ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
     ctx.fillText("🥚", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
+  } else if (agent.controlledBy === "player") {
+    // Direct ask: "change the player icon to a 👱 emoji." The human has no
+    // sprite art, and the letter fallback read as one more glyph among
+    // the terrain. Same backing-circle treatment as the egg so it holds up
+    // on a light tile and under fog.
+    ctx.beginPath();
+    ctx.ellipse(px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY, TILE_SIZE * 0.42, TILE_SIZE * 0.42, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+    ctx.fill();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillText("👱", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
   } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being
