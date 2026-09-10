@@ -1,4 +1,4 @@
-import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2 } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2, WeatherType } from "./types.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 
@@ -495,6 +495,53 @@ export interface MoveSpec {
   statusImmunityAura?: { ticks: number; radius: number };
   /** Spawns (or refreshes) a real rain `WeatherCell` (weather.ts) centered on the user's own position — a move-driven weather trigger, not a passive spawn roll. Requires `utilityMove`. Absent/false = no weather effect, the default. */
   spawnsRain?: boolean;
+  /**
+   * Added to the RADIUS of the cell `spawnsRain` puts down (weather.ts's
+   * `spawnWeatherCellAt` rolls `WEATHER_RADIUS_MIN`-`WEATHER_RADIUS_MAX`,
+   * 8-18, and this is added on top). A wider front is the most directly
+   * visible thing a weather move can buy: more tiles under rain means more
+   * flora holding on (`floraDecayDivisor`), more thirst spared
+   * (`thirstDecayMultiplier`) and more shoreline eligible to become real
+   * water (`advanceWaterCycle`). Meaningless without `spawnsRain`. Absent/0
+   * = the rolled radius, unchanged.
+   */
+  weatherRadiusBonus?: number;
+  /**
+   * Added to the LIFESPAN in ticks of the cell `spawnsRain` puts down
+   * (rolled 200-500). Distinct from `weatherRadiusBonus` in kind, not
+   * degree: water forms under rain on a per-tile-per-tick roll
+   * (`RAIN_WATER_FORM_CHANCE_PER_TICK`, 1/1800), so duration is what
+   * actually converts shoreline into new water, while radius decides how
+   * much shoreline is under the cloud at all. Meaningless without
+   * `spawnsRain`. Absent/0 = the rolled lifespan, unchanged.
+   */
+  weatherLifespanBonus?: number;
+  /**
+   * What KIND of cell `spawnsRain` puts down, when the move's own rain is
+   * meant to arrive as something worse. `"storm"` carries real, separate
+   * mechanics in weather.ts (`stormAccuracyMultiplier` 0.6,
+   * `stormFovPenalty` 4, and sustained exposure with no cover is a genuine
+   * `"weather"` migration trigger in herdMigration.ts); `"coldSnap"` slows
+   * everything under it (`COLD_SNAP_SPEED_MULTIPLIER`). Meaningless
+   * without `spawnsRain`. Absent = `"rain"`, the default and the only
+   * thing `spawnsRain` could produce before this field existed.
+   */
+  weatherType?: WeatherType;
+  /**
+   * Permanently raises the `fertilityCeiling` of every tile within `radius`
+   * (Chebyshev) of the user by `amount` — flora.ts's `raiseFertilityCeiling`,
+   * applied by utilityMoves.ts, clamped at loam's 1.0.
+   *
+   * Deliberately NOT the same lever as `fertilityBoost`: that one raises a
+   * tile's current fertility toward a ceiling it cannot pass, so on sandy
+   * (0.6) or rocky (0.25) ground — where worldgen already writes the
+   * starting fertility AT the ceiling — it measurably does nothing at all.
+   * This one moves the ceiling itself, which is the difference between
+   * "this patch recovers faster" and "this patch can hold a plant now."
+   * Requires `utilityMove`. Absent = the ground keeps whatever ceiling its
+   * ground type gave it, the default.
+   */
+  fertilityCeilingBoost?: { amount: number; radius: number };
   /** Multiplies the user's own mate-search radius (`reproduction.ts`'s `MATE_SEARCH_RADIUS`) by `multiplier` for `ticks` — see `Agent.matingRadiusBoostTicksRemaining`'s own doc comment. Requires `utilityMove`. Absent = no boost, the default. */
   matingRadiusBoost?: { multiplier: number; ticks: number };
   /** On use, finds the nearest living, non-same-herd agent within `radius` and transfers `amount` of the user's target `need` from them to the user — real resource theft, distinct from any hostile hit. A no-op (still goes on cooldown) if no such agent is in range. Requires `utilityMove`. Absent = no drain effect, the default. */
@@ -740,6 +787,14 @@ export interface MoveTreeNode {
     statusImmunityAura?: { ticks: number; radius: number };
     /** OR-merge, like a boolean flag being turned on for good once any node sets it — see `selfHeal` above. */
     spawnsRain?: boolean;
+    /** Additive, like `power` — two nodes each widening the front both count, so a build stacks them instead of racing. See `MoveSpec.weatherRadiusBonus`. */
+    weatherRadiusBonus?: number;
+    /** Additive, like `power` — see `MoveSpec.weatherLifespanBonus`. */
+    weatherLifespanBonus?: number;
+    /** Overwrite, like `shape` — a move's rain arrives as exactly one kind of weather, so alternative kinds must sit on one ancestry chain. See `MoveSpec.weatherType`. */
+    weatherType?: WeatherType;
+    /** Overwrite, like `shape`. Restate the whole object (amount/radius). See `MoveSpec.fertilityCeilingBoost`. */
+    fertilityCeilingBoost?: { amount: number; radius: number };
     /** Additive, like `power` — see `MoveSpec.gatherBurst`. Real on any move that already qualifies for one of the gather paths (a `burrow` move for digging, a damage move for canopy harvest). */
     gatherBurst?: number;
   };
@@ -1017,6 +1072,12 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       selfHeal: delta.selfHeal ?? result.selfHeal,
       statusImmunityAura: delta.statusImmunityAura ?? result.statusImmunityAura,
       spawnsRain: delta.spawnsRain ?? result.spawnsRain,
+      weatherRadiusBonus:
+        delta.weatherRadiusBonus !== undefined ? (result.weatherRadiusBonus ?? 0) + delta.weatherRadiusBonus : result.weatherRadiusBonus,
+      weatherLifespanBonus:
+        delta.weatherLifespanBonus !== undefined ? (result.weatherLifespanBonus ?? 0) + delta.weatherLifespanBonus : result.weatherLifespanBonus,
+      weatherType: delta.weatherType ?? result.weatherType,
+      fertilityCeilingBoost: delta.fertilityCeilingBoost ?? result.fertilityCeilingBoost,
       gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
     if (delta.shape) formShape = delta.shape;

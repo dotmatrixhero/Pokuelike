@@ -359,6 +359,10 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("selfHeal")) lines.push(`Heals the user ${Math.round(delta.selfHeal.fraction * 100)}% of its own max HP on use${delta.selfHeal.sunbeamBonus ? `, +${Math.round(delta.selfHeal.sunbeamBonus * 100)}% more near a sunbeam` : ""}.`);
   if (has("statusImmunityAura")) lines.push(`Grants ${delta.statusImmunityAura.radius === 0 ? "the user" : `the user and every herd-mate within ${delta.statusImmunityAura.radius} tiles`} ${delta.statusImmunityAura.ticks} ticks of immunity to new status effects.`);
   if (has("spawnsRain") && delta.spawnsRain) lines.push("Pulls a real rain cell down over the user's own position.");
+  if (has("weatherRadiusBonus")) lines.push(`${signed(delta.weatherRadiusBonus)} tiles to the radius of the weather cell it pulls down (base 8-18).`);
+  if (has("weatherLifespanBonus")) lines.push(`${signed(delta.weatherLifespanBonus)} ticks to how long that weather cell lasts (base 200-500).`);
+  if (has("weatherType")) lines.push(`The weather it pulls down arrives as ${delta.weatherType === "coldSnap" ? "a cold snap" : `a ${delta.weatherType}`} instead of plain rain.`);
+  if (has("fertilityCeilingBoost")) lines.push(`Permanently raises the soil's own fertility CEILING by ${Math.round(delta.fertilityCeilingBoost.amount * 100)}% within ${delta.fertilityCeilingBoost.radius} tiles — ground that could not hold a plant can now.`);
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
@@ -387,6 +391,7 @@ function capitalize(s: string): string {
 const ADDITIVE_FIELDS = [
   "power", "accuracy", "cooldownTicks", "statusChance", "defensePenetration", "lockTicks",
   "critRateStage", "lifestealFraction", "recoilFraction", "jamCooldownTicks", "positionSwapPull", "gatherBurst",
+  "weatherRadiusBonus", "weatherLifespanBonus",
 ] as const;
 /** OR-merge boolean fields — once any chosen node turns one on, it stays on for the whole build. */
 const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset", "spawnsRain"] as const;

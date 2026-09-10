@@ -244,7 +244,7 @@ function problems(move: ProposedMove): string[] {
     "aggressive movement": ["chargeAttack", "forcedMovement", "reposition", "lockTicks"],
     "piercing": ["defensePenetration", "resistanceBreaker", "bonusVsType", "rangeBonus"],
     "defence": ["p:damageReduction", "p:damageReductionFlat", "p:defenseBoost", "p:thorns", "p:thornsRubble", "p:unshaken", "p:immovable", "p:fireproof"],
-    "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "fertilityBoost", "fertilityCeilingBoost", "floraRegrowthMultiplier", "floraCompetition"],
+    "environment": ["terrainBurn", "terrainFill", "consumesOwnTerrain", "createsTerrain", "spawnsRain", "weatherRadiusBonus", "weatherLifespanBonus", "weatherType", "fertilityCeilingBoost", "fertilityBoost", "floraRegrowthMultiplier", "floraCompetition"],
     "wider aoe": ["shape", "hitsArea", "areaBonus"],
     "reposition others": ["positionSwap", "positionSwapPull", "reposition"],
     "planted/duration": ["statChangeOnHit", "statChangesOnHit", "p:terrainUnhindered", "p:dispersalSpeed", "herdMigrationResistance"],
@@ -447,7 +447,7 @@ function problems(move: ProposedMove): string[] {
   };
   const OVERWRITE = [
     "shape", "range", "hits", "forcedMovement", "situationalBonus", "statChangeOnHit", "rallyCall", "allyEffect", "reposition",
-    "drainNeeds", "selfHeal", "fertilityBoost", "statusImmunityAura", "matingRadiusBoost",
+    "drainNeeds", "selfHeal", "fertilityBoost", "fertilityCeilingBoost", "weatherType", "statusImmunityAura", "matingRadiusBoost",
     "weightScaling", "selfStateBonus", "bonusVsType", "resistanceBreaker", "selfCostPerUse",
     "statusSeverity", "consumesOwnTerrain", "terrainFill", "chargeAttack",
   ];

@@ -474,6 +474,23 @@ export interface Tile {
    */
   groundDegraded?: number;
   /**
+   * Permanent improvement to this tile's own `fertilityCeiling` — soil
+   * built ON TOP of what the ground type came with, the inverse of
+   * `groundDegraded` above. Only ever raised by a move that carries
+   * `MoveSpec.fertilityCeilingBoost` (Grassy Terrain's tree), applied by
+   * utilityMoves.ts; flora.ts's `fertilityCeiling` folds it in and clamps
+   * the result at loam's own 1.0, so no tile can ever be made richer than
+   * the best natural ground in the world.
+   *
+   * Why this exists at all: `raiseFertility` caps at the tile's ceiling,
+   * and `assignGroundTypes` (worldgen.ts) already writes a rocky tile's
+   * fertility AT its 0.25 ceiling — so before this field, casting a
+   * fertility move on rocky or sandy ground was measurably a no-op, and a
+   * whole lane of a ground-changing move's tree would have been dead
+   * content. `undefined`/0 == the ground type's own ceiling, unchanged.
+   */
+  fertilityCeilingBonus?: number;
+  /**
    * "water"/"ice" tiles only: which real body this tile belongs to — see
    * `WaterKind`'s own doc comment. Set once at generation (worldgen.ts's
    * `assignWaterKinds`/`carveSuicuneRivers`) and by weather.ts's
