@@ -5162,6 +5162,100 @@ flora/bush/tree/food/seedling (fire.ts) and a burrower's answer to fire is
 already free, since the engine's strict same-layer targeting means an agent
 underground is not standing on the burning tile at all.
 
+### Slash converted to v4 (Shipped) — "the stillness before the swing"
+
+Fifth structural conversion, and the second designed *against* a specific
+neighbour rather than in isolation. Scratch had just shipped as "four claws
+and no technique... a rake that LEAVES THINGS BEHIND," and Slash is the other
+half of that sentence.
+
+**The fantasy, written before a node was touched:**
+
+> Slash is a cut, and a cut is a decision made before the arm moves. There is
+> one line through an animal that opens it and a hundred that skid off bone,
+> and the whole move is the discipline of waiting for that line to show
+> itself. Nothing is left behind: no filth, no torn ground, no wound that
+> keeps working after. The edge goes in clean, comes out clean, and the thing
+> it cut simply stops. Every species that knows it carries an implement
+> instead of a paw — Scyther's scythes, Pinsir's pincers, Farfetch'd's leek
+> held like a sword, Charizard's talons. What is dangerous about Slash is not
+> the swing. It is the stillness before it.
+
+The four learners were the gift here: **scyther, charizard, farfetch'd,
+pinsir**, and not one of them fights with a bare paw. Slash is the move of
+things that carry an edge.
+
+**The separation from Scratch is written into the source as three rules,
+not as a vibe.**
+
+| | Scratch | Slash |
+|---|---|---|
+| what it leaves | a septic wound, mud, a shredded bush, a scored tree | nothing — no `statusChance`, no `statusSpreads`, no `terrainFill`/`terrainBurn`/`consumesOwnTerrain` anywhere in the tree |
+| the wind-up | none ("the paw is already moving"); its own comment names `chargeAttack` as deliberately absent | all of it — `chargeAttack` is Boldness's lane notable |
+| Sociability | marking and shouting (`rallyCall` on a raked flank, `nonTerritorial` on a scored tree) | **teaching**: technique is the one thing about this move that can be handed to another animal |
+
+**Lanes differ in kind, not degree:**
+
+| branch | lane A | lane B | different how |
+|---|---|---|---|
+| Aggression — *The One Cut* | **The Stroke** — how the swing is spent (the crit lane, and the three-way fork) | **Where The Edge Reaches** — the seam, then two tiles of it (`range`) | severity vs. geometry |
+| Boldness — *The Stillness* | **The Held Stance** — `chargeAttack`, `immovable`, `unshaken` | **The Footwork** — one tile, exactly on time (`forcedMovement` both directions) | refusing to move at all vs. moving exactly |
+| Sociability — *The Form Passed On* | **The Drill** — the demonstration that stops needing to be a separate errand (`allyEffectOnAttack`) | **The Clean Kill** — the herd eats because of the edge (`gatherBurst`) | teaching vs. feeding |
+
+**The three payoffs worth naming.** *The Long Moment* is the roster's fourth
+`chargeAttack` and the **only one that does not travel** — `leapTiles: 0`
+against Tackle's six tiles and Peck's three — which turns out to make the
+fantasy literal, because predation.ts refuses every attack against a charging
+agent outright. Going still *is* the defence. *The Long Guard* buys `range.max`
+1 → 2, the one geometry lever a point move like Scratch structurally cannot
+have, and it pays out twice: `moveRange` makes the holder stop stepping into
+melee, and needs.ts's canopy-harvest path scales a damage move's food burst by
+`range.max - 1`, so a Slash user visibly cuts fruit down faster. *Unflinching*
+grants `unshaken` — three users in the whole roster, and the only defensive
+passive that is not a percentage: the next hit is negated entirely, then
+recharges.
+
+**Rejected, with reasons — unreachable content is a bug.**
+`critCooldownReset` was the best flavour idea in the pass ("a cut that clean,
+the arm is already back on guard") and is **specifically unsafe on this tree**:
+it is an invisible second tempo multiplier the tempo formula cannot see, and a
+fully-invested Reaping build sits at crit stage 3 = every hit crits = the
+cooldown resets every hit = **6.0x tempo on a move whose cap is 3.0x**. The one
+lever that is unsafe here *because* Slash is the crit move. `statusImmunityAura`
+and `selfHeal` are both driven by `maybeUseUtilityMove`, which needs the
+`utilityMove` flag an attack move cannot carry — dead on Slash, same class of
+finding as Scratch's `drainNeeds`. And **four of the five `situationalBonus`
+setters** came out: it is an OVERWRITE field, v2 shipped five co-takeable ones,
+and on any mixed build three of them silently did nothing.
+
+**Crit, counted rather than assumed.** `rollCritical` clamps the stage at 3,
+so the tree grants exactly +3 and not one more: The Line Shows Itself → Reaping
+Slash → Apex Predator. Only the Reaping fork reaches 3 (100%); Frenzy and
+Cleaving builds stop at 2 (50%). That is the fork paying off in kind. Verified
+by walking all twelve maximal builds through the real `applyMoveTree` — the
+harness was proved able to reject an illegal walk and an illegal fork pair
+first.
+
+**Passives went down where it matters, measured.** `damageReduction` and
+`regenFlat` both came out — the two kinds that sum uncapped across a species'
+whole movepool. What went in cannot stack: `unshaken` is read as
+`passives.unshaken > 0`, `immovable` is a flat opt-out, `calmingPresence`
+saturates at a floor. `passive-exposure.ts`, all four learners:
+
+| species | dmgReduction | healing | | |
+|---|---|---|---|---|
+| scyther | 10% → **0%** | 1.7%/tick → **0.0%** | | |
+| charizard | 16% → **6%** | 5.7%/tick → **4.0%** | | |
+| farfetch'd | 10% → **0%** | 4.7%/tick → **3.0%** | | |
+| pinsir | 10% → **0%** | 1.7%/tick → **0.0%** | | |
+
+Thorns unchanged, and no species entered or left the tool's reported worst
+cases. *The One They Watch*'s `calmingPresence` is **0.2 and the number is
+measured**: `herdConflictChance` floors the multiplier at 0.5, so a species'
+summed calm past 0.50 buys nothing, and Charizard already carries 0.30 from
+Flamethrower — the first draft's 0.35 wasted 0.15 of a skill point on one of
+the four learners.
+
 **Numbers, roster as control:**
 
 | | before | after | roster median |
@@ -5199,3 +5293,33 @@ before a second thorns grant was pulled off the Aggression capstone. 40% sits
 below Venusaur's 65% and above Bulbasaur's 35%. It is a real change to how
 these four species feel to attack, and it is a balance number, so it is
 recorded here rather than presented as settled.
+
+| nodes | 36 | 45 | 45 |
+| distinct levers | 21 | **28** | 24 |
+| colour-pie flavours | 9 | **12** | 11 |
+| tempo | 3.00x (cap 3.00) | 3.00x (cap 3.00) | 2.00x |
+| power | 2.36x | **2.94x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+
+**Tempo was already at the cap before this pass and not one tick was spent.**
+Base 5, `cdFloor` 1, `maxCut` -4 — and v2 had already spent exactly -4. The
+four -1 nodes in the v4 tree are the same four that shipped in v2. Slash is
+the roster's only tree sitting on a 3.00x cap, which is worth knowing before
+anyone reaches for cooldown here again.
+
+**Two self-caught regressions in the first draft, both fixed before commit.**
+The power multiplier came out at **3.94x**, the highest in the roster, because
+`+power` was being used as generic "upside" to satisfy the pure-downside rule
+on filler — fifteen nodes were trimmed to bring it to 2.94x. And the cheapest
+capstone read **7 pts** against a converted-tree norm of 9-11, because every
+node had been set to `cost: 1`; the shipped v4 trees keep `cost: 2` on the
+four identity nodes per branch, and matching that put it at 10.
+
+**One honest limit.** The accuracy total came down 105 → 80, but Slash's canon
+accuracy is 100 and surplus only ever pays out through `rollAccuracy`'s
+`extraMultiplier` — a storm (0.6x) or attacking uphill (down to 0.7x). A
+fully-invested Retreat build reaches 195 accuracy, which is live only in those
+conditions and inert everywhere else. The fix that actually made accuracy a
+real purchase was *Opportunist's Strike* taking the move to **85**, which is a
+genuine miss chance at any weather and finally gives Keen Eye's +15 something
+to cover.

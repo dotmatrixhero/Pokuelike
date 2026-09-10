@@ -664,125 +664,272 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("SLASH"),
     cooldownTicks: 5,
     range: { min: 0, max: 1 },
-    // v2 — scaled up to the same triangle as Tackle: Ferocity (Aggression),
-    // Precision (Boldness), and a slimmer Pack Instinct (Sociability) — even
-    // a mostly-solo hunter like Scyther coordinates around a kill often
-    // enough to earn a real, if lighter, support branch. Ferocity leans on
-    // defense-penetration and crit rate instead of the usual power/accuracy
-    // trade; Precision earns its accuracy focus by being the one branch
-    // that's genuinely about precision. See MOVES_DESIGN.md's "Slash"
-    // writeup and Tackle's own tree comment for what's deliberately not
-    // here (Max PP, `aggroRedirect`).
+    // ================================================================
+    // SLASH — v4 two-lane conversion (36 -> 45). "The stillness before
+    // the swing."
+    //
+    // THE FANTASY, written before a node was touched:
+    //
+    //   Slash is a cut, and a cut is a decision made before the arm
+    //   moves. There is one line through an animal that opens it and a
+    //   hundred that skid off bone, and the whole move is the discipline
+    //   of waiting for that line to show itself. Nothing is left behind:
+    //   no filth, no torn ground, no wound that keeps working after. The
+    //   edge goes in clean, comes out clean, and the thing it cut simply
+    //   stops. Every species that knows it carries an implement instead
+    //   of a paw — Scyther's scythes, Pinsir's pincers, Farfetch'd's leek
+    //   held like a sword, Charizard's talons. What is dangerous about
+    //   Slash is not the swing. It is the stillness before it.
+    //
+    // WRITTEN AGAINST SCRATCH, DELIBERATELY. Scratch was converted one
+    // pass earlier as "four claws and no technique... a rake that LEAVES
+    // THINGS BEHIND" — a septic wound, churned mud, a shredded bush, a
+    // claw mark on a tree. Slash is the opposite animal and the source
+    // enforces it as a rule, not a vibe:
+    //   - Scratch leaves things behind. Slash leaves NOTHING behind, so
+    //     this tree has no `statusChance`, no `statusSpreads`, no
+    //     `terrainFill`, no `terrainBurn`, no `consumesOwnTerrain`.
+    //     Scratch owns every one of those and Slash touches none.
+    //   - Scratch has no wind-up ("the paw is already moving") and its
+    //     own comment names `chargeAttack` as deliberately absent. Slash
+    //     is ALL wind-up, so `chargeAttack` is this tree's Boldness lane
+    //     notable — and at `leapTiles: 0` it is the only charge in the
+    //     roster that does not travel. Tackle crosses six tiles, Peck
+    //     three, Body Slam rears up. Slash stands still.
+    //   - Scratch's Sociability marks and shouts (`rallyCall` on a raked
+    //     flank, `nonTerritorial` on a scored tree). Slash's is TEACHING:
+    //     technique is the one thing about this move that can be handed
+    //     to another animal. A filthy claw teaches nothing; a cut can be
+    //     shown, drilled and copied.
+    //
+    // TEMPO: base 5, cdFloor 1, maxCut -4 — and the tree already spent
+    // exactly -4 before this conversion, i.e. it is ALREADY at the 3.00x
+    // cap. Not one tick of new cooldown headroom was spent here; the
+    // four -1 nodes are the same four that shipped in v2.
+    //
+    // CRIT is Slash's signature and `rollCritical` (combat.ts) CLAMPS the
+    // stage at 3, so the whole tree grants exactly +3 and not one more:
+    // The Line Shows Itself (+1) -> Reaping Slash (+1) -> Apex Predator
+    // (+1). Stage 3 is 100% crit, and only the Reaping fork reaches it —
+    // Frenzy and Cleaving builds stop at stage 2 (50%). That is the fork
+    // paying off in kind rather than in degree, and nothing past 3 is
+    // sold anywhere in the tree.
+    //
+    // REJECTED, with the call site read rather than guessed:
+    //   - `critCooldownReset`. Perfect flavour ("a cut that clean, the
+    //     arm is already back on guard") and a real lever with five
+    //     roster users, but it is an INVISIBLE SECOND TEMPO MULTIPLIER
+    //     that the tempo formula in DESIGN_VALIDATION.md cannot see. On
+    //     this tree specifically, a fully-invested Reaping build sits at
+    //     crit stage 3 = every hit crits = the cooldown resets every hit
+    //     = effective cooldown 0 = 6.0x tempo on a move whose cap is
+    //     3.0x. It is the one lever that is genuinely unsafe here BECAUSE
+    //     Slash is the crit move. Left out on purpose.
+    //   - `statusImmunityAura` and `selfHeal`. Both are driven by
+    //     `utilityMoves.ts`'s `maybeUseUtilityMove`, which needs the
+    //     `utilityMove` flag an attack move cannot carry (see
+    //     MoveSpec's own doc comments, engine/moves.ts:416-418). Dead on
+    //     Slash. Same class of finding as Scratch's `drainNeeds`.
+    //   - Four of the tree's five `situationalBonus` setters. It is an
+    //     OVERWRITE field and v2 shipped five co-takeable ones — a real
+    //     checker problem, and three of the five silently did nothing on
+    //     any mixed build. Exactly one survives (Coup de Grace), and the
+    //     nodes that lost it gained real levers instead.
+    //   - Six of the v2 tree's nine `accuracy` nodes' worth of surplus.
+    //     Slash's canon accuracy is 100 and `rollAccuracy` only ever
+    //     spends surplus through `extraMultiplier` — storms (0.6x,
+    //     weather.ts) and attacking uphill (down to 0.7x,
+    //     elevation.ts) — so it is live, but only barely, and nine
+    //     accuracy nodes on a 100-accuracy move is filler wearing a
+    //     precision branch's name. Tree total: 105 -> 60.
+    //
+    // PASSIVES went from two stacking kinds to none. `damageReduction`
+    // (Alpha Strike) and `regenFlat` (Opportunist Scavenger) both came
+    // out — those are the two that sum uncapped across a species' whole
+    // movepool (`agent.passives[kind] += value`, status.ts) and the two
+    // MOVES_DESIGN.md names as the laziest reach for a "tanky branch".
+    // What went in instead is `immovable`, `unshaken` and
+    // `calmingPresence`, all three of which are read as booleans or as
+    // an aura at a fixed radius and CANNOT stack into invulnerability:
+    // `unshaken` is `passives.unshaken > 0` with its own recharge
+    // (predation.ts's `resolveHitAgainstTarget`), `immovable` is a flat
+    // opt-out of forced movement (movement.ts). Slash now grants 0%
+    // damage reduction, 0%/tick healing and 0% thorns.
+    // ================================================================
     tree: {
+      // ============================================================
+      // AGGRESSION — "The One Cut"
+      // Aggression here is not more swings. It is everything spent on
+      // making a single stroke lethal, and on the geometry that puts the
+      // edge where nothing is able to stop it.
+      // Lanes differ in KIND: Lane A is HOW THE SWING IS SPENT (one
+      // committed stroke / several light ones / one wide arc — the crit
+      // lane), Lane B is WHERE THE EDGE REACHES (the seam, then two
+      // tiles of it). Severity against geometry, not two sizes of the
+      // same thing.
+      // Flavours: raw damage, piercing, aggressive movement, wider AoE,
+      // stealth/ambush, resource economy.
+      // ============================================================
       honed_edge: {
         id: "honed_edge",
         name: "Honed Edge",
         cost: 1,
         leaning: "aggression",
-        // A wickedly sharp edge that shears through armor as much as flesh.
+        // OPENER. A wickedly sharp edge that shears through armor as
+        // much as flesh.
         delta: { power: 15, defensePenetration: 0.15 },
       },
+
+      // --- Lane A: "The Stroke" — how the swing is spent ---
       raking_claws: {
         id: "raking_claws",
-        name: "+5 Power",
+        name: "Whetstone Hours",
         cost: 1,
         prerequisites: ["honed_edge"],
         leaning: "aggression",
-        delta: { power: 5 },
-      },
-      quick_reflexes: {
-        id: "quick_reflexes",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["raking_claws"],
-        leaning: "aggression",
-        delta: { accuracy: 10 },
+        // LANE A filler. Was a bare "+5 Power". An edge that cuts like
+        // this is an edge that gets sat with and worked on, and a stroke
+        // thrown from the shoulder instead of the wrist costs real
+        // stamina to throw — `selfCostPerUse` drains the user's own
+        // energy every cast (predation.ts's `resolveHit`), with the
+        // payoff in the same node (principle 4). Fifth user of a lever
+        // the roster has barely touched.
+        delta: { power: 8, selfCostPerUse: { need: "energy", amount: 0.05 } },
       },
       harder_swing: {
         id: "harder_swing",
-        name: "-1 Cooldown",
-        cost: 1,
-        prerequisitesAnyOf: [["quick_reflexes"], ["brutal_efficiency"], ["ambush_pack"]],
+        name: "The Line Shows Itself",
+        cost: 2,
+        prerequisitesAnyOf: [["raking_claws"], ["never_set_again"]],
         leaning: "aggression",
-        delta: { cooldownTicks: -1 },
-      },
-      predators_instinct: {
-        id: "predators_instinct",
-        name: "Predator's Instinct",
-        cost: 1,
-        prerequisites: ["harder_swing"],
-        leaning: "aggression",
-        // An ambush predator's edge — hits harder after dark.
-        delta: { situationalBonus: { condition: "night", multiplier: 1.3 } },
-      },
-      sharpened_focus: {
-        id: "sharpened_focus",
-        name: "+10 Accuracy",
-        cost: 1,
-        prerequisites: ["predators_instinct"],
-        leaning: "aggression",
-        delta: { accuracy: 10 },
-      },
-      coup_de_grace: {
-        id: "coup_de_grace",
-        name: "Coup de Grace",
-        cost: 1,
-        prerequisites: ["sharpened_focus"],
-        leaning: "aggression",
-        // Anything already burned, poisoned, paralyzed, asleep, or frozen
-        // goes down twice as fast — a predator finishing off whatever's
-        // already weakened, not fussy about the cause.
-        delta: { situationalBonus: { condition: "targetStatused", multiplier: 2 } },
+        // LANE A NOTABLE, and the tree's first crit stage. The whole
+        // fantasy in one node: the opening appears and the arm is
+        // already through it, so the swing comes round sooner AND finds
+        // the gap more often. Crit stage 0 -> 1 is 1/24 -> 1/8
+        // (`CRIT_STAGE_CHANCE`, combat.ts). The -1 cooldown is one of
+        // the four this tree already shipped; no new tempo was spent.
+        delta: { cooldownTicks: -1, critRateStage: 1 },
       },
       reaping_slash: {
         id: "reaping_slash",
         name: "Reaping Slash",
-        cost: 2,
-        prerequisites: ["coup_de_grace"],
+        cost: 1,
+        prerequisites: ["harder_swing"],
         excludes: ["frenzy_cutter", "cleaving_slash"],
         leaning: "aggression",
-        // A committed, all-in follow-through — locks the user out of its
-        // next action tick, but a hit this precise finds weak points more often.
+        // FORK A. A committed, all-in follow-through — locks the user
+        // out of its next action tick, but a hit this precise finds weak
+        // points more often. The ONLY route to crit stage 3 (always
+        // crits, once Apex Predator lands); the other two forks cap at
+        // stage 2.
         delta: { power: 25, cooldownTicks: 1, lockTicks: 2, critRateStage: 1 },
       },
       frenzy_cutter: {
         id: "frenzy_cutter",
         name: "Frenzy Cutter",
-        cost: 2,
-        prerequisites: ["coup_de_grace"],
+        cost: 1,
+        prerequisites: ["harder_swing"],
         excludes: ["reaping_slash", "cleaving_slash"],
         leaning: "aggression",
-        // Several quick, lighter cuts, reckless enough to nick the user too.
+        // FORK B. Several quick, lighter cuts, reckless enough to nick
+        // the user too. Volume instead of severity — and at stage 2 a
+        // multi-hit build crits about half its individual hits.
         delta: { hits: { min: 2, max: 3 }, power: -20, recoilFraction: 0.05 },
       },
       cleaving_slash: {
         id: "cleaving_slash",
         name: "Cleaving Slash",
-        cost: 2,
-        prerequisites: ["coup_de_grace"],
+        cost: 1,
+        prerequisites: ["harder_swing"],
         excludes: ["reaping_slash", "frenzy_cutter"],
         leaning: "aggression",
-        // A wide, sweeping arc that catches everyone standing in front of
-        // it, not just the one target it was aimed at.
+        // FORK C, and the tree's ONLY `shape` setter — a wide sweeping
+        // arc that catches everyone standing in front of it, not just
+        // the one target it was aimed at.
         delta: { shape: { kind: "cone", length: 1, width: 2 }, hitsArea: true, power: -15 },
       },
+
+      // --- Lane B: "Where The Edge Reaches" — the seam, and then two
+      // tiles of it ---
+      predators_instinct: {
+        id: "predators_instinct",
+        name: "Predator's Instinct",
+        cost: 1,
+        prerequisites: ["honed_edge"],
+        leaning: "aggression",
+        // LANE B filler. Was `situationalBonus: night` — dropped because
+        // `situationalBonus` is an OVERWRITE field and v2 shipped five
+        // co-takeable setters of it, so on most builds this node either
+        // erased Coup de Grace or was erased by it. The NAME survives
+        // intact under a mechanic that fits it better: an instinct for
+        // where a thing will actually die, not for what time of day it
+        // is.
+        delta: { power: 5, defensePenetration: 0.1 },
+      },
+      coup_de_grace: {
+        id: "coup_de_grace",
+        name: "Coup de Grace",
+        cost: 2,
+        prerequisitesAnyOf: [["predators_instinct"], ["the_named_one"]],
+        leaning: "aggression",
+        // LANE B NOTABLE, and now the tree's ONLY `situationalBonus`.
+        // Anything already burned, poisoned, paralyzed, asleep or frozen
+        // goes down twice as fast — the executioner's read, and the one
+        // condition worth keeping on a move that inflicts no status of
+        // its own: it can only ever fire on damage some OTHER move set
+        // up, which is exactly what a finisher is.
+        delta: { situationalBonus: { condition: "targetStatused", multiplier: 2 } },
+      },
+      sharpened_focus: {
+        id: "sharpened_focus",
+        name: "The Long Guard",
+        cost: 1,
+        prerequisites: ["coup_de_grace"],
+        leaning: "aggression",
+        // LANE B tail, and the memorable one. Was a bare "+10 Accuracy",
+        // the fourth of nine on a 100-accuracy move. A scythe, a pincer
+        // and a leek are all longer than the arm holding them, so this
+        // buys the thing none of the other Normal-type melee trees have:
+        // real REACH. `range.max` 1 -> 2 is read by `moveRange`/
+        // `withinMoveRange` (combat.ts), which is what predation.ts uses
+        // to decide "attack now" vs. "close the distance" — so the
+        // holder visibly stops stepping into melee. Less shoulder behind
+        // a cut thrown at full extension, hence the -5.
+        //
+        // It also has a real NON-COMBAT payoff, which is why it earns a
+        // lane tail rather than a filler slot: needs.ts's canopy-harvest
+        // path lets a damage move stand in for a dig, "with higher range
+        // giving advantage" — `CANOPY_HARVEST_RANGE_BONUS_PER_POINT` is
+        // multiplied by `range.max - 1`. A Slash user with the Long
+        // Guard cuts fruit down out of the canopy measurably faster.
+        // Scratch, a point move, cannot buy this at all.
+        delta: { range: { min: 0, max: 2 }, power: -5 },
+      },
+
       apex_predator: {
         id: "apex_predator",
         name: "Apex Predator",
         cost: 2,
-        prerequisitesAnyOf: [["reaping_slash"], ["frenzy_cutter"], ["cleaving_slash"]],
+        prerequisitesAnyOf: [["reaping_slash"], ["frenzy_cutter"], ["cleaving_slash"], ["sharpened_focus"]],
         leaning: "aggression",
-        // The culmination of raw aggression — every strike from here carries
-        // real killing intent.
+        // DEEP NOTABLE — both lanes converge here. Every strike from
+        // here carries real killing intent. Third and LAST crit stage in
+        // the tree: a Reaping build lands on stage 3 (100%), everything
+        // else on stage 2 (50%). `rollCritical` clamps at 3, so nothing
+        // beyond this point sells another one.
         delta: { power: 10, critRateStage: 1 },
       },
       ferocity_capstone_filler: {
         id: "ferocity_capstone_filler",
-        name: "+5 Power",
+        name: "All The Way Through",
         cost: 1,
         prerequisites: ["apex_predator"],
         leaning: "aggression",
-        delta: { power: 5 },
+        // Filler. Was a bare "+5 Power". The arm goes all the way
+        // through the target and takes a beat to come back — real cost
+        // and real payoff in the same node (principle 4). `lockTicks`
+        // locks the USER, not the defender (principle 3).
+        delta: { power: 5, lockTicks: 1 },
       },
       merciless: {
         id: "merciless",
@@ -790,62 +937,136 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["ferocity_capstone_filler"],
         leaning: "aggression",
-        // Even a hide built to shrug off a Normal-type hit doesn't fully
-        // blunt this anymore.
+        // CAPSTONE. Even a hide built to shrug off a Normal-type hit
+        // doesn't fully blunt this anymore.
         delta: { resistanceBreaker: { multiplier: 1.5 } },
       },
-      // Crosslink: Aggression <-> Boldness — a precise cut placed exactly
-      // where it slows the target's own next move.
-      brutal_efficiency: {
-        id: "brutal_efficiency",
-        name: "Brutal Efficiency",
-        cost: 1,
-        prerequisites: ["honed_edge", "keen_eye"],
-        leaning: "aggression",
-        delta: { jamCooldownTicks: 1 },
-      },
+
+      // ============================================================
+      // BOLDNESS — "The Stillness"
+      // Boldness for a duellist is not armour. It is the nerve to stand
+      // perfectly still inside someone else's attack and wait for the
+      // line to show — and then the footwork that decides, to the tile,
+      // where the exchange happens.
+      // Lanes differ in KIND: Lane A REFUSES TO MOVE AT ALL (a wind-up
+      // that is literally untouchable, plus the two passives that stop
+      // anything shifting it), Lane B MOVES EXACTLY ONE TILE at exactly
+      // the right instant. Not two grades of toughness — one lane's
+      // answer is stillness and the other's is distance.
+      // Flavours: defence, aggressive movement, raw damage, piercing.
+      // ============================================================
       keen_eye: {
         id: "keen_eye",
         name: "Keen Eye",
         cost: 1,
         leaning: "boldness",
-        // Reads an opening better than most — Precision's whole reason to
-        // exist is accuracy, so this one earns the stat.
+        // OPENER. Reads an opening better than most. Slash's canon
+        // accuracy is 100, so surplus only pays out through
+        // `rollAccuracy`'s `extraMultiplier` — fighting in a storm
+        // (0.6x) or uphill (down to 0.7x). This branch is the one place
+        // in the tree where that is worth buying on purpose, and the
+        // Opportunist's Strike fork below deliberately gives it
+        // something to cover.
         delta: { accuracy: 15 },
       },
+
+      // --- Lane A: "The Held Stance" — nothing moves it, including it ---
       light_footing: {
         id: "light_footing",
-        name: "+5 Power",
+        name: "Rooted Stance",
         cost: 1,
         prerequisites: ["keen_eye"],
         leaning: "boldness",
-        delta: { power: 5 },
+        // LANE A filler. Was a bare "+5 Power". `immovable` is read by
+        // movement.ts's `applyForcedMovement` as a flat opt-out of being
+        // dragged, shoved or lunged at — which is precisely what a
+        // wind-up lane needs, because the whole lane is built on holding
+        // one tile. Binary, so it cannot stack across a movepool.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: { power: 3 },
       },
       steady_hand: {
         id: "steady_hand",
-        name: "-1 Cooldown",
+        name: "Economy of Motion",
         cost: 1,
-        prerequisitesAnyOf: [["light_footing"], ["brutal_efficiency"], ["watchful_pack"]],
+        prerequisites: ["light_footing"],
         leaning: "boldness",
+        // LANE A filler. The blade never travels further than it has to,
+        // so it comes back on guard sooner. One of the four -1 cooldown
+        // nodes this tree already shipped.
         delta: { cooldownTicks: -1 },
       },
+      the_long_moment: {
+        id: "the_long_moment",
+        name: "The Long Moment",
+        cost: 2,
+        prerequisitesAnyOf: [["steady_hand"], ["never_set_again"]],
+        leaning: "boldness",
+        // LANE A NOTABLE, and the single node this whole conversion was
+        // built around. "What is dangerous about Slash is not the swing,
+        // it is the stillness before it" — and the engine makes that
+        // literal: while `Agent.chargingAttack` is set, predation.ts's
+        // `resolveHit` REFUSES every attack against the holder outright
+        // ("no accuracy roll, no partial effects"). Going still is the
+        // defence.
+        //
+        // `leapTiles: 0` is the point of difference from every other
+        // charge in the roster: Tackle's Full Tilt crosses six tiles,
+        // Peck's Set The Point three, Body Slam's Reckoning rears up and
+        // drops. This one does not travel at all. It stands, for two
+        // ticks, and then cuts. The cost is in the same node as the
+        // payoff — two action ticks are two actions not taken, and if
+        // the target has moved out of the line when it releases, the
+        // whole thing is spent for nothing.
+        delta: { chargeAttack: { ticks: 2, bonusPower: 40, leapTiles: 0 } },
+      },
+      unflinching: {
+        id: "unflinching",
+        name: "Unflinching",
+        cost: 1,
+        prerequisites: ["the_long_moment"],
+        leaning: "boldness",
+        // LANE A tail. `unshaken` is the rarest defensive passive in the
+        // roster (three users) and the only one that is not a
+        // percentage: the next hit against the holder is negated
+        // entirely — no accuracy roll, no partial effects, the same
+        // shape as the charge's own invulnerability window — and then it
+        // recharges (predation.ts's `resolveHitAgainstTarget`,
+        // `Agent.unshakenCooldownTicks`). "Doesn't even flinch the first
+        // time" is the duellist's composure stated as a mechanic, and
+        // it is deliberately NOT `damageReduction`, which is what this
+        // branch would have reached for and what Scratch's own Dug In
+        // lane already spends.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: { power: 3 },
+      },
+
+      // --- Lane B: "The Footwork" — one tile, exactly on time ---
       feint: {
         id: "feint",
         name: "Feint",
         cost: 1,
-        prerequisites: ["steady_hand"],
+        prerequisites: ["keen_eye"],
         leaning: "boldness",
-        // Closes to melee as part of using the move, before the hit itself
-        // resolves.
+        // LANE B filler. Closes to melee as part of using the move,
+        // before the hit itself resolves.
         delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
       },
       quickstep: {
         id: "quickstep",
-        name: "+5 Power",
-        cost: 1,
-        prerequisites: ["feint"],
+        name: "Measure",
+        cost: 2,
+        prerequisitesAnyOf: [["feint"], ["the_opening_called"]],
         leaning: "boldness",
-        delta: { power: 5 },
+        // LANE B NOTABLE. Was a bare "+5 Power". "Measure" is the
+        // fencer's word for exact distance, and this is the lane's
+        // thesis: step in on the precise beat their guard resets, put
+        // the point where the plate does not meet, and leave them a tick
+        // further from acting than they were. `jamCooldownTicks` pushes
+        // the DEFENDER's own cooldowns out — tempo DENIAL, which is the
+        // only honest way for a tree already sitting on the 3.00x tempo
+        // cap to keep feeling faster than what it is fighting.
+        delta: { power: 5, jamCooldownTicks: 1, defensePenetration: 0.1 },
       },
       opportunists_strike: {
         id: "opportunists_strike",
@@ -854,8 +1075,14 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["quickstep"],
         excludes: ["calculated_retreat"],
         leaning: "boldness",
-        // Punishes a target that hasn't turned to face the threat yet.
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
+        // FORK A. Was `situationalBonus: flanking`, cut for the
+        // OVERWRITE collision (see Coup de Grace). What replaced it is
+        // the fork's actual decision: this one does NOT wait for the
+        // measure. It goes the instant the guard opens and sometimes
+        // goes into nothing — 100 accuracy down to 85 is a real miss
+        // chance in `rollAccuracy` at any weather, which is what finally
+        // makes Keen Eye's +15 a live purchase rather than surplus.
+        delta: { power: 12, accuracy: -15 },
       },
       calculated_retreat: {
         id: "calculated_retreat",
@@ -864,25 +1091,31 @@ export const MOVES: Record<string, MoveSpec> = {
         prerequisites: ["quickstep"],
         excludes: ["opportunists_strike"],
         leaning: "boldness",
-        // Strikes, then immediately steps back out of range — never sticks
-        // around for the counter.
+        // FORK B, and different in KIND from Fork A rather than in
+        // degree: A commits and stays in the exchange, B refuses to be
+        // in it. Strikes, then immediately steps back out of range —
+        // never sticks around for the counter.
         delta: { forcedMovement: { mover: "attacker", direction: "away", tiles: 1, timing: "onHit" }, accuracy: 10 },
       },
+
       flawless_form: {
         id: "flawless_form",
         name: "Flawless Form",
         cost: 2,
-        prerequisitesAnyOf: [["opportunists_strike"], ["calculated_retreat"]],
+        prerequisitesAnyOf: [["unflinching"], ["opportunists_strike"], ["calculated_retreat"]],
         leaning: "boldness",
-        // A style so refined it barely wastes a drop of momentum — or blood.
+        // DEEP NOTABLE — both lanes converge here. A style so refined it
+        // barely wastes a drop of momentum, or blood.
         delta: { accuracy: 20, lifestealFraction: 0.1 },
       },
       precision_capstone_filler: {
         id: "precision_capstone_filler",
-        name: "-1 Cooldown",
+        name: "No Wasted Motion",
         cost: 1,
         prerequisites: ["flawless_form"],
         leaning: "boldness",
+        // Filler. The last of the four -1 cooldown nodes this tree
+        // already shipped.
         delta: { cooldownTicks: -1 },
       },
       perfect_strike: {
@@ -891,107 +1124,193 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["precision_capstone_filler"],
         leaning: "boldness",
-        // About as close to a guaranteed, clean hit as this sim's accuracy
-        // math allows.
-        delta: { power: 15, accuracy: 10 },
+        // CAPSTONE. About as close to a guaranteed, clean hit as this
+        // sim's accuracy math allows.
+        delta: { power: 12, accuracy: 10 },
       },
-      // Crosslink: Boldness <-> Sociability — watching each other's blind
-      // spots means fewer clean hits land. Refined per feedback: converted
-      // from a flat damageReduction (already the default lever for most
-      // "tanky branch" nodes across every tree) to a real Defense-stat
-      // buff — "watchful" isn't an armor/hide fiction, so a stat buff (also
-      // physical-only for free, unlike damageReduction's indiscriminate
-      // blunting) reads truer to the name.
-      watchful_pack: {
-        id: "watchful_pack",
-        name: "Watchful Pack",
-        cost: 1,
-        prerequisites: ["keen_eye", "shared_scent"],
-        leaning: "boldness",
-        grantsPassive: { kind: "defenseBoost", value: 0.5 },
-        delta: {},
-      },
+
+      // ============================================================
+      // SOCIABILITY — "The Form Passed On"
+      // Technique is the one thing about this move that can be handed to
+      // another animal. A filthy claw teaches nothing; a cut can be
+      // shown, drilled and copied — and a clean kill is the only kind a
+      // herd can actually share, because nothing is spoiled, nothing is
+      // wasted and nothing is left thrashing.
+      // Lanes differ in KIND: Lane A makes herd-mates BETTER AT FIGHTING
+      // (the drill — a demonstration that eventually stops needing to be
+      // a separate errand), Lane B makes herd-mates FED (the clean kill
+      // — the carcass opened along its seams, the fruit taken out of the
+      // canopy whole). Teaching against feeding.
+      // Flavours: ally buffing, healing, calming, planted/duration, raw
+      // damage.
+      // ============================================================
       shared_scent: {
         id: "shared_scent",
-        name: "Shared Scent",
+        name: "The Demonstration",
         cost: 1,
         leaning: "sociability",
-        // Marks a kill for kin to follow in on, sharpening their own strikes.
+        // OPENER. Was "Shared Scent" — a scent-marking name on a move
+        // whose whole Sociability fantasy is technique, and Scratch owns
+        // the scent-and-mark register outright. The mechanic never
+        // changed and it was always describing this: `targetsAlly` means
+        // the move can be aimed AT a herd-mate, and what they take from
+        // it is a real Attack buff. That is a lesson, not a scent.
         delta: { targetsAlly: true, allyEffect: { buff: { stat: "attack", stage: 1, ticks: 15 } } },
       },
+
+      // --- Lane A: "The Drill" — the form, taught ---
       scavengers_patience: {
         id: "scavengers_patience",
-        name: "+10 Accuracy",
+        name: "Hours On The Form",
         cost: 1,
         prerequisites: ["shared_scent"],
         leaning: "sociability",
-        delta: { accuracy: 10 },
+        // LANE A filler. Was "Scavenger's Patience", a scavenging name
+        // on the teaching lane. Repetition is what a drill IS, and it is
+        // the one honest place left in this tree for accuracy: an animal
+        // that has cut the same line ten thousand times still finds it
+        // in a storm.
+        delta: { accuracy: 10, power: 5 },
       },
       kin_sense: {
         id: "kin_sense",
-        name: "-1 Cooldown",
+        name: "Called Tempo",
         cost: 1,
-        prerequisitesAnyOf: [["scavengers_patience"], ["watchful_pack"], ["ambush_pack"]],
+        prerequisites: ["scavengers_patience"],
         leaning: "sociability",
+        // LANE A filler. Drilling to a called beat. One of the four -1
+        // cooldown nodes this tree already shipped; its v2
+        // `prerequisitesAnyOf` moved up to Coordinated Strike, which is
+        // where this lane's bridge shortcut now lands.
         delta: { cooldownTicks: -1 },
       },
       coordinated_strike: {
         id: "coordinated_strike",
         name: "Coordinated Strike",
-        cost: 1,
-        prerequisites: ["kin_sense"],
+        cost: 2,
+        prerequisitesAnyOf: [["kin_sense"], ["the_opening_called"]],
         leaning: "sociability",
-        // Fighting where another of its kind can back it up breeds real confidence.
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 10 } },
+        // LANE A NOTABLE. Fighting where another of its kind can back it
+        // up breeds real confidence — and the lane's payoff is that the
+        // demonstration stops being a separate errand. `allyEffectOnAttack`
+        // (predation.ts) makes the opener's Attack buff ride along on an
+        // ordinary hostile cut, so the teacher no longer has to stop
+        // fighting to teach.
+        delta: {
+          statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 10 },
+          allyEffectOnAttack: true,
+        },
       },
       pack_rhythm: {
         id: "pack_rhythm",
-        name: "+10 Accuracy",
+        name: "In Step",
         cost: 1,
         prerequisites: ["coordinated_strike"],
         leaning: "sociability",
-        delta: { accuracy: 10 },
+        // LANE A tail. Two animals cutting on the same count.
+        delta: { power: 5, accuracy: 10 },
+      },
+
+      // --- Lane B: "The Clean Kill" — the herd eats because of the edge ---
+      clean_through: {
+        id: "clean_through",
+        name: "Clean Through",
+        cost: 1,
+        prerequisites: ["shared_scent"],
+        leaning: "sociability",
+        // LANE B filler. The cut goes through rather than worrying at
+        // the thing, so the edge takes what it opened instead of losing
+        // it into the dirt.
+        delta: { power: 5, lifestealFraction: 0.05 },
+      },
+      dressed_not_torn: {
+        id: "dressed_not_torn",
+        name: "Dressed, Not Torn",
+        cost: 2,
+        prerequisitesAnyOf: [["clean_through"], ["the_named_one"]],
+        leaning: "sociability",
+        // LANE B NOTABLE, and the lane's whole thesis: a carcass opened
+        // along its seams feeds a herd, and a carcass mauled open feeds
+        // half of one. `gatherBurst` is read on needs.ts's CANOPY
+        // HARVEST path for a damage move — a deliberately different code
+        // path from Scratch's Communal Foraging, which spends the same
+        // lever on the DIG path (`digMove.gatherBurst`, needs.ts:1710).
+        // Scratch digs food up; Slash cuts it down.
+        delta: { gatherBurst: 3 },
       },
       opportunist_scavenger: {
         id: "opportunist_scavenger",
         name: "Opportunist Scavenger",
         cost: 1,
-        prerequisites: ["pack_rhythm"],
+        prerequisites: ["dressed_not_torn"],
         excludes: ["territorial_snarl"],
         leaning: "sociability",
-        // Feeds off scraps between fights, recovering quietly.
-        grantsPassive: { kind: "regenFlat", value: 0.75 },
-        delta: { power: -5 },
+        // FORK A. Was a `regenFlat` passive — pulled because healing
+        // passives sum uncapped across a species' entire movepool and
+        // this one was buying, on a fork tip, the thing the whole roster
+        // has too much of. It now does what its name says with a delta
+        // instead: it takes its share out of the animal it opened, at
+        // the price of a lighter cut. Bounded by the move.
+        delta: { power: -5, lifestealFraction: 0.12 },
       },
       territorial_snarl: {
         id: "territorial_snarl",
         name: "Territorial Snarl",
         cost: 1,
-        prerequisites: ["pack_rhythm"],
+        prerequisites: ["dressed_not_torn"],
         excludes: ["opportunist_scavenger"],
         leaning: "sociability",
-        // A wounded rival gets no mercy — least of all from something with
-        // backup nearby.
-        delta: { situationalBonus: { condition: "targetLowHp", multiplier: 1.3 } },
+        // FORK B, and different in KIND from Fork A: A takes a bigger
+        // share of the kill, B refuses to share it at all and dares the
+        // rest to argue. Was `situationalBonus: targetLowHp`, cut for
+        // the OVERWRITE collision (see Coup de Grace). Standing over a
+        // carcass and snarling is a real posture and a real cost — an
+        // animal committed to the argument is not moving off the
+        // carcass, which is what `lockTicks` does to its own user.
+        delta: { power: 12, lockTicks: 1 },
       },
+
       alpha_strike: {
         id: "alpha_strike",
-        name: "Alpha Strike",
+        name: "The One They Watch",
         cost: 2,
-        prerequisitesAnyOf: [["opportunist_scavenger"], ["territorial_snarl"]],
+        prerequisitesAnyOf: [["pack_rhythm"], ["opportunist_scavenger"], ["territorial_snarl"]],
         leaning: "sociability",
-        // A relentless, all-in style that shrugs off punishment better than
-        // it has any right to.
-        grantsPassive: { kind: "damageReduction", value: 0.1 },
-        delta: { power: 10 },
+        // DEEP NOTABLE — both lanes converge here. Was "Alpha Strike"
+        // carrying a flat 10% `damageReduction`, which MOVES_DESIGN.md
+        // names by title ("Stop overusing damageReduction") as the
+        // laziest possible answer for a branch like this, and which
+        // stacks uncapped across every tree a species knows.
+        //
+        // `calmingPresence` is the honest version of the same idea and a
+        // far better one: herdConflict.ts's `herdConflictChance`
+        // multiplies DOWN the rivalry-escalation chance of every living
+        // agent in a radius, both sides of a standoff, not just its own
+        // herd. Nothing near an animal this visibly good with an edge
+        // wants to start anything. It is deterrence rather than armour,
+        // it happens on the map where it can be watched, and it is the
+        // one thing in this tree that makes a fight NOT happen.
+        //
+        // 0.2 rather than a bigger number, and the number is measured:
+        // `herdConflictChance` floors the multiplier at
+        // MIN_CALMING_MULTIPLIER = 0.5 (herdConflict.ts), so a species'
+        // SUMMED calm past 0.50 buys literally nothing. Charizard
+        // already carries 0.30 from Flamethrower's Calming Ash, so 0.35
+        // here (the first draft) wasted 0.15 of a skill point on one of
+        // Slash's four learners. At 0.2 Charizard lands exactly on the
+        // floor and nothing in the tree is dead.
+        delta: { power: 6 },
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
       },
       pack_capstone_filler: {
         id: "pack_capstone_filler",
-        name: "+10 Accuracy",
+        name: "Second On The Line",
         cost: 1,
         prerequisites: ["alpha_strike"],
         leaning: "sociability",
-        delta: { accuracy: 10 },
+        // Filler. Was a bare "+10 Accuracy", the ninth in the tree.
+        // Someone else standing where they were shown to stand.
+        delta: { defensePenetration: 0.1 },
       },
       united_front: {
         id: "united_front",
@@ -999,19 +1318,147 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["pack_capstone_filler"],
         leaning: "sociability",
-        // The whole point of a pack — mends and steadies a herd-mate in one
-        // motion, not two separate errands.
+        // CAPSTONE. The whole point of a pack — mends and steadies a
+        // herd-mate in one motion, not two separate errands.
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.1, buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
-      // Crosslink: Sociability <-> Aggression — a coordinated ambush catches
-      // even a wary target off guard.
+
+      // ============================================================
+      // BRIDGE 1 — Aggression <-> Boldness: "the beat"
+      // A cut placed exactly where it costs the target its own next
+      // move. Every node on this bridge deepens `jamCooldownTicks` and
+      // nothing else (principle 13).
+      // ============================================================
+      brutal_efficiency: {
+        id: "brutal_efficiency",
+        name: "Brutal Efficiency",
+        cost: 1,
+        prerequisites: ["honed_edge", "keen_eye"],
+        leaning: "aggression",
+        // CROSSLINK.
+        delta: { jamCooldownTicks: 1 },
+      },
+      quick_reflexes: {
+        id: "quick_reflexes",
+        name: "Cut The Nerve",
+        cost: 1,
+        prerequisites: ["brutal_efficiency"],
+        leaning: "aggression",
+        // BRIDGE FILLER. This node was an Aggression "+10 Accuracy"
+        // filler in v2 and was RELOCATED here rather than deleted —
+        // Aggression was already at 13 branch nodes, one over the v4
+        // standard, and Brutal Efficiency was a two-node spur with no
+        // filler at all (one of the ten checker problems). It keeps its
+        // accuracy and picks up the bridge's own lever, which is what
+        // principle 13 requires of a bridge filler.
+        delta: { jamCooldownTicks: 1, accuracy: 10 },
+      },
+      never_set_again: {
+        id: "never_set_again",
+        name: "Never Set Again",
+        cost: 2,
+        prerequisites: ["quick_reflexes"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Escalates its own crosslink's lever a third
+        // time rather than bolting on a generic stat: with three tiers
+        // of jam on the same target's cooldowns, the thing being cut
+        // never gets its guard back at all. Alternate route into BOTH
+        // branches this crosslink connects (principle 11) — Aggression's
+        // The Line Shows Itself and Boldness's The Long Moment, one lane
+        // notable each — and it lands one step short of every fork
+        // rather than on one (principle 12).
+        delta: { jamCooldownTicks: 2 },
+      },
+
+      // ============================================================
+      // BRIDGE 2 — Boldness <-> Sociability: "two pairs of eyes"
+      // Watching each other's blind spots means both of you see the gap
+      // sooner. Every node deepens `defensePenetration`.
+      // ============================================================
+      watchful_pack: {
+        id: "watchful_pack",
+        name: "Watchful Pack",
+        cost: 1,
+        prerequisites: ["keen_eye", "shared_scent"],
+        leaning: "boldness",
+        // CROSSLINK. Kept its v2 `defenseBoost` passive — a real
+        // Defense-stat buff rather than `damageReduction`, deliberately,
+        // since "watchful" is not an armour fiction and `defenseBoost`
+        // is physical-only where `damageReduction` blunts everything
+        // indiscriminately. The delta was `{}` in v2, which left the
+        // bridge with no lever for its filler to share; it now carries
+        // the seam-finding half the name always implied.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: { defensePenetration: 0.1 },
+      },
+      second_pair_of_eyes: {
+        id: "second_pair_of_eyes",
+        name: "Second Pair Of Eyes",
+        cost: 1,
+        prerequisites: ["watchful_pack"],
+        leaning: "boldness",
+        // BRIDGE FILLER, sharing its crosslink's own lever.
+        delta: { defensePenetration: 0.1, accuracy: 10 },
+      },
+      the_opening_called: {
+        id: "the_opening_called",
+        name: "The Opening, Called",
+        cost: 2,
+        prerequisites: ["second_pair_of_eyes"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. The herd-mate watching the other side says
+        // where the gap is out loud, so the cut goes straight into it.
+        // Deepens the bridge's own lever a third time. Alternate route
+        // into both branches it connects: Boldness's Measure and
+        // Sociability's Coordinated Strike, one lane notable each, both
+        // one step short of their fork.
+        delta: { defensePenetration: 0.2 },
+      },
+
+      // ============================================================
+      // BRIDGE 3 — Sociability <-> Aggression: "the named one"
+      // The first cut names a target and the rest of the herd converges
+      // on it. Every node deepens `rallyCall`.
+      // ============================================================
       ambush_pack: {
         id: "ambush_pack",
         name: "Ambush Pack",
         cost: 1,
         prerequisites: ["shared_scent", "honed_edge"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.3 } },
+        // CROSSLINK. Was `situationalBonus: flanking`, a fifth
+        // co-takeable setter of an OVERWRITE field and a duplicate of
+        // Opportunist's Strike's condition besides. `rallyCall` is what
+        // the node's own name was always describing: a coordinated
+        // ambush is other animals independently deciding to go for the
+        // same throat, which is a qualitatively different payoff from a
+        // number on the caster.
+        delta: { rallyCall: { ticks: 45 } },
+      },
+      word_gets_around: {
+        id: "word_gets_around",
+        name: "Word Gets Around",
+        cost: 1,
+        prerequisites: ["ambush_pack"],
+        leaning: "aggression",
+        // BRIDGE FILLER, deepening its crosslink's own mark rather than
+        // reaching for a new lever (principle 13). `rallyCall` is an
+        // overwrite, so this is the same escalate-in-place shape
+        // Earthquake's Marked Rupture already uses.
+        delta: { rallyCall: { ticks: 70 } },
+      },
+      the_named_one: {
+        id: "the_named_one",
+        name: "The Named One",
+        cost: 2,
+        prerequisites: ["word_gets_around"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. The mark outlasts the fight that made it.
+        // Alternate route into both branches this crosslink connects:
+        // Aggression's Coup de Grace and Sociability's Dressed, Not
+        // Torn, one lane notable each, both one step short of their
+        // fork.
+        delta: { rallyCall: { ticks: 110 } },
       },
     },
   },
