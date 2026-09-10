@@ -551,8 +551,16 @@ export type BehaviorKind =
 export type PlayerAction =
   | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   | { kind: "wait" }
-  /** ROADMAP.md M3: eat from the food tile you stand on. Fails (and still costs the turn) on anything else. */
-  | { kind: "eat" }
+  /**
+   * ROADMAP.md M3: eat from the food tile you stand on. Fails (and still
+   * costs the turn) on anything else. `itemKey`, when given, names which
+   * carried food material to eat instead (the pack menu's per-row Eat
+   * button — distinct crop items, CLAUDE.md's "We need distinct crop" fix,
+   * made a bare "eat whatever's first" ambiguous the moment more than one
+   * kind sits in the pack); omitted keeps the old "first one found" pick
+   * (the 'e' key/HUD button, which has no specific row to name).
+   */
+  | { kind: "eat"; itemKey?: string }
   /** ROADMAP.md M3: drink from the water tile you stand on or beside. Fails (and still costs the turn) otherwise. */
   | { kind: "drink" }
   /** ROADMAP.md M5: start gathering from the tile you stand on (harvest.ts says what it yields). A time-spend — see `Activity`. */
@@ -568,8 +576,13 @@ export type PlayerAction =
   | { kind: "stow" }
   /** ROADMAP.md M6: toggle crouching. Halves your threat signature; a crouched step costs extra action energy. */
   | { kind: "crouch" }
-  /** ROADMAP.md M6: set one berry from your pack down on a free tile beside you, for whoever comes. */
-  | { kind: "offer" }
+  /**
+   * ROADMAP.md M6: set one berry from your pack down on a free tile beside
+   * you, for whoever comes. `itemKey`, when given, names which carried
+   * food material to offer — same "distinct crop items" reasoning as
+   * `eat`'s own `itemKey`; omitted keeps the old "first one found" pick.
+   */
+  | { kind: "offer"; itemKey?: string }
   /**
    * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Swings at
    * the adjacent tile in the given direction — a living agent there takes
@@ -580,8 +593,16 @@ export type PlayerAction =
    * a `tree`, a machete against a `bush`) fells/clears it instead. Fails
    * (still costs the turn) against a wall, water, or a tile nothing in the
    * current loadout can affect.
+   *
+   * Direct follow-up ask: "Attack should move list should work when you
+   * have a weapon, or tackle if you don't. The player has moves too, even
+   * if it's just tackle." `moveId`, when given, picks a specific one of
+   * the player's own real `Agent.moves` (bare-handed Tackle plus whatever
+   * a held item grants — the same list `syncPlayerMoves` keeps in sync)
+   * instead of letting `pickBestMove` auto-select one; omitted keeps the
+   * original auto-pick behavior (the plain 'f'-key/HUD-button swing).
    */
-  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; moveId?: string }
   /**
    * Direct ask: "even before m7... under the attack option a sub menu
    * show up to select your bonded pokemon if its within the same zone as
@@ -595,7 +616,9 @@ export type PlayerAction =
    * `applyCommandedAction`. Fails if there is no such follower, or it
    * doesn't know that move.
    */
-  | { kind: "command"; agentId: string; moveId: string; target: Vec2 };
+  | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
+  | { kind: "drop"; itemKey: string };
 
 /**
  * What happened when the player's last action was applied — for the UI to

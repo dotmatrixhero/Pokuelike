@@ -5,13 +5,13 @@ import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
-import { GATHER_TURNS, MATERIALS, harvestLeft, harvestableAt, takeHarvest, type MaterialId } from "./harvest.js";
+import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
 import { carryCapacityOf } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, resolveHit } from "./predation.js";
-import { pickBestMove } from "./combat.js";
+import { pickBestMove, withinMoveRange } from "./combat.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -114,11 +114,16 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       }
       // Direct ask: "make offer and eat only available from inventory after
       // you gather" — nothing underfoot, so eat a carried berry instead.
-      // `foodNutritionFactor(undefined)` is already the neutral (1x) default
-      // this function returns for exactly this "no tile" case.
-      if (countOf(agent, "food") <= 0) return false;
-      removeItem(agent, "food", 1);
-      consume(agent.needs, "seekFood", foodNutritionFactor(undefined));
+      // Any real food material (`FOOD_MATERIAL_IDS` — a specific crop now
+      // that gathering hands those back distinctly, not just the old
+      // generic "food"), not literally the item key "food". `action.itemKey`
+      // names exactly which one (the pack menu's per-row Eat button) —
+      // falling back to "first one found" would silently eat a DIFFERENT
+      // carried food than the row the player actually tapped.
+      const carried = resolveFoodItem(agent, action.itemKey);
+      if (!carried) return false;
+      removeItem(agent, carried, 1);
+      consume(agent.needs, "seekFood", foodNutritionMultiplierOf(carried));
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
       return true;
@@ -170,6 +175,13 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     }
     case "attack": {
       const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      // Direct ask: "Attack should move list should work when you have a
+      // weapon, or tackle if you don't. The player has moves too" — an
+      // explicit `moveId` names one of the player's own real moves; a
+      // chosen move must exist, be off cooldown, and reach distance 1 (dx/
+      // dy are each -1/0/1 by construction) to count as "you swung."
+      const chosen = action.moveId ? agent.moves?.find((m) => m.id === action.moveId) : undefined;
+      if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, 1))) return false;
       const defender = world.agents.find(
         (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
       );
@@ -183,8 +195,8 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         // happened at all. Distance is always 1 by construction — dx/dy
         // are each -1/0/1, comfortably within every move on the player's
         // loadout (`range: {max: 1}`).
-        if (!pickBestMove(agent, defender.types ?? [], 1, world.tick)) return false;
-        resolveHit(world, agent, defender, log, "defeated", ctx, 1, rng);
+        if (!chosen && !pickBestMove(agent, defender.types ?? [], 1, world.tick)) return false;
+        resolveHit(world, agent, defender, log, "defeated", ctx, 1, rng, 1, chosen);
         out.attackedId = defender.id;
         return true;
       }
@@ -192,13 +204,14 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // tree, machete against a bush), MOVES_AND_TOOLS.md's generalised
       // `terrainEffect`. `pickBestMove` never offers these (they're
       // `utilityMove`-flagged, see `terrainMove`'s own doc comment in
-      // crafting.ts), so they're picked directly here rather than through
-      // the ordinary combat move-selection path.
+      // crafting.ts), so a plain auto-swing (no explicit `moveId`) picks
+      // one directly here rather than through the ordinary combat move-
+      // selection path; an explicit `moveId` was already resolved above.
       const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
       if (!tile) return false;
-      const move = (agent.moves ?? []).find(
-        (m) => m.terrainEffect && !agent.moveCooldowns?.[m.id] && (!m.terrainEffect.from || m.terrainEffect.from.includes(tile.terrain))
-      );
+      const move =
+        chosen ??
+        (agent.moves ?? []).find((m) => m.terrainEffect && !agent.moveCooldowns?.[m.id] && (!m.terrainEffect.from || m.terrainEffect.from.includes(tile.terrain)));
       if (!move?.terrainEffect) return false;
       const felled = applyTerrainEffectAt(world, agent, agent.layer, targetPos, move);
       if (!felled) return false;
@@ -226,20 +239,38 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       return agent.posture === "crouch";
     }
     case "offer": {
-      if (countOf(agent, "food") <= 0) return false;
+      const offered = resolveFoodItem(agent, action.itemKey);
+      if (!offered) return false;
       const spot = freeTileBeside(world, agent);
       if (!spot) return false;
-      removeItem(agent, "food", 1);
+      removeItem(agent, offered, 1);
       const tile = tileAt(world, agent.layer, spot.x, spot.y)!;
       tile.terrain = "food";
       tile.stock = OFFERED_FOOD_STOCK;
-      tile.flavor = undefined;
+      // Carries the specific crop through to the ground — the generic
+      // "food" fallback still reads as flavorless (undefined), same as
+      // every offer before distinct crop items existed.
+      tile.flavor = offered === "food" ? undefined : offered;
       tile.offeredBy = agent.id;
       invalidateResourceIndex(world);
       // Lever 2, the gift moment (threat.ts): the instant food goes down,
       // signature collapses for GIFT_GRACE_TICKS — no need to retreat for
       // the offering to actually get taken.
       agent.giftGraceUntil = world.tick + GIFT_GRACE_TICKS;
+      return true;
+    }
+    case "drop": {
+      // Direct report: "can't drop items." A plain discard — frees the
+      // carry weight. No ground-item/pickup system exists yet, so this
+      // does not leave anything retrievable; see TODO.md.
+      if (!removeItem(agent, action.itemKey, 1)) return false;
+      if (countOf(agent, action.itemKey) <= 0) {
+        if (agent.equipment?.held === action.itemKey) {
+          agent.equipment.held = undefined;
+          syncPlayerMoves(world, agent);
+        }
+        if (agent.equipment?.worn === action.itemKey) agent.equipment.worn = undefined;
+      }
       return true;
     }
   }
@@ -252,6 +283,23 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
  * it. This lasts ~90.
  */
 const OFFERED_FOOD_STOCK = CONSUME_STOCK_AMOUNT * 2;
+
+/**
+ * Which carried food material `eat`/`offer` should act on. An explicit
+ * `itemKey` (the pack menu's per-row button, naming exactly which stack was
+ * tapped) is honored only if it's a real food material the agent actually
+ * carries — never falls back silently to a different one just because the
+ * named one turned out to be empty or bogus, which would be the same
+ * "wrong item consumed" bug this exists to prevent. Omitted `itemKey` (the
+ * 'e' key/HUD button, with no specific row to name) keeps the original
+ * "first one found" pick, in `FOOD_MATERIAL_IDS` order.
+ */
+function resolveFoodItem(agent: Agent, itemKey: string | undefined): MaterialId | undefined {
+  if (itemKey !== undefined) {
+    return (FOOD_MATERIAL_IDS as readonly string[]).includes(itemKey) && countOf(agent, itemKey) > 0 ? (itemKey as MaterialId) : undefined;
+  }
+  return FOOD_MATERIAL_IDS.find((id) => countOf(agent, id) > 0);
+}
 
 /** A walkable, empty floor tile among the eight around the player — the offering goes down beside you, not under you. */
 function freeTileBeside(world: World, agent: Agent): { x: number; y: number } | undefined {

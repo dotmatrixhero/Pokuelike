@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -559,7 +559,7 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       return ok ? "You crouch. You move slowly and read as less of a threat." : "You stand up.";
     case "offer":
       if (ok) return "You set a berry down beside you.";
-      return countOf(player, "food") > 0 ? "No free ground beside you." : "You have no berries. Gather some from a patch.";
+      return FOOD_MATERIAL_IDS.some((id) => countOf(player, id) > 0) ? "No free ground beside you." : "You have no food. Gather some from a patch.";
     case "attack": {
       if (!ok) return "Nothing there to hit.";
       if (outcome.attackedId) {
@@ -576,6 +576,8 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
       return ok ? `You signal ${name}.` : `${name} won't take that order.`;
     }
+    case "drop":
+      return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
   }
 }
 
@@ -663,21 +665,36 @@ function openPackMenu(): void {
   };
   packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(me)}`));
   if (!me.inventory?.length) packMenuBodyEl.appendChild(rowEl("Nothing yet. Stand on lichen or deadwood and gather."));
+  // Direct report: "can't drop items." Every row gets a real Drop action
+  // now, alongside whatever else it does — the same actions-row pattern
+  // "food" already used for Eat/Offer, extended to every item instead of
+  // one row keeping the single-whole-row-tap shape and the rest not.
   for (const item of me.inventory ?? []) {
     const def = world.items?.[item.itemKey];
     const held = me.equipment?.held === item.itemKey;
     const worn = me.equipment?.worn === item.itemKey;
-    const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}`;
-    if (item.itemKey === "food") {
-      packMenuBodyEl.appendChild(
-        actionsRowEl(label, [
-          { label: "Eat", onTap: () => playerAct({ kind: "eat" }) },
-          { label: "Offer", onTap: () => playerAct({ kind: "offer" }) },
-        ])
-      );
-    } else if (def?.slot === "held") packMenuBodyEl.appendChild(rowEl(label, held ? "in hand · tap to put away" : "tap to hold", () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey })));
-    else if (def?.slot === "worn") packMenuBodyEl.appendChild(rowEl(label, worn ? "worn" : "tap to wear", worn ? undefined : () => playerAct({ kind: "equip", itemKey: item.itemKey })));
-    else packMenuBodyEl.appendChild(rowEl(label));
+    const state = held ? " (in hand)" : worn ? " (worn)" : "";
+    const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}${state}`;
+    const actions: { label: string; onTap: () => void }[] = [];
+    // Direct report: "we need distinct crop... add to inventory as its own
+    // thing" — gathering now hands back the specific crop (Potato, Apple,
+    // ...), not just the old generic "food" — `FOOD_MATERIAL_IDS` (not a
+    // bare `itemKey === "food"` check) is what still recognizes any of
+    // them as "a berry in the pack" for Eat/Offer.
+    if ((FOOD_MATERIAL_IDS as readonly string[]).includes(item.itemKey)) {
+      // Names the specific stack this row is for — with more than one kind
+      // of food in the pack now (distinct crop items), a bare `{kind:
+      // "eat"}` would silently eat whichever material happens to sort
+      // first, not necessarily the one this row's button was tapped on.
+      actions.push({ label: "Eat", onTap: () => playerAct({ kind: "eat", itemKey: item.itemKey }) });
+      actions.push({ label: "Offer", onTap: () => playerAct({ kind: "offer", itemKey: item.itemKey }) });
+    } else if (def?.slot === "held") {
+      actions.push({ label: held ? "Put away" : "Hold", onTap: () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey }) });
+    } else if (def?.slot === "worn" && !worn) {
+      actions.push({ label: "Wear", onTap: () => playerAct({ kind: "equip", itemKey: item.itemKey }) });
+    }
+    actions.push({ label: "Drop", onTap: () => playerAct({ kind: "drop", itemKey: item.itemKey }) });
+    packMenuBodyEl.appendChild(actionsRowEl(label, actions));
   }
   packMenuBodyEl.appendChild(h("Make"));
   const known = (me.knownRecipes ?? []).map((id) => world.recipes?.[id]).filter((r): r is NonNullable<typeof r> => !!r);
@@ -702,12 +719,17 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
- * Direct ask: "under the attack option a sub menu show up to select your
+ * Direct asks: "under the attack option a sub menu show up to select your
  * bonded pokemon if its within the same zone as you, and you can select a
  * move and target a space with it - it then uses its own pathfinding to get
- * to the right position and use it." Only ever opened when at least one
- * bonded follower is in zone (see the attack key/button handlers below) —
- * with none, Attack stays the plain instant self-swing it always was.
+ * to the right position and use it" and the follow-up, "Attack should move
+ * list should work when you have a weapon, or tackle if you don't. The
+ * player has moves too, even if it's just tackle." Attack always opens
+ * this now: a "You" section lists the player's own real moves
+ * (bare-handed Tackle, plus whatever a held item grants — `Agent.moves`,
+ * kept in sync by `syncPlayerMoves`), each firing the ordinary directional
+ * swing (`lastFacing`) with that specific move; a bonded-follower section
+ * per partner in zone, same as before, for the tile-targeted command.
  */
 function openCommandMenu(): void {
   const me = findPlayer(world);
@@ -734,12 +756,19 @@ function openCommandMenu(): void {
     el.textContent = text;
     return el;
   };
-  commandMenuBodyEl.appendChild(
-    row("You", "swing at whatever's in the direction you last moved", () => {
-      closeCommandMenu();
-      playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
-    })
-  );
+  commandMenuBodyEl.appendChild(heading("You"));
+  const myMoves = me.moves ?? [];
+  if (myMoves.length === 0) commandMenuBodyEl.appendChild(row("No moves.", undefined, () => {}));
+  for (const move of myMoves) {
+    const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
+    commandMenuBodyEl.appendChild(
+      row(move.name, onCooldown ? "on cooldown" : "tap to swing in the direction you last moved", () => {
+        if (onCooldown) return;
+        closeCommandMenu();
+        playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId: move.id });
+      })
+    );
+  }
   for (const partner of bondedPartnersInZone(me)) {
     const name = SPECIES[partner.species]?.name ?? partner.species;
     commandMenuBodyEl.appendChild(heading(name));
@@ -834,26 +863,22 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
 };
 
 /**
- * Direct ask: "under the attack option a sub menu show up to select your
- * bonded pokemon." With no bonded follower in zone, Attack is unchanged —
- * the plain instant swing 'f'/the HUD button always did. With one or more
- * present, it opens the chooser instead (which itself still offers "You" for
- * the plain swing). Pressing Attack again while already targeting cancels
- * the order rather than reopening the menu — the one mobile-friendly way to
- * back out besides Escape.
+ * Direct asks: "under the attack option a sub menu show up to select your
+ * bonded pokemon" and the follow-up, "Attack should move list should work
+ * when you have a weapon, or tackle if you don't. The player has moves
+ * too, even if it's just tackle." Attack always opens the chooser now — a
+ * "You" section for the player's own real moves, plus a section per
+ * bonded follower in zone. Pressing Attack again while already targeting
+ * cancels the order rather than reopening the menu — the one mobile-
+ * friendly way to back out besides Escape.
  */
 function attemptAttack(): void {
   if (targeting) {
     cancelTargeting();
     return;
   }
-  const me = findPlayer(world);
-  if (!me) return;
-  if (bondedPartnersInZone(me).length > 0) {
-    openCommandMenu();
-    return;
-  }
-  playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+  if (!findPlayer(world)) return;
+  openCommandMenu();
 }
 
 window.addEventListener("keydown", (e) => {

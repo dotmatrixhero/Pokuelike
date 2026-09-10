@@ -8842,3 +8842,75 @@ Not yet built: the disperser-door decision above is still open, and
 Rescue/Fight-alongside against real M7-layer predators are unexercised
 by this feature (layer 1 has none) — this only proves the mechanism
 against layer-1 wildlife.
+
+## Playtest report and fixes: drop, distinct crop items, attack's own move list
+
+Direct report, a rapid-fire list: *"need tier 1 crafting. Can't craft. can't
+drop items or use or equip them? can't gather crop or potato. can't rescue.
+attacking does not bring up move list. It just says nothing to attack."*
+
+Live-tested all five on real master (`?player=cave`, real key presses, real
+UI — not code-reading): craft, gather, and equip/stow all worked cleanly
+(gathered lichen → pack menu → Fiber → "You make fiber."; 'g' → "You gather
+lichen."; equip/stow both round-tripped `Agent.moves`). Rescue is a real,
+confirmed gap — ROADMAP.md's own M6 Build list explicitly defers Fight-
+alongside/Rescue to M7 ("need danger; layer 1 has none"), not a bug. Drop
+was a real, confirmed gap — grepped the whole `PlayerAction` union, no
+`"drop"` case existed anywhere. The attack move-list mismatch turned out to
+be the real, load-bearing finding underneath the report: *"Attack should
+move list should work when you have a weapon, or tackle if you don't. The
+player has moves too, even if it's just tackle."* — the just-shipped
+command-partner menu (previous section) only opened when a bonded follower
+was in zone, which is rare in real, unassisted play (TODO.md's own bond
+numbers); with none, Attack silently fell back to the old instant auto-pick
+swing, which reads as "no move list at all" exactly as reported. And the
+"can't gather crop/potato" report, followed up with *"We need distinct
+crop. Need to add to inventory as it's own thing,"* pointed at a real design
+gap: `harvestableAt` collapsed every crop flavor but herbs into one generic
+`"food"` material (Berries) — potato, apple, wheat, all 15 real crops in
+`crops.ts`'s own registry, indistinguishable in the pack.
+
+**Built, all three:**
+- **Drop** (`types.ts`'s new `{kind: "drop"; itemKey}`, `player.ts`'s new
+  case): discards one of a carried item, freeing its weight; clears the
+  held/worn slot (and resyncs moves) if it was the last one. Discard-only —
+  no ground-item/pickup system exists yet, so nothing is left retrievable;
+  flagged as a real, separate, bigger feature if wanted later, not silently
+  built in.
+- **Distinct crop items** (`harvest.ts`): `MaterialId` now includes every
+  real `CropId` (crops.ts's own 15-crop registry, herbs among them);
+  `MATERIALS`' names are sourced straight from `FOOD_CROPS[...].name` (one
+  source of truth, no duplicated string table); `harvestableAt` hands back
+  the tile's real flavor instead of collapsing it. New `FOOD_MATERIAL_IDS`/
+  `foodNutritionMultiplierOf` exports so `eat`/`offer` recognize ANY food
+  material as "a berry in the pack," not just the literal string `"food"`
+  — `offer`'s placed tile now carries the specific crop's flavor through to
+  the ground too (a Potato offered leaves a `flavor: "potato"` tile, not a
+  blank one).
+- **Attack's own move list** (`types.ts`'s `attack` case gained an optional
+  `moveId`, `player.ts`'s case validates and passes it through to
+  `resolveHit`'s `explicitMove`/the terrain branch): Attack now always
+  opens the chooser (`openCommandMenu`, previous section) — a "You" section
+  listing the player's own real `Agent.moves` (bare-handed Tackle, plus
+  whatever a held item grants), each move tapping straight into the
+  existing directional swing with that specific move, alongside the
+  bonded-partner section when one's in zone.
+
+**A real bug found and fixed along the way, live-testing the fix itself**:
+tapping a specific item's Eat/Offer button in the pack menu was silently
+acting on a DIFFERENT carried food than the one tapped — `eat`/`offer` had
+no way to say *which* food material to consume, just "the first one found"
+in a fixed priority order. With only one possible food item ("food") this
+was invisible; the moment two distinct crops sit in the same pack (this
+session's own new feature), tapping "Potato → Eat" silently ate an Apple
+instead. Caught live (Playwright: gave the player Potato + Apple, tapped
+Potato's Eat button, watched the Apple disappear instead), not from reading
+the diff. Fixed: `eat`/`offer` both gained an optional `itemKey`; the pack
+menu's row buttons now pass their own item's key explicitly; the 'e' key/
+HUD button (no specific row to name) keeps the old first-found behavior.
+Re-verified live after the fix: tapping Potato's own Eat button now eats
+the Potato.
+
+21 new unit tests (`test/inventoryActions.test.ts`, `test/playerCombat.test.ts`
+additions) plus the live Playwright/engine verification above. Full suite:
+engine 1474/1474, data 387/387.

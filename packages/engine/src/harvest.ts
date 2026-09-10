@@ -1,6 +1,7 @@
 import type { Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { LAYER_ORDER } from "./types.js";
+import { CROP_IDS, FOOD_CROPS, type CropId } from "./crops.js";
 
 /**
  * What a tile yields to a gatherer — ROADMAP.md M5, HANDOFF.md §3.3.
@@ -15,17 +16,50 @@ import { LAYER_ORDER } from "./types.js";
  * verb/move." The materials table (weights, names) lives here too because
  * the engine is what puts them in a pack; the data package's crafting
  * tables reference these ids.
+ *
+ * Direct report: "We need distinct crop. Need to add to inventory as it's
+ * own thing" — a gathered food tile used to always yield the single generic
+ * `"food"` material (Berries) regardless of what actually grew there;
+ * `crops.ts`'s real per-tile `flavor` (Potato, Apple, Wheat, ...) was
+ * thrown away at the gather step. `MaterialId` now includes every real
+ * `CropId` (crops.ts's own registry — "herbs" among them, already special-
+ * cased below before this), so `harvestableAt` can hand back the tile's
+ * actual crop instead of collapsing it. `"food"` itself stays only as a
+ * defensive fallback for the rare tile that somehow has no flavor set.
  */
 
-export type MaterialId = "lichen" | "deadwood" | "flint" | "herbs" | "food";
+export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | CropId;
+
+const CROP_MATERIALS = Object.fromEntries(CROP_IDS.map((id) => [id, { name: FOOD_CROPS[id].name, weight: 1 }])) as Record<CropId, { name: string; weight: number }>;
 
 export const MATERIALS: Record<MaterialId, { name: string; weight: number }> = {
   lichen: { name: "Lichen", weight: 1 },
   deadwood: { name: "Deadwood", weight: 2 },
   flint: { name: "Flint", weight: 1 },
-  herbs: { name: "Herbs", weight: 1 },
   food: { name: "Berries", weight: 1 },
+  ...CROP_MATERIALS,
 };
+
+/**
+ * Every material a gathered/offered food tile can actually be — the plain
+ * `"food"` fallback plus every real crop (`crops.ts`'s `CROP_IDS`, herbs
+ * included). What `player.ts`'s `eat`/`offer` treat as "a berry in the
+ * pack" now that gathering hands back a specific crop instead of always
+ * generic Berries — checking a bare `itemKey === "food"` would silently
+ * stop recognizing anything else in the pack as edible.
+ */
+export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", ...CROP_IDS];
+
+/**
+ * The nutrition multiplier for a carried food item with no tile to read
+ * quality from (flora.ts's own `foodNutritionFactor` needs a real `Tile`
+ * for that) — just the crop's own `FOOD_CROPS[...].nutritionMultiplier`,
+ * or the neutral 1x every eat-from-pack used before crops had distinct
+ * items at all.
+ */
+export function foodNutritionMultiplierOf(material: MaterialId): number {
+  return material in FOOD_CROPS ? FOOD_CROPS[material as CropId].nutritionMultiplier : 1;
+}
 
 /** Takes before a tile is bare. Sim-original; CRAFTABLES_V1.md's open question 4 is spoilage, not this. */
 export const HARVEST_YIELD_PER_TILE = 3;
@@ -52,7 +86,7 @@ export function harvestableAt(world: World, layer: Layer, pos: Vec2): MaterialId
   const tile = tileAt(world, layer, pos.x, pos.y);
   if (!tile) return [];
   const out: MaterialId[] = [];
-  if (tile.terrain === "food" && (tile.stock ?? 0) > 0) out.push(tile.flavor === "herbs" ? "herbs" : "food");
+  if (tile.terrain === "food" && (tile.stock ?? 0) > 0) out.push(tile.flavor && tile.flavor in FOOD_CROPS ? (tile.flavor as CropId) : "food");
   // Ground you can pick things off: bare floor, and floor with plants on
   // it. The chamber's flora spreads over the floor near water, and a bot
   // that walked to a "floor" tile found "flora" there by the time it

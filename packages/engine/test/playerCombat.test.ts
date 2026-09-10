@@ -234,3 +234,55 @@ describe("MOVES_AND_TOOLS.md: attack — terrain effect when nothing living is t
     expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0 })).toBe(false);
   });
 });
+
+describe("Direct ask: \"Attack should move list should work when you have a weapon, or tackle if you don't. The player has moves too, even if it's just tackle.\" — explicit moveId", () => {
+  it("an explicit moveId is used instead of pickBestMove's own choice", () => {
+    const { world, me } = worldWithPlayer();
+    me.inventory = [{ itemKey: "knife", weight: 2, count: 1 }];
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "knife" });
+    const target = prey("rat", 6, 5);
+    world.agents.push(target);
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_tackle" })).toBe(true);
+    // Explicitly chose bare-handed Tackle — its cooldown fired, not Scratch's.
+    expect(me.moveCooldowns?.test_tackle).toBeGreaterThan(0);
+    expect(me.moveCooldowns?.test_scratch).toBeUndefined();
+  });
+
+  it("an explicit moveId not in the player's current loadout fails", () => {
+    const { world, me } = worldWithPlayer();
+    const target = prey("rat", 6, 5);
+    world.agents.push(target);
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_scratch" })).toBe(false);
+    expect(target.hp).toBe(25);
+  });
+
+  it("an explicit moveId already on cooldown fails, even though a different known move is off cooldown", () => {
+    const { world, me } = worldWithPlayer();
+    me.inventory = [{ itemKey: "knife", weight: 2, count: 1 }];
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "knife" });
+    const target = prey("rat", 6, 5, { stats: { hp: 999, attack: 25, defense: 25, spAttack: 25, spDefense: 25, speed: 30 }, hp: 999, maxHp: 999 });
+    world.agents.push(target);
+    applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_tackle" });
+    // Tackle is on cooldown now; asking for it again explicitly must fail
+    // even though Scratch (a different known move) is still available.
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_tackle" })).toBe(false);
+    expect(me.moveCooldowns?.test_scratch).toBeUndefined();
+  });
+
+  it("an explicit moveId drives the terrain-effect branch too, same as auto-pick", () => {
+    const { world, me } = worldWithPlayer();
+    me.inventory = [{ itemKey: "axe", weight: 4, count: 1 }];
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "axe" });
+    setTile(world, "surface", 6, 5, "tree");
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_fell" })).toBe(true);
+    expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("floor");
+    expect(me.inventory?.find((i) => i.itemKey === "deadwood")?.count).toBe(1);
+  });
+
+  it("explicitly naming a move the loadout can't use against this tile fails — bare-handed Tackle can't fell a tree", () => {
+    const { world, me } = worldWithPlayer();
+    setTile(world, "surface", 6, 5, "tree");
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_tackle" })).toBe(false);
+    expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("tree");
+  });
+});
