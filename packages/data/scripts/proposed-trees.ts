@@ -1,4 +1,22 @@
 /**
+ * HISTORICAL. All five trees below have SHIPPED — they are live in
+ * `packages/data/src/moves.ts` and the game reads those, not these. This
+ * file is kept as the draft of record (and as the checker's `--selftest`
+ * fixture host); it is NOT the source of truth for any of them any more,
+ * and it deliberately still shows the drafts' original failures so the
+ * before/after stays legible.
+ *
+ * What changed on the way in is written up in MOVES_DESIGN.md's "Round six
+ * shipped" section. The short version: roughly a third of these nodes used
+ * proposed engine fields (`hitsBonus`, `rangeBonus`, `rallyCallTicks`,
+ * `areaBonus`, `allyEffects`, `situationalBonuses`, `reposition`, `ppCost`/
+ * `maxPPBonus`) or `PassiveKind`s (`bulk`, `unnoticed`, `huntTargetSkip`,
+ * `terrainUnhindered`, `dispersalSpeed`, `cooldownHaste`, `herdHaste`,
+ * `thornsRubble`) that do not exist, and Harden/Growth/Agility are
+ * `utilityMove`s, which never reach the hostile hit pipeline at all.
+ *
+ * ---
+ *
  * PROPOSED move trees — drafts for review in the Move Tree Atlas's
  * "proposed" mode. Nothing here is wired into `MOVES`; the game does not
  * read it. Direct ask: "Add a proposed mode. I just want to see your trees

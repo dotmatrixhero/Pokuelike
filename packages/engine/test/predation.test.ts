@@ -63,6 +63,19 @@ const SAFE_RNG = mulberry32(20260904);
 // is now power-based (see predation.ts's isPreyOf/PREY_POWER_RATIO), so prey/
 // predator/guardian need a real, deliberate power gap between them or nothing
 // would ever qualify as prey of anything.
+/**
+ * `accuracy: -1` (the can't-miss convention) so the many tests below that
+ * are about SOMETHING ELSE — reach, obstacles, fainting, wind-ups, crit
+ * cooldown resets — do not silently depend on the accuracy roll.
+ *
+ * They used to, at 100 accuracy, and nine of them broke at once when
+ * `situationalAccuracyPenalty` landed. Not because any of them were wrong:
+ * every world here starts at tick 0, which is MIDNIGHT, and most of them
+ * feature prey that is actively fleeing — so the fixtures were fighting in
+ * the dark at a running target and taking the full -20 for it. The tests
+ * that are genuinely about accuracy declare their own move (see
+ * PARTIAL_ACC_MOVE) or set the clock.
+ */
 const TEST_MOVE: MoveSpec = {
   id: "test-move",
   name: "Test Move",
@@ -70,9 +83,16 @@ const TEST_MOVE: MoveSpec = {
   type: "normal",
   category: "physical",
   power: 40,
-  accuracy: 100,
+  accuracy: -1,
   cooldownTicks: 0,
 };
+
+/**
+ * The counterpart to TEST_MOVE for the handful of tests that are genuinely
+ * ABOUT the accuracy roll — 100 accuracy, so a multiplier or a flat penalty
+ * has something to bite.
+ */
+const ACC_TEST_MOVE: MoveSpec = { ...TEST_MOVE, id: "acc-test-move", accuracy: 100 };
 
 const RANGED_MOVE: MoveSpec = {
   id: "ranged-move",
@@ -81,7 +101,9 @@ const RANGED_MOVE: MoveSpec = {
   type: "normal",
   category: "physical",
   power: 40,
-  accuracy: 100,
+  // Reach is what this move exists to test; see TEST_MOVE on why it must not
+  // also be rolling accuracy.
+  accuracy: -1,
   cooldownTicks: 0,
 };
 
@@ -338,8 +360,9 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const fixedRng = () => 0.7;
 
     const clearWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    clearWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     clearWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -347,15 +370,16 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const clearLog = new EventLog();
     tickWorld(clearWorld, clearLog, RULES, undefined, fixedRng);
     expect(clearLog.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
 
     const stormWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    stormWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     stormWorld.weatherCells = [
       { id: "s", type: "storm", center: { x: 5, y: 5 }, radius: 5, startedTick: 0, lifespanTicks: 999, drift: { x: 0, y: 0 } },
     ];
     stormWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -364,7 +388,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     tickWorld(stormWorld, stormLog, RULES, undefined, fixedRng);
     expect(stormLog.events).not.toContainEqual(expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" }));
     expect(stormLog.events).toContainEqual(
-      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
   });
 
@@ -389,9 +413,10 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const fixedRng = () => 0.92;
 
     const levelWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    levelWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     for (const [x, y] of [[5, 5], [5, 6]]) setElevation(levelWorld, "surface", x!, y!, 100);
     levelWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -399,17 +424,18 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
     const levelLog = new EventLog();
     tickWorld(levelWorld, levelLog, RULES, undefined, fixedRng);
     expect(levelLog.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
 
     // Same fight, same seed, same roll — only the gap changes. The attacker
     // (bulbasaur-0, at 5,5) stays at 100; the defender it swings at (the
     // predator at 5,6) stands at 102.
     const upSlopeWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    upSlopeWorld.tick = NOON; // isolate weather/elevation from the night accuracy penalty
     setElevation(upSlopeWorld, "surface", 5, 5, 100);
     setElevation(upSlopeWorld, "surface", 5, 6, 102);
     upSlopeWorld.agents.push(
-      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" }),
+      prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a", moves: [ACC_TEST_MOVE] }),
       prey({ x: 4, y: 5 }, { id: "bulbasaur-1", herdId: "herd-a" }),
       prey({ x: 6, y: 5 }, { id: "bulbasaur-2", herdId: "herd-a" }),
       predator({ x: 5, y: 6 })
@@ -420,7 +446,7 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
       expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" })
     );
     expect(upSlopeLog.events).toContainEqual(
-      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: TEST_MOVE.id, pos: { x: 5, y: 6 } })
+      expect.objectContaining({ kind: "missed", attackerId: "bulbasaur-0", moveId: ACC_TEST_MOVE.id, pos: { x: 5, y: 6 } })
     );
   });
 });
@@ -1263,7 +1289,12 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
 
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
-    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 } };
+    // `accuracy: -1` (the can't-miss convention) so this isolates the HIT
+    // COUNT, which is what it exists to check. Accuracy is rolled PER HIT
+    // now, so a partial-accuracy flurry lands a variable number of times by
+    // design — testing count and accuracy through one assertion would make
+    // this flake on any future accuracy change.
+    const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 }, accuracy: -1 };
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100 }); // survives all 3 FALLBACK_DAMAGE (1 each) hits
     const hunter = predator({ x: 6, y: 5 }, undefined, { maxHp: 200, moves: [FLURRY_MOVE] }); // maxHp raised so a maxHp:100 target still qualifies as prey (see isPreyOf/PREY_POWER_RATIO)
@@ -1365,7 +1396,11 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
 
     tickWorld(world, undefined, RULES);
 
-    expect(hunter.statStages).toEqual([{ stat: "attack", stage: 1, ticksRemaining: undefined }]);
+    // `sourceMoveId` is asserted, not ignored: it is what makes re-using this
+    // same move refresh the entry rather than stack a second stage.
+    expect(hunter.statStages).toEqual([
+      { stat: "attack", stage: 1, ticksRemaining: undefined, sourceMoveId: "self-buff-move" },
+    ]);
   });
 
   it("a defender-side stat change applies only on a landed, non-killing hit", () => {
@@ -1385,7 +1420,9 @@ describe("statChangeOnHit wired into real combat (resolveHit)", () => {
     // own action tick, then the target's own tickAgentNeeds (later in the
     // same tickWorld iteration) immediately counts it down by 1 — real,
     // same-tick behavior, not a bug.
-    expect(target.statStages).toEqual([{ stat: "defense", stage: -1, ticksRemaining: 9 }]);
+    expect(target.statStages).toEqual([
+      { stat: "defense", stage: -1, ticksRemaining: 9, sourceMoveId: "debuff-move" },
+    ]);
   });
 
   it("no defender-side stat change on a killing/finishing hit", () => {
@@ -2314,7 +2351,17 @@ describe("pack hunting", () => {
   it("the real mechanical advantage: a pack accuracy bonus turns a would-be miss into a hit", () => {
     // A partial-accuracy move so the roll actually matters — TEST_MOVE's
     // 100 accuracy never misses regardless of any multiplier.
-    const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 60 };
+    //
+    // 65, not 60: distance now costs 5 accuracy per tile and these fixtures
+    // are adjacent, so 65 is what arrives at the roll as the 60 the
+    // arithmetic below reasons about. The test's claim and its margins are
+    // unchanged — only the input needed restating once the melee cost
+    // existed.
+    // 65, and the worlds below run at NOON: the roll this test reasons about
+    // is 60, and the fixtures are adjacent with the predator mid-approach, so
+    // 5 goes to the sprint penalty. Daylight keeps the night term out of it —
+    // this test is about the PACK bonus, not about the dark.
+    const PARTIAL_ACC_MOVE: MoveSpec = { ...TEST_MOVE, id: "partial-acc-move", accuracy: 65 };
     // 65 < 60 fails a solo roll; 65 < 60 * (1 + PACK_ACCURACY_BONUS_PER_ALLY) = 69 succeeds with exactly 1 committed packmate.
     const fixedRng = () => 0.65;
     // A solo-eligible target (well within PREY_POWER_RATIO) isolates the
@@ -2323,6 +2370,7 @@ describe("pack hunting", () => {
     const target = prey({ x: 5, y: 5 });
 
     const soloWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    soloWorld.tick = NOON;
     const soloHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     soloWorld.agents.push(soloHunter, target);
     const soloLog = new EventLog();
@@ -2330,6 +2378,7 @@ describe("pack hunting", () => {
     expect(soloLog.events).toContainEqual(expect.objectContaining({ kind: "missed", attackerId: "scyther-0" }));
 
     const packWorld = createWorld(10, 10, AB_COMPARISON_SEED);
+    packWorld.tick = NOON;
     const packTarget = prey({ x: 5, y: 5 });
     const packHunter = predator({ x: 6, y: 5 }, 0.1, { moves: [PARTIAL_ACC_MOVE] });
     // Already committed to the same target — the real, positioning-driven
@@ -2664,6 +2713,33 @@ describe("burrow (MoveSpec.burrow, Dig-to-escape)", () => {
 
     expect(log.events.some((e) => e.kind === "fought")).toBe(false);
     expect(attacker.burrowedTicksRemaining).toBeUndefined(); // never self-triggered either
+  });
+
+  it("lockTicks on a burrow move really applies on the flee path — the escape can cost real turns", () => {
+    // Dig's v4 tree spends `lockTicks` as a deliberate commitment cost on its
+    // Aggression "long dive" lane, which only means anything because the
+    // burrow-flee branch goes through `useMove` (combat.ts) like every other
+    // move use. Written down as a regression guard because the tree's own
+    // source comment previously claimed cooldown and passives were the only
+    // levers this move could ever reach.
+    const LOCKING_BURROW: MoveSpec = { ...BURROW_MOVE, id: "locking-burrow", lockTicks: 3 };
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = prey({ x: 5, y: 5 }, { moves: [LOCKING_BURROW] });
+    world.agents.push(target, predator({ x: 6, y: 5 }));
+    tickWorld(world, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(target.burrowedTicksRemaining).toBe(20);
+    expect(target.actionLockTicks).toBe(3);
+
+    // Control: the same layout with the plain burrow move locks nothing, so
+    // the assertion above is reading `lockTicks` and not some other lock.
+    const control = createWorld(10, 10, AB_COMPARISON_SEED);
+    const unlocked = prey({ x: 5, y: 5 }, { moves: [BURROW_MOVE] });
+    control.agents.push(unlocked, predator({ x: 6, y: 5 }));
+    tickWorld(control, undefined, RULES, undefined, SAFE_RNG);
+
+    expect(unlocked.burrowedTicksRemaining).toBe(20);
+    expect(unlocked.actionLockTicks ?? 0).toBe(0);
   });
 });
 

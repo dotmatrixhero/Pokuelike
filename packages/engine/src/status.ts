@@ -223,13 +223,52 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
 /**
  * Adds one stat-stage entry — a permanent one (no `ticksRemaining`, e.g.
  * Growl's designed Attack-lowering AoE) or a temporary one (counted down and
- * removed by `tickStatStages`, e.g. Bubble Shield's self-buff-on-hit). Never
- * merges with an existing entry on the same `stat` — multiple entries stack
- * additively, read back by `getStatStage`.
+ * removed by `tickStatStages`, e.g. Bubble Shield's self-buff-on-hit).
+ *
+ * ONE ENTRY PER (stat, sourceMoveId). Using the same move again does not
+ * stack a second copy — it overwrites the stage and refreshes the timer.
+ * Direct: "if something gives you +1 stage of attack, using it again should
+ * not give you another stage, merely refresh timer. However a DIFFERENT move
+ * could give you another stage."
+ *
+ * This is a real cap, not bookkeeping. `applyStatStage` used to push
+ * unconditionally, so a self-buffing move used N times was +N stages
+ * forever — and `maybeUseUtilityMoveInCombat`'s own two-stage ceiling was
+ * the ONLY thing standing between a status move and unbounded stacking, on
+ * one of the two paths that call this. Spamming was strictly better than
+ * building.
+ *
+ * What still stacks, on purpose:
+ *   - Different moves. Harden and Withdraw both buying Defense is a real
+ *     build, and each keeps its own entry.
+ *   - Different nodes of the SAME move within ONE use, because the caller
+ *     sums them before calling here — "+1 stage from one node, and +2 stage
+ *     from another, you COULD get to +3 stage with one use, but NOT +6 if
+ *     you use the move twice."
+ *
+ * `sourceMoveId` absent means "no move behind this" and never merges — a
+ * designed permanent effect or a bare-engine test keeps the old behaviour.
  */
-export function applyStatStage(agent: Agent, stat: StatKey, stage: number, ticksRemaining?: number): void {
+export function applyStatStage(
+  agent: Agent,
+  stat: StatKey,
+  stage: number,
+  ticksRemaining?: number,
+  sourceMoveId?: string
+): void {
   agent.statStages = agent.statStages ?? [];
-  agent.statStages.push({ stat, stage, ticksRemaining });
+  if (sourceMoveId !== undefined) {
+    const existing = agent.statStages.find((s) => s.stat === stat && s.sourceMoveId === sourceMoveId);
+    if (existing) {
+      // Overwrite rather than max(): a build that has since been re-specced
+      // into a WEAKER version of the same node should read as weaker, and a
+      // debuff (negative stage) refreshing has to move the same direction.
+      existing.stage = stage;
+      existing.ticksRemaining = ticksRemaining;
+      return;
+    }
+  }
+  agent.statStages.push({ stat, stage, ticksRemaining, sourceMoveId });
 }
 
 /** Sum of every stacked entry's `stage` for `stat` — what `calculateDamage`/`actionSpeedOf` feed into `statStageMultiplier`. 0 if none. */

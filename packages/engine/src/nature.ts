@@ -6,7 +6,21 @@
  */
 
 /** The five non-HP stats a nature can raise/lower — HP is never affected, matching mainline. */
-export type StatKey = "attack" | "defense" | "spAttack" | "spDefense" | "speed";
+/**
+ * The five battle stats a nature can raise or lower, plus the two
+ * accuracy-side stages.
+ *
+ * `accuracy` and `evasion` are deliberately NOT in `Stats` — there is no base
+ * accuracy or base evasion, only a stage that shifts the hit roll — but they
+ * are real `StatKey`s so a tree node can grant them through the same
+ * `statChangeOnHit` plumbing every other stat uses. They resolve through
+ * `accuracyStageMultiplier` (combat.ts), a different, base-3 curve from the
+ * other five, read at the two `rollAccuracy` call sites.
+ *
+ * `randomNature` only ever picks from the five real stats, so no nature can
+ * raise or lower accuracy — see `NATURES`.
+ */
+export type StatKey = "attack" | "defense" | "spAttack" | "spDefense" | "speed" | "accuracy" | "evasion";
 
 export interface NatureEffect {
   /** The stat this nature multiplies by 1.1x. Absent for the 5 neutral natures. */

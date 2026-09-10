@@ -8319,3 +8319,57 @@ Open ruling for the user: is the surviving 1/5 death (a real, traceable
 food-scarcity failure, not RNG noise or a bond-number gap) worth a
 dedicated flora-regrowth pass, or is 4/5 good enough for M6's answer as
 it stands?
+
+## Round six shipped: five bare moves got trees — and two primitives still gate the best nodes
+
+`harden`, `twineedle`, `poison_sting`, `growth`, `agility` are live at 45
+nodes each. Full writeup, numbers and live verification in MOVES_DESIGN.md's
+"Round six SHIPPED" section. Two items are deliberately left open here:
+
+- **Needs-recovery interference from a status** (a hook in `needs.ts`, so a
+  poisoned agent restores hunger/thirst more slowly). This is the only thing
+  between Poison Sting's *Sickened* and its own best design — "the payoff of
+  poisoning something is not that it takes damage, it is that it STARVES",
+  legible in the chronicle rather than in a fight. Verified missing at the
+  call site: `tickStatusEffects` gives poison a flat per-tick HP fraction and
+  nothing else, and no needs-recovery path in `needs.ts` reads `agent.status`
+  at all. `drainNeeds` cannot stand in — `utilityMoves.ts` is its only reader,
+  and flagging Poison Sting `utilityMove` would remove it from combat.
+  *Sickened* shipped as the live half (`statusSeverity` + `jamCooldownTicks`).
+
+- **A fertility CEILING lever.** `raiseFertility` caps at the tile's own
+  `fertilityCeiling` (`GROUND_TYPE_PARAMS`: sandy 0.6, loam 1.0, rocky 0.25),
+  so `fertilityBoost` buys **speed to the ceiling, not a level above it** —
+  measured live, a fully-specced Growth and the base move both read 0.6 on
+  sandy ground once ambient regen has run. Growth's whole Boldness branch is
+  therefore about getting there faster and wider, not richer. Raising the
+  ceiling is the missing lever the draft's `fertilityCeilingBoost` reached
+  for.
+
+Two smaller things worth remembering, both measured:
+
+- **`defenseBoost` had essentially no roster exposure before this** (worst
+  0.5) and `statStageMultiplier` **clamps stat stages at ±6**. A tree that
+  spends freely on it goes from 0.5 to 9.0 with nothing complaining, and
+  everything past ~4 is points spent on nothing once the tree's own
+  `statChangeOnHit` ladder is counted. Trimmed to 4.0/4.5 on Harden/Agility.
+- **Nothing in the checker or `tree-balance.ts` can see a dead lever on a
+  `utilityMove`.** `pickBestMove` excludes them from hostile selection, so
+  ~30 delta fields are unreachable on Harden/Growth/Agility. That rule now
+  lives as a test in `packages/data/test/moveTrees.test.ts`, proven to fail
+  by injecting one. Folding it into `check-proposed-trees.ts` would be the
+  natural next step.
+
+## Side note from the master merge: runner reaches into web's source
+
+`packages/runner/src/rollBuilds.ts` deep-imports `describeMoveTreeNode` and
+`summarizeBuildEffects` from `../../web/src/moveTreeSvg.js`, which broke
+runner's `tsc --noEmit` against its own `rootDir: "src"`. Found on the merge,
+but it predates it — the branch's runner typecheck was never run.
+
+Fixed the cheap way: `rootDir` does nothing under `noEmit: true`, so it's
+gone from `packages/runner/tsconfig.json`. The real fix is to split
+`moveTreeSvg.ts` — lines 1–466 are prose/layout with one DOM helper
+(`svgEl`) embedded in the middle, and only the prose half is what runner
+wants. Extracting the describers into a shared module would let both callers
+import it by package name instead of by relative path. Not done mid-merge.

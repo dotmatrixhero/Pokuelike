@@ -1074,7 +1074,18 @@ export interface Agent {
    * duration is set. Multiple entries on the same `stat` stack additively
    * (clamped downstream by `statStageMultiplier`'s own [-6,+6] clamp).
    */
-  statStages?: Array<{ stat: StatKey; stage: number; ticksRemaining?: number }>;
+  statStages?: Array<{
+    stat: StatKey;
+    stage: number;
+    ticksRemaining?: number;
+    /**
+     * Which move put this entry here, so re-using that same move REFRESHES it
+     * instead of stacking another copy — see `applyStatStage` (status.ts).
+     * Absent for entries with no move behind them (a designed permanent
+     * effect, or a bare-engine test), which never merge with anything.
+     */
+    sourceMoveId?: string;
+  }>;
   /**
    * Granted permanently by a move-tree node's `grantsPassive` (moves.ts) once
    * chosen — see `PassiveKind`'s own doc comment for what each key does and
@@ -1424,6 +1435,39 @@ export interface Agent {
    * that never set it. See daynight.ts/DESIGN.md's Phase 2.
    */
   activityPattern?: ActivityPattern;
+
+  /**
+   * How many of this agent's own ACTION ticks in a row it has moved on,
+   * reset to 0 the moment it acts without moving. Maintained in
+   * simulation.ts, in the same before/after position check
+   * `terrainSpeedFactor` already uses.
+   *
+   * Read by combat.ts's accuracy roll: something running is harder to hit,
+   * and harder the longer it has been running. Direct: "Definitely. I don't
+   * like how easy it is to chase down and kill things."
+   *
+   * Counted in the agent's OWN actions, not world ticks — a slow agent that
+   * moves every action is just as evasive as a fast one, which is the point:
+   * this rewards committing to running, not raw Speed, which already has its
+   * own advantages.
+   */
+  consecutiveMoveActions?: number;
+
+  /**
+   * Actions remaining on a fight-or-flight commitment — see predation.ts's
+   * `applyFightOrFlight`. While this is above 0 the agent sticks with
+   * whichever it chose instead of re-deciding every action.
+   *
+   * The commitment is the point, not the decision: re-rolling every action
+   * produces an agent that flips between running and turning and does
+   * neither, and it defeats `consecutiveMoveActions` by construction, since
+   * that streak resets the moment the agent does anything but move.
+   * Counted in the agent's OWN actions, same clock as everything else here.
+   */
+  fightOrFlightActionsLeft?: number;
+
+  /** Which way the fight-or-flight roll went, held for the length of the commitment. */
+  fightOrFlightChoice?: "fight" | "flee";
 
   // --- Shelter-building (see DESIGN.md's "Shelter-building" section, shelter.ts) ---
 

@@ -434,6 +434,14 @@ export function tickWorld(
     } else {
       tickAgentAction(world, agent, log, rules, ctx, rng, regionDispersal);
     }
+    const movedThisAction = !isDead(agent) && (agent.pos.x !== before.x || agent.pos.y !== before.y || agent.layer !== beforeLayer);
+    // A running streak, in the agent's own actions. Broken by any action
+    // spent not moving — attacking, eating, resting — so standing and
+    // fighting gives up the evasion immediately rather than carrying it.
+    // Counted for the player too: a player who sprints is just as hard to
+    // hit as anything else that does.
+    agent.consecutiveMoveActions = movedThisAction ? (agent.consecutiveMoveActions ?? 0) + 1 : 0;
+
     if (!isDead(agent) && agent.layer === beforeLayer && (agent.pos.x !== before.x || agent.pos.y !== before.y)) {
       const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
       agent.terrainSpeedFactor = movementSpeedFactor(beforeElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
