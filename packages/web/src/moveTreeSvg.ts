@@ -272,21 +272,32 @@ function pct(v: number): string {
 function signed(v: number): string {
   return `${v > 0 ? "+" : ""}${v}`;
 }
-function conditionLabel(c: string): string {
-  const labels: Record<string, string> = {
-    targetLowHp: "at or below half HP",
-    flanking: "caught off guard (flanking)",
-    night: "it's night",
-    elevation: "the user is standing higher up",
-    concealed: "the user is concealed in a bush",
-    coldSnap: "there's a cold snap",
-    storm: "there's a storm",
-    drought: "there's a drought",
-    rain: "it's raining",
-    targetBurning: "burning",
-    targetStatused: "already statused",
+/**
+ * The whole "when ..." clause for one `SituationalCondition`, not just a
+ * fragment. It used to return a fragment that every call site pasted after a
+ * hardcoded "when the target is", which produced real nonsense for the eight
+ * conditions that are about the WORLD or the USER rather than the target —
+ * "×1.4 damage when the target is it's raining", "when the target is the
+ * user is concealed in a bush". Shipped trees (Twineedle's `concealed`
+ * ladder, Sludge's `rain` bridge, every `elevation` node) all read that way.
+ * `rallyMarked` was also missing outright and fell through to its raw key.
+ */
+function situationalClause(c: string): string {
+  const clauses: Record<string, string> = {
+    targetLowHp: "when the target is at or below half HP",
+    flanking: "when the target is caught off guard (flanking)",
+    night: "at night",
+    elevation: "when the user is standing higher up than the target",
+    concealed: "when the user is concealed in a bush",
+    coldSnap: "during a cold snap",
+    storm: "in a storm",
+    drought: "in a drought",
+    rain: "in the rain",
+    targetBurning: "when the target is burning",
+    targetStatused: "when the target already carries a status",
+    rallyMarked: "when the target is marked as the herd's priority",
   };
-  return labels[c] ?? c;
+  return clauses[c] ?? `when ${c}`;
 }
 function shapeLabel(shape: { kind: string; length?: number; width?: number; radius?: number }): string {
   if (shape.kind === "point") return "a point-blank hit";
@@ -315,9 +326,9 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("hits")) lines.push(`Strikes ${delta.hits.min === delta.hits.max ? `${delta.hits.min} times` : `${delta.hits.min}–${delta.hits.max} times`} per use.`);
   if (has("hitsBonus")) lines.push(`${signed(delta.hitsBonus)} strike${Math.abs(delta.hitsBonus) === 1 ? "" : "s"} per use, on top of however many it already makes.`);
   if (has("lockTicks")) lines.push(`Locks the user out of acting ${signed(delta.lockTicks)} extra tick${Math.abs(delta.lockTicks) === 1 ? "" : "s"} after use.`);
-  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage when the target is ${conditionLabel(delta.situationalBonus.condition)}.`);
+  if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage ${situationalClause(delta.situationalBonus.condition)}.`);
   for (const sb of (delta.situationalBonuses ?? []) as any[]) {
-    lines.push(`×${sb.multiplier} damage when the target is ${conditionLabel(sb.condition)} — stacks with this move's other conditions.`);
+    lines.push(`×${sb.multiplier} damage ${situationalClause(sb.condition)} — stacks with this move's other conditions.`);
   }
   if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
   for (const sc of [...(delta.statChangeOnHit ? [delta.statChangeOnHit] : []), ...((delta.statChangesOnHit ?? []) as any[])]) {

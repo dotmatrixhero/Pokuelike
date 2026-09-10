@@ -7990,6 +7990,650 @@ export const MOVES: Record<string, MoveSpec> = {
     hitsArea: true,
     statusChance: 0.3,
     statusKind: "poison",
+    // v4 (two-lane standard).
+    //
+    // THE FANTASY. It throws a piece of itself and the piece stays where it
+    // lands. Poison Sting is a needle: one wound, one target, delivery so
+    // small the victim does not notice it. Sludge is the opposite end of the
+    // same type — a handful of something wet, thrown at a whole arc of
+    // ground, and afterwards that ground is ruined. Grimer and Muk are made
+    // of the ammunition; Tentacruel, Weepinbell and Haunter are throwing
+    // what they secrete. Nothing about this move is precise, and the tree
+    // never tries to make it precise. It makes the mess bigger, thicker, and
+    // harder to walk out of.
+    //
+    // AGGRESSION — what it throws is itself. Lane A is MASS (more of the
+    // body per throw, the muck underfoot scooped up and hurled with it, real
+    // hunger spent every use); lane B is CORROSION (the same one gob, made
+    // to eat through armour and through a type resist). Volume against
+    // quality — a different KIND of answer, not a bigger number of the same
+    // one. The branch spends its own body the whole way down and the
+    // capstone is where it gets the body back.
+    // BOLDNESS — the mire. Lane M is the GROUND (a landed hit turns the
+    // defender's tile to real "mud", and the same hit drags them onto it);
+    // lane B is the BODY (a thing with no bones to break, that hurts to
+    // touch). One lane changes the map, the other changes what it costs to
+    // reach it — and they converge on something that cannot be moved.
+    // SOCIABILITY — we live in it. Lane C is the CLOUD (footprint: a wider
+    // arc, thrown further, that the herd is exempt from); lane R is the REEK
+    // (nobody picks a fight near it, and the herd wearing it is tougher).
+    // Widening the mess against making the mess unapproachable.
+    //
+    // THIS MOVE'S OWN FLAW IS SOCIABILITY'S HOOK. Sludge is the roster's
+    // only base-`hitsArea` cone, which means it already sprays herd-mates
+    // standing in front of it. `excludesAllies` is therefore the OPENER of
+    // that branch, not its payoff (it is a capstone on Twineedle and Poison
+    // Sting): here it is the price of admission before the branch is allowed
+    // to make the cloud any bigger at all.
+    //
+    // CHECKED AT THE CALL SITE, not in the design doc, and each one changed
+    // the design:
+    //   - AN AoE ONLY STATUSES ITS PRIMARY TARGET. `resolveAreaHit` calls
+    //     `resolveHitAgainstTarget` per caught agent with `isPrimaryTarget`
+    //     false for everyone but the one actually picked, and status
+    //     infliction, `terrainFill`, `jamCooldownTicks`, `rallyCall` and
+    //     forced movement all sit inside that gate (predation.ts). So the
+    //     cone spreads DAMAGE, never poison. Lane C answers that head-on
+    //     with `statusSpreads` (status.ts's `maybeSpreadStatus`, an
+    //     independent roll onto one neighbour) rather than pretending the
+    //     cone poisons everyone — see the report note; this is an engine
+    //     limitation the tree is designed around, not one it hides.
+    //   - `chargeAttack` WAS THE PLANNED AGGRESSION CAPSTONE and had to be
+    //     cut. `resolveChargedAttack` (predation.ts) resolves the released
+    //     leap through `resolveHitAgainstTarget` DIRECTLY — it never checks
+    //     `move.hitsArea`. Putting it on Sludge would silently turn the move
+    //     single-target on its biggest hit, which is the opposite of every
+    //     word above.
+    //   - `terrainFill: { terrain: "mud" }` is real and visible: "mud" is
+    //     0.5x movement speed for anything that steps on it afterwards
+    //     (support.ts's `TERRAIN_SPEED_MULTIPLIER`), permanent, and only
+    //     "floor"/"sand"/"mud" tiles convert (`TERRAIN_FILLABLE`). Scratch's
+    //     Churned Ground already fills mud; the difference is that here it
+    //     is a whole system rather than one node — Aggression's Scooped Up
+    //     spends a mud tile back for damage (`consumesOwnTerrain`), and the
+    //     hit that makes the mud drags the target onto it first (forced
+    //     movement runs BEFORE `terrainFill` in `resolveHitAgainstTarget`,
+    //     so the mud forms under where they LAND, not where they stood).
+    //   - `resistanceBreaker` is not flavour on this move. Poison resists
+    //     Poison, and seven of Sludge's nine learners ARE Poison-typed, so
+    //     an untreed Sludge barely dents the thing most likely to be
+    //     fighting it. `calculateDamage` (combat.ts) only applies the
+    //     breaker when `effectiveness < 1` and clamps at neutral.
+    //   - `weightScaling` adds a fraction of the user's own max HP as bonus
+    //     power (predation.ts) — Muk is the heaviest thing that learns this,
+    //     so the mass lane's notable is literally its own body weight.
+    //
+    // THE ONE THING THAT COULD NOT SHIP. Same hole Poison Sting's tree
+    // documents: the real payoff of poisoning something should be that it
+    // STARVES. `tickStatusEffects` (status.ts) gives poison a flat per-tick
+    // HP fraction and nothing in needs.ts reads `agent.status` at all, so
+    // there is no needs-recovery hook to hang it on, and building one was
+    // out of scope here. It bites this tree harder than it bit that one —
+    // area denial's honest payoff is "everything in that ground gets weaker"
+    // — so the denial is carried by things that DO exist: mud at 0.5x speed,
+    // a Speed debuff on hit, and `jamCooldownTicks`.
+    tree: {
+      // ================= AGGRESSION: what it throws is itself =============
+      sling_it: {
+        id: "sling_it",
+        name: "Sling It",
+        cost: 1,
+        leaning: "aggression",
+        // Benefit and cost in the SAME node (principle 4). It throws harder
+        // because it throws more of itself, and that is a real 1% bite out
+        // of its own hunger every use (`selfCostPerUse`, spent in
+        // `resolveHit`). Every node under here is paid for in body.
+        delta: { power: 12, selfCostPerUse: { need: "hunger", amount: 0.01 } },
+      },
+      // --- Lane A: mass. More of it, and the ground it is standing in.
+      scooped_up: {
+        id: "scooped_up",
+        name: "Scooped Up",
+        cost: 1,
+        prerequisites: ["sling_it"],
+        leaning: "aggression",
+        // It grabs whatever muck is under its own feet and throws that too.
+        // `consumesOwnTerrain` reads the ATTACKER's tile and reverts it to
+        // floor as part of the throw, so the bonus is spent, not standing.
+        // Pairs with Boldness's Sump across the tree: one branch makes mud,
+        // the other burns it for damage.
+        delta: { consumesOwnTerrain: { terrain: "mud", damageMultiplier: 1.5 } },
+      },
+      second_handful: {
+        id: "second_handful",
+        name: "Second Handful",
+        cost: 1,
+        prerequisites: ["scooped_up"],
+        leaning: "aggression",
+        // `hitsBonus` is the additive form — two nodes that each add a
+        // handful really do add two, where `hits` would have raced.
+        delta: { hitsBonus: 1 },
+      },
+      dead_weight: {
+        id: "dead_weight",
+        name: "Dead Weight",
+        cost: 1,
+        prerequisitesAnyOf: [["second_handful"], ["downpour"]],
+        leaning: "aggression",
+        // LANE A NOTABLE. The whole body is the ammunition, so the heavier
+        // the thrower the harder the throw (`weightScaling`, +8% of its own
+        // max HP as power). The only setter of it in this tree. It costs
+        // four times the opener's hunger to throw this much.
+        delta: {
+          power: 10,
+          weightScaling: { factor: 0.08 },
+          selfCostPerUse: { need: "hunger", amount: 0.04 },
+        },
+      },
+      heavier_still: {
+        id: "heavier_still",
+        name: "Heavier Still",
+        cost: 1,
+        prerequisites: ["dead_weight"],
+        leaning: "aggression",
+        // Benefit and cost in the same node. A heave this big is one motion
+        // it cannot abort — `lockTicks` keeps the user locked out for a tick
+        // after the throw (it locks the USER, never the target; checked,
+        // because the field name reads the other way).
+        delta: { power: 8, lockTicks: 1 },
+      },
+      // --- Lane B: corrosion. One gob, made worse instead of bigger.
+      acid_through: {
+        id: "acid_through",
+        name: "Acid Through",
+        cost: 1,
+        prerequisites: ["sling_it"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.2 },
+      },
+      eats_stone: {
+        id: "eats_stone",
+        name: "Eats Stone",
+        cost: 1,
+        prerequisites: ["acid_through"],
+        leaning: "aggression",
+        // Rock-types are the roster's armoured things (Geodude, Onix,
+        // Kabuto), and acid is what actually answers armour. `bonusVsType`
+        // checks `defender.types` in `calculateDamage`.
+        delta: { bonusVsType: { type: "rock", multiplier: 1.5 } },
+      },
+      caustic: {
+        id: "caustic",
+        name: "Caustic",
+        cost: 1,
+        prerequisitesAnyOf: [["eats_stone"], ["barrage"]],
+        leaning: "aggression",
+        // LANE B NOTABLE. Deliberately NOT more gobs — that is lane A's
+        // answer. This is the one gob eating through a type resist
+        // (`resistanceBreaker` claws a resisted hit back toward neutral,
+        // capped there) and leaving a dose that does real damage per tick.
+        // Poison-on-Poison is the fight this branch actually loses without
+        // it.
+        delta: { statusSeverity: 2.4, resistanceBreaker: { multiplier: 1.5 } },
+      },
+      runs_deeper: {
+        id: "runs_deeper",
+        name: "Runs Deeper",
+        cost: 1,
+        prerequisites: ["caustic"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.15 },
+      },
+      // --- Convergence, filler, capstone.
+      nothing_it_touches: {
+        id: "nothing_it_touches",
+        name: "Nothing It Touches",
+        cost: 1,
+        prerequisitesAnyOf: [["heavier_still"], ["runs_deeper"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: thrown heavy or thrown nasty,
+        // what it hits is wet with it afterwards.
+        delta: { defensePenetration: 0.2, statusChance: 0.15 },
+      },
+      wears_through: {
+        id: "wears_through",
+        name: "Wears Through",
+        cost: 1,
+        prerequisites: ["nothing_it_touches"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1, critRateStage: 1 },
+      },
+      takes_it_back: {
+        id: "takes_it_back",
+        name: "Takes It Back",
+        cost: 1,
+        prerequisites: ["wears_through"],
+        leaning: "aggression",
+        // CAPSTONE. It closes the branch's own loop rather than adding a
+        // bigger number to it. Every node above spent hunger to throw part
+        // of the body away; this one gets the body back — the thrown mass
+        // digests what it lands on and 30% of the damage comes home
+        // (`lifestealFraction`). The resist-breaker goes all the way to
+        // neutral and the dose gets worse at the same time, because by here
+        // the thing it is fighting is usually another Poison-type.
+        delta: {
+          lifestealFraction: 0.3,
+          statusSeverity: 3.4,
+          resistanceBreaker: { multiplier: 2 },
+          selfCostPerUse: { need: "hunger", amount: 0.06 },
+        },
+      },
+
+      // ================= BOLDNESS: the mire ===============================
+      where_it_lands: {
+        id: "where_it_lands",
+        name: "Where It Lands",
+        cost: 1,
+        leaning: "boldness",
+        // Boldness here is not bravery, it is refusal to move. The opener
+        // is the first thing that makes standing next to this a problem:
+        // everything the target has on cooldown comes back six ticks later
+        // (`jamCooldownTicks`, added to every entry in `moveCooldowns`).
+        delta: { jamCooldownTicks: 6 },
+      },
+      // --- Lane M: the ground. It stops being ground.
+      sump: {
+        id: "sump",
+        name: "Sump",
+        cost: 1,
+        prerequisites: ["where_it_lands"],
+        leaning: "boldness",
+        // A landed hit converts the defender's floor/sand tile into real
+        // "mud" — permanent, visible on the map, and 0.5x movement speed for
+        // anything that walks it afterwards. The only `terrainFill` setter
+        // in this tree, so nothing races it.
+        delta: { terrainFill: { terrain: "mud" } },
+      },
+      bogged: {
+        id: "bogged",
+        name: "Bogged",
+        cost: 1,
+        prerequisites: ["sump"],
+        leaning: "boldness",
+        // It hauls them in rather than shoving them off. Forced movement
+        // resolves BEFORE `terrainFill` in `resolveHitAgainstTarget`, so on
+        // a build holding both, the mud forms under where they were dragged
+        // to — the drag and the mire are one action.
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
+      },
+      sink: {
+        id: "sink",
+        name: "Sink",
+        cost: 1,
+        prerequisitesAnyOf: [["bogged"], ["nobody_runs"]],
+        leaning: "boldness",
+        // LANE M NOTABLE. Two tiles of drag, on the same chain the opener
+        // started rather than a second setter racing it, and everything
+        // they were about to do is another eight ticks away.
+        delta: {
+          forcedMovement: { mover: "defender", direction: "closer", tiles: 2, timing: "onHit" },
+          jamCooldownTicks: 8,
+        },
+      },
+      runs_downhill: {
+        id: "runs_downhill",
+        name: "Runs Downhill",
+        cost: 1,
+        prerequisites: ["sink"],
+        leaning: "boldness",
+        // The condition IS the flavour: filth thrown from higher ground
+        // keeps going. `elevation` compares the two tiles' real elevation in
+        // `oneSituationalMultiplier`.
+        delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.35 }] },
+      },
+      // --- Lane B: the body. Nothing in it to break.
+      no_bones: {
+        id: "no_bones",
+        name: "No Bones",
+        cost: 1,
+        prerequisites: ["where_it_lands"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      caustic_hide: {
+        id: "caustic_hide",
+        name: "Caustic Hide",
+        cost: 1,
+        prerequisites: ["no_bones"],
+        leaning: "boldness",
+        // Hitting a thing made of this costs you something.
+        grantsPassive: { kind: "thorns", value: 0.15 },
+        delta: {},
+      },
+      nothing_to_break: {
+        id: "nothing_to_break",
+        name: "Nothing to Break",
+        cost: 1,
+        prerequisitesAnyOf: [["caustic_hide"], ["downpour"]],
+        leaning: "boldness",
+        // LANE B NOTABLE. A different KIND of answer to the same branch
+        // question than lane M's: that lane makes the ground expensive to
+        // cross, this one makes the body not worth hitting. Per-move caps
+        // are respected across the whole tree — 20% damage reduction and 45%
+        // thorns at most, counting every node a single build can hold.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.12 },
+          { kind: "thorns", value: 0.2 },
+        ],
+        delta: {},
+      },
+      reforms: {
+        id: "reforms",
+        name: "Reforms",
+        cost: 1,
+        prerequisites: ["nothing_to_break"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      the_mire_holds: {
+        id: "the_mire_holds",
+        name: "The Mire Holds",
+        cost: 1,
+        prerequisitesAnyOf: [["runs_downhill"], ["reforms"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes end at the same sentence: it does not
+        // move, and neither does what it hit. `immovable` is a real
+        // primitive — nothing can drag, shove or lunge this agent — and it
+        // is the exact counterpart to the drag lane M spends on everyone
+        // else.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 90 }] },
+      },
+      settled_deep: {
+        id: "settled_deep",
+        name: "Settled Deep",
+        cost: 1,
+        prerequisites: ["the_mire_holds"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+        delta: {},
+      },
+      mired: {
+        id: "mired",
+        name: "Mired",
+        cost: 1,
+        prerequisites: ["settled_deep"],
+        leaning: "boldness",
+        // CAPSTONE. The branch's thesis stated once: whatever this hits
+        // leaves slowly or does not leave. Two Speed stages for 150 ticks:
+        // `statChangesOnHit` APPENDS, and `resolveStatChangesOnHit` then
+        // keeps the strongest entry per (target, stat) — checked, because
+        // the obvious reading is wrong. The Mire Holds' -1 and this -2 do
+        // NOT sum to -3; the -2 supersedes it, exactly like the rain ladder
+        // on the Aggression/Boldness bridge. Ten more ticks on everything
+        // they had ready, and a body that is now genuinely dangerous to
+        // touch. This is where the missing needs-hook would have gone: the
+        // honest version of "poisoned ground starves you" is not available,
+        // so what ships is ground that will not let you leave it.
+        grantsPassive: { kind: "thorns", value: 0.1 },
+        delta: {
+          statChangesOnHit: [{ target: "defender", stat: "speed", stage: -2, ticks: 150 }],
+          jamCooldownTicks: 10,
+        },
+      },
+
+      // ================= SOCIABILITY: we live in it =======================
+      downwind: {
+        id: "downwind",
+        name: "Downwind",
+        cost: 1,
+        leaning: "sociability",
+        // The move's own flaw, bought out first. A base-`hitsArea` cone
+        // sprays whoever is standing in front of it, herd included
+        // (`resolveAreaHit` filters targets on `excludesAllies`). Nothing
+        // else in this branch is safe to take until this is paid for, which
+        // is why it is the opener and not the payoff.
+        delta: { excludesAllies: true },
+      },
+      // --- Lane C: the cloud. Footprint.
+      wider_spray: {
+        id: "wider_spray",
+        name: "Wider Spray",
+        cost: 1,
+        prerequisites: ["downwind"],
+        leaning: "sociability",
+        // `areaBonus` is additive and applied once at the end of
+        // `applyMoveTree`, so it cannot be lost to a later form change —
+        // +1 on a cone is +1 tile of length (`growShape`).
+        delta: { areaBonus: 1 },
+      },
+      thick_air: {
+        id: "thick_air",
+        name: "Thick Air",
+        cost: 1,
+        prerequisites: ["wider_spray"],
+        leaning: "sociability",
+        // The honest fix for the AoE-status gate in the header: the cone
+        // itself only poisons the one target it picked, so this rolls a
+        // second, independent infliction onto one neighbour of that target
+        // (`maybeSpreadStatus`).
+        delta: { statusSpreads: true },
+      },
+      the_cloud: {
+        id: "the_cloud",
+        name: "The Cloud",
+        cost: 1,
+        prerequisitesAnyOf: [["thick_air"], ["nobody_runs"]],
+        leaning: "sociability",
+        // LANE C NOTABLE. A four-tile arc of it, and more of what lands
+        // takes hold.
+        delta: { areaBonus: 1, statusChance: 0.15 },
+      },
+      it_hangs: {
+        id: "it_hangs",
+        name: "It Hangs",
+        cost: 1,
+        prerequisites: ["the_cloud"],
+        leaning: "sociability",
+        delta: { rangeBonus: 1, statusChance: 0.1 },
+      },
+      // --- Lane R: the reek. Nobody wants to be here.
+      foul_ground: {
+        id: "foul_ground",
+        name: "Foul Ground",
+        cost: 1,
+        prerequisites: ["downwind"],
+        leaning: "sociability",
+        // Not a buff to anyone — it changes what OTHER agents decide to do.
+        // `calmingPresence` makes every agent nearby, herd or not, less
+        // likely to start a fight over a resource tile.
+        grantsPassive: { kind: "calmingPresence", value: 0.15 },
+        delta: {},
+      },
+      smeared: {
+        id: "smeared",
+        name: "Smeared",
+        cost: 1,
+        prerequisites: ["foul_ground"],
+        leaning: "sociability",
+        // The herd wears it on purpose. `allyEffects` APPENDS, and
+        // `resolveAllyEffect` then keeps the strongest buff per stat — so
+        // later nodes in this lane are a real ladder, not a race, and two
+        // co-takeable nodes can never leave the result order-dependent the
+        // way the singular `allyEffect` would.
+        delta: { targetsAlly: true, allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 90 } }] },
+      },
+      the_reek: {
+        id: "the_reek",
+        name: "The Reek",
+        cost: 1,
+        prerequisitesAnyOf: [["smeared"], ["barrage"]],
+        leaning: "sociability",
+        // LANE R NOTABLE. A different kind of answer than lane C's: that
+        // lane makes the cloud bigger, this one makes the herd inside it not
+        // worth approaching. `allyEffectOnAttack` means the coat goes on a
+        // herd-mate for free whenever it throws at something else, instead
+        // of costing a whole action.
+        grantsPassive: { kind: "calmingPresence", value: 0.25 },
+        delta: {
+          allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 120 } }],
+          allyEffectOnAttack: true,
+        },
+      },
+      nothing_comes_near: {
+        id: "nothing_comes_near",
+        name: "Nothing Comes Near",
+        cost: 1,
+        prerequisites: ["the_reek"],
+        leaning: "sociability",
+        // It has stopped needing to claim anything. Nothing contests a
+        // tile that smells like this.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      we_live_in_it: {
+        id: "we_live_in_it",
+        name: "We Live In It",
+        cost: 1,
+        prerequisitesAnyOf: [["it_hangs"], ["nothing_comes_near"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here: the herd is standing in a
+        // hazard that does not apply to them and is tougher for it.
+        delta: {
+          statusChance: 0.15,
+          allyEffects: [{ buff: { stat: "defense", stage: 2, ticks: 150 } }],
+        },
+      },
+      carries: {
+        id: "carries",
+        name: "Carries",
+        cost: 1,
+        prerequisites: ["we_live_in_it"],
+        leaning: "sociability",
+        delta: { rangeBonus: 1, accuracy: 5 },
+      },
+      the_moat: {
+        id: "the_moat",
+        name: "The Moat",
+        cost: 1,
+        prerequisites: ["carries"],
+        leaning: "sociability",
+        // CAPSTONE. It stops throwing forward and throws in every direction
+        // at once: a ring at radius 1 is the eight tiles around the caster
+        // (`resolveShape` keys ring on Chebyshev distance), which with the
+        // opener's `excludesAllies` means the herd stands in the middle of a
+        // wall of it and nothing else can close. The only `shape` setter in
+        // the tree, so no fork is needed against a rival form.
+        //
+        // Stated plainly because it is a real tradeoff and not a strict
+        // upgrade: `growShape` adds any `areaBonus` to the RING's radius, so
+        // a build that also walked lane C pushes the ring outward and stops
+        // covering the tiles right next to it. Cloud-then-moat is a wide
+        // perimeter with a soft middle; moat alone is a tight shell. That is
+        // the decision, not an oversight.
+        delta: { shape: { kind: "ring", radius: 1 } },
+      },
+
+      // ================= Bridges ==========================================
+      it_runs: {
+        id: "it_runs",
+        name: "It Runs",
+        cost: 1,
+        prerequisites: ["sling_it", "where_it_lands"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Wet weather is when a thrown mass
+        // and a mire are the same thing. `rain` is a real weather cell
+        // checked at the attacker's own position.
+        delta: { situationalBonuses: [{ condition: "rain", multiplier: 1.25 }] },
+      },
+      runs_further: {
+        id: "runs_further",
+        name: "Runs Further",
+        cost: 1,
+        prerequisites: ["it_runs"],
+        leaning: "aggression",
+        // Deepens its own crosslink's lever rather than grabbing a spare
+        // stat (principle 13). `situationalBonuses` appends and
+        // `resolveSituationalBonuses` keeps the strongest entry per
+        // condition, so this replaces the 1.25 cleanly instead of stacking
+        // into a silent product.
+        delta: { situationalBonuses: [{ condition: "rain", multiplier: 1.4 }] },
+      },
+      downpour: {
+        id: "downpour",
+        name: "Downpour",
+        cost: 1,
+        prerequisites: ["runs_further"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Its own lever taken as far as it goes, plus the
+        // thing rain does to a thrown poison: more of it takes. Lands on
+        // Dead Weight (Aggression's mass lane) and Nothing to Break
+        // (Boldness's body lane) — the two lanes that are NOT about weather,
+        // complementing them rather than repeating what they already do.
+        delta: { situationalBonuses: [{ condition: "rain", multiplier: 1.7 }], statusChance: 0.15 },
+      },
+
+      bogged_down: {
+        id: "bogged_down",
+        name: "Bogged Down",
+        cost: 1,
+        prerequisites: ["where_it_lands", "downwind"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. A herd that shares one patch of
+        // filth wants everything else in it moving slowly.
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 60 }] },
+      },
+      deeper_bog: {
+        id: "deeper_bog",
+        name: "Deeper Bog",
+        cost: 1,
+        prerequisites: ["bogged_down"],
+        leaning: "boldness",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 90 }] },
+      },
+      nobody_runs: {
+        id: "nobody_runs",
+        name: "Nobody Runs",
+        cost: 1,
+        prerequisites: ["deeper_bog"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. The slow becomes a mark: whatever cannot get away
+        // is what the rest of the herd goes for (`rallyCallTicks` is the
+        // additive form, +90 ticks onto a move that has no base mark).
+        // Lands on Sink (Boldness) and The Cloud (Sociability).
+        delta: {
+          statChangesOnHit: [{ target: "defender", stat: "speed", stage: -2, ticks: 120 }],
+          rallyCallTicks: 90,
+        },
+      },
+
+      all_together: {
+        id: "all_together",
+        name: "All Together",
+        cost: 1,
+        prerequisites: ["downwind", "sling_it"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. Everyone throws at once.
+        delta: { hitsBonus: 1 },
+      },
+      and_again: {
+        id: "and_again",
+        name: "And Again",
+        cost: 1,
+        prerequisites: ["all_together"],
+        leaning: "sociability",
+        delta: { hitsBonus: 1 },
+      },
+      barrage: {
+        id: "barrage",
+        name: "Barrage",
+        cost: 1,
+        prerequisites: ["and_again"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Volume escalated into the thing volume is actually
+        // worth on this move: every gob rolls poison separately
+        // (`resolveHitAgainstTarget` runs `maybeInflictStatus` per hit of a
+        // multi-hit), so more handfuls means the status is near-certain
+        // rather than merely more damage. Lands on Caustic (Aggression's
+        // quality lane) and The Reek (Sociability's deterrence lane) — one
+        // lane notable per branch, and neither of them is a volume lane.
+        delta: { hitsBonus: 1, statusChance: 0.15 },
+      },
+    },
   },
   poison_sting: {
     id: "poison_sting",
