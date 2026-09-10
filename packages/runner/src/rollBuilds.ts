@@ -143,9 +143,6 @@ for (let i = 0; i < count; i++) {
     console.log("| | |\n|---|---|");
     for (const [k, v] of glance) console.log(`| ${k} | ${v} |`);
 
-    console.log("\n## Nodes\n");
-    nodeBlock();
-
     console.log(`\n## What the build does\n\n_${totalCost} points spent._\n`);
     for (const l of deltaLines) console.log(`- ${l}`);
     if (passiveLines.length) {
@@ -161,12 +158,14 @@ for (let i = 0; i < count; i++) {
       if (a !== b) console.log(`| \`${k}\` | ${a} | ${b} |`);
     }
     console.log("\n</details>");
+
+    // Nodes last: the summary above is what a review actually reads, and the
+    // node list is the receipt you check it against.
+    console.log("\n## Nodes\n");
+    nodeBlock();
   } else {
     console.log("\n  AT A GLANCE:");
     for (const [k, v] of glance) console.log(`    ${k.padEnd(15)} ${v.replace(/\*\*/g, "")}`);
-
-    console.log("\n  NODES TAKEN, in the order the engine bought them:");
-    nodeBlock();
 
     console.log(`\n  WHAT THE BUILD DOES (${totalCost} points spent):`);
     for (const l of deltaLines) console.log(`    - ${l}`);
@@ -181,6 +180,9 @@ for (let i = 0; i < count; i++) {
       const a = fmt((move as any)[k]), b = fmt((built as any)[k]);
       if (a !== b) console.log(`    ${k.padEnd(20)} ${a}  ->  ${b}`);
     }
+
+    console.log("\n  NODES TAKEN, in the order the engine bought them:");
+    nodeBlock();
   }
   console.log();
 }

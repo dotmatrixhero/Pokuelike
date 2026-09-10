@@ -951,7 +951,7 @@
     return kinds;
   }
 
-  var STAT_LABEL = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed" };
+  var STAT_LABEL = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed", accuracy: "Accuracy", evasion: "Evasiveness" };
   var PASSIVE_LABEL = {
     damageReduction: function (v) { var eff = v / (1 + v); return "Passive — takes less damage from every hit. Diminishing returns: " + pct(v) + " raw is " + pct(eff) + " in practice, and stacking can never reach immunity."; },
     damageReductionFlat: function (v) { return "Passive — takes a flat " + v + " HP off every hit, after the percentage reduction. Worth proportionally more against weak hits than strong ones; a landed hit always does at least 1."; },

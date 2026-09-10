@@ -242,7 +242,10 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 // here to run once over a whole COMBINED build's net delta, not just one
 // node at a time, for `summarizeBuildEffects` below. ----------
 
-const STAT_LABEL: Record<string, string> = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed" };
+// `accuracy`/`evasion` are real StatKeys and resolve through a different,
+// base-3 curve (combat.ts's `accuracyStageMultiplier`) — labelled here so a
+// node granting one reads as English rather than as a raw key.
+const STAT_LABEL: Record<string, string> = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed", accuracy: "Accuracy", evasion: "Evasiveness" };
 
 const PASSIVE_LABEL: Record<string, (v: number) => string> = {
   damageReduction: (v) => {

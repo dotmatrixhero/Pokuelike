@@ -35,11 +35,17 @@ function moveOf(over: Partial<MoveSpec>): MoveSpec {
  * make the PREDATOR swing produced confident all-zero tables instead,
  * because `isPreyOf`'s relative-power gate never opened.
  */
-function fight(move: MoveSpec, rng: () => number) {
+function fight(
+  move: MoveSpec,
+  rng: () => number,
+  targetStages: Partial<Record<"accuracy" | "evasion", number>> = {},
+  attackerStages: Partial<Record<"accuracy" | "evasion", number>> = {}
+) {
   const world = createWorld(10, 10, SEED);
   const attacker: Agent = {
     id: "bulbasaur-0", species: "bulbasaur", pos: { x: 5, y: 5 }, layer: "surface", homeLayer: "surface",
     needs: createNeeds(), behavior: "idle", moves: [move], maxHp: 10, herdId: "herd-a",
+    statStages: Object.entries(attackerStages).map(([stat, stage]) => ({ stat, stage })),
   } as unknown as Agent;
   const mate = (id: string, pos: { x: number; y: number }): Agent => ({
     id, species: "bulbasaur", pos, layer: "surface", homeLayer: "surface",
@@ -49,6 +55,7 @@ function fight(move: MoveSpec, rng: () => number) {
     id: "scyther-0", species: "scyther", pos: { x: 5, y: 6 }, layer: "surface", homeLayer: "surface",
     needs: createNeeds({ hunger: 0.3 }), behavior: "idle", moves: [moveOf({})],
     maxHp: 20, hp: 10_000, // huge current HP so a flurry can never kill and cut the loop short
+    statStages: Object.entries(targetStages).map(([stat, stage]) => ({ stat, stage })),
   } as unknown as Agent;
   world.agents.push(attacker, mate("bulbasaur-1", { x: 4, y: 5 }), mate("bulbasaur-2", { x: 6, y: 5 }), target);
 
@@ -65,6 +72,38 @@ function fight(move: MoveSpec, rng: () => number) {
     tilesMoved: Math.abs(target.pos.x - startPos.x) + Math.abs(target.pos.y - startPos.y),
   };
 }
+
+describe("accuracy and evasion stages actually reach the hit roll", () => {
+  // They were hardcoded to 0 at both `rollAccuracy` call sites for most of
+  // this project's life — `accuracyStageMultiplier` existed, was correct, and
+  // had never once been passed a non-zero argument. Direct: "There are
+  // debuffs that affect accuracy. And evasiveness does too."
+  const nearMiss = () => 0.85; // clears 100 accuracy, fails anything much below it
+
+  it("a defender's evasion stage makes an otherwise-certain hit miss", () => {
+    const plain = fight(moveOf({ accuracy: 100 }), nearMiss);
+    expect(plain.damageEvents).toBe(1);
+
+    const evasive = fight(moveOf({ accuracy: 100 }), nearMiss, { evasion: 6 });
+    expect(evasive.damageEvents).toBe(0);
+    expect(evasive.missedEvents).toBe(1);
+  });
+
+  it("the attacker's accuracy stage cancels it out — the roll is the NET of the two", () => {
+    // Same +6 evasion, but the attacker is +6 accuracy: net 0, so the hit
+    // lands exactly as if neither existed. That is the base-3 curve's whole
+    // shape, and it is why the two have to be read as a pair.
+    const cancelled = fight(moveOf({ accuracy: 100 }), nearMiss, { evasion: 6 }, { accuracy: 6 });
+    expect(cancelled.damageEvents).toBe(1);
+  });
+
+  it("a guaranteed-hit move ignores stages entirely", () => {
+    // Control on the exemption: accuracy < 0 is the can't-miss convention,
+    // and it has to beat evasion too or "guaranteed" is a lie.
+    const sure = fight(moveOf({ accuracy: -1 }), nearMiss, { evasion: 6 });
+    expect(sure.damageEvents).toBe(1);
+  });
+});
 
 describe("multi-hit ordering: damage, knockback and crits", () => {
   it("all hits land FIRST, then the knockback fires once — not hit/push/hit/push", () => {

@@ -57,10 +57,14 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
  * PokeRogue's convention for "can't miss") always hits regardless of
  * stages/`extraMultiplier` — a guaranteed-hit move stays guaranteed even
  * mid-storm, matching how it already ignores accuracy/evasion stages.
- * Stages default to 0 (no agent in the sim currently has accuracy/evasion
- * stages), so `accuracyStageMultiplier` is a no-op multiplier until
- * something changes them — but the roll itself is real: a move with
- * `accuracy < 100` can now actually miss. See TODO.md.
+ * Accuracy and evasion stages are REAL now: `"accuracy"` and `"evasion"` are
+ * `StatKey`s (nature.ts), so any tree node can grant them through the same
+ * `statChangeOnHit` plumbing every other stat uses, and both call sites —
+ * predation.ts's `resolveHitAgainstTarget` and herdConflict.ts's
+ * `resolveRivalryHit` — pass the attacker's accuracy stage against the
+ * defender's evasion stage. They were hardcoded to 0 at both sites for most
+ * of this project's life, which made this parameter pair, and
+ * `accuracyStageMultiplier` with it, elaborate dead code.
  *
  * `extraMultiplier` (default 1) is a second, independent multiplier on top
  * of the stage-based one — currently weather.ts's Phase 3 storm accuracy
