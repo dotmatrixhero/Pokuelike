@@ -12820,6 +12820,581 @@ export const MOVES: Record<string, MoveSpec> = {
     // mainline's own +1 Defense, mechanically identical to Harden above
     // under a Water-flavored name, same as the real games.
     statChangeOnHit: { target: "self", stat: "defense", stage: 1, ticks: 50 },
+    // v4 (two-lane standard).
+    //
+    // THE FANTASY. A shell is not armour you wear, it is a room you go
+    // into. Withdrawing is leaving: the animal is still there and the
+    // water still carries it, but there is nothing on the outside left to
+    // hit. Squirtle, Wartortle, Blastoise, Omanyte and Omastar all learn
+    // it, and every one of them is still going somewhere while it is shut.
+    //
+    // HOW THIS IS NOT HARDEN, which already owns "raise your own
+    // Defense." Harden is skin going rigid — its answer to danger is to
+    // stop: `lockTicks` on four separate nodes, `immovable`, becoming
+    // scenery, shedding grit into the ground it is standing on. Withdraw's
+    // answer is to leave without stopping. THIS TREE CONTAINS NO
+    // `lockTicks` AT ALL, deliberately: a shell costs you nothing in
+    // tempo, which is the entire trade Harden makes. Where Harden roots
+    // itself, Withdraw buys Speed stages, `aquaticHaste` and cooldown; and
+    // where Harden's shell is a surface that hurts to touch (`thorns` on
+    // six nodes), Withdraw's is an interior, with room in it for somebody
+    // else. There is no `thorns` here either.
+    //
+    // BOLDNESS — nobody is home. Lane H is SEALED (the hatch itself: flat
+    // mitigation, `unshaken`, and the Defense-stage ladder the move is
+    // named for); lane Q is QUIET (not a thicker wall — nothing inside to
+    // hit: `damageReduction`, `selfHeal`, `regen`. The hit lands, and the
+    // animal it was aimed at was elsewhere).
+    // AGGRESSION — the shell keeps moving. Lane R is CARRIED (let the
+    // water do it: `aquaticHaste`, the shipped herd-scoped water Speed
+    // aura, plus cooldown); lane K is the KICK (do it yourself: a Speed
+    // stage and coming back out already covered). Differ in kind: drift
+    // versus push.
+    // SOCIABILITY — there is room in here. Lane C TAKES THEM IN (a real
+    // `targetsAlly` support use: heals and Defense buffs, the hatchling
+    // pulled in beside you); lane N is the NURSERY (nothing to do with
+    // rescue — the shell as a fixed safe place: `matingRadiusBoost`,
+    // `healAura`, shallow water). Converges on a shell with the whole
+    // family in it.
+    //
+    // WHAT A `utilityMove` CAN REACH, checked at the call sites.
+    // `pickBestMove` excludes every `utilityMove` from hostile selection,
+    // so `resolveHit` never runs with Withdraw: `power`, `accuracy`,
+    // `shape`/`hitsArea`, `range`, `statusChance`, `defensePenetration`,
+    // `forcedMovement`, `weightScaling`, `critRateStage` and the rest of
+    // that surface are all dead here and appear nowhere below. Live:
+    // `cooldownTicks` (`useMove`), `selfHeal`/`statChangesOnHit`/
+    // `matingRadiusBoost` (utilityMoves.ts), `targetsAlly` + `allyEffects`
+    // (support.ts), and every `grantsPassive` kind.
+    //
+    // COMBAT REACHABILITY. `maybeUseUtilityMoveInCombat` spends a fight
+    // action only on `selfHeal`, a positive self stat change or a
+    // `statusImmunityAura`. Boldness reaches both of the first two,
+    // Aggression the Defense and Speed stages, and Sociability's deep
+    // notable braces the user as well as the ally it shelters — so every
+    // branch can actually fire mid-fight, not only on idle ticks.
+    // Deliberately no `statusImmunityAura` anywhere: that is Safeguard's
+    // move, and duplicating it here would make two trees the same answer.
+    tree: {
+      // ===== BOLDNESS: nobody is home =====
+      pulled_in: {
+        id: "pulled_in",
+        name: "Pulled In",
+        cost: 1,
+        leaning: "boldness",
+        // OPENER. Doubles the base move's own Defense stage. Splits into
+        // the hatch itself and what is (not) behind it.
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 60 }] },
+      },
+      // --- Lane H: sealed. The hatch.
+      drawn_hatch: {
+        id: "drawn_hatch",
+        name: "Drawn Hatch",
+        cost: 1,
+        prerequisites: ["pulled_in"],
+        excludes: ["snap_shut"],
+        leaning: "boldness",
+        // FORK, against Snap Shut. A thicker door: a flat 2 HP off every
+        // hit that lands.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      snap_shut: {
+        id: "snap_shut",
+        name: "Snap Shut",
+        cost: 1,
+        prerequisites: ["pulled_in"],
+        excludes: ["drawn_hatch"],
+        leaning: "boldness",
+        // FORK, against Drawn Hatch. Not thicker — faster. Base cooldown
+        // 40, so -6 is a real gain in how often the shell can be shut at
+        // all, and cooldowns tick on the agent's own action clock.
+        delta: { cooldownTicks: -6 },
+      },
+      nobody_home: {
+        id: "nobody_home",
+        name: "Nobody Home",
+        cost: 1,
+        prerequisitesAnyOf: [["drawn_hatch"], ["snap_shut"], ["closed_and_going"]],
+        leaning: "boldness",
+        // LANE H NOTABLE. The shell is shut and the first thing to reach
+        // it connects with nothing (`unshaken`, checked at the top of
+        // `resolveHitAgainstTarget`).
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 3, ticks: 90 }] },
+      },
+      sealed_seam: {
+        id: "sealed_seam",
+        name: "Sealed Seam",
+        cost: 1,
+        prerequisites: ["nobody_home"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      // --- Lane Q: quiet. Not a thicker wall — nothing in there to hit.
+      slack_water: {
+        id: "slack_water",
+        name: "Slack Water",
+        cost: 1,
+        prerequisites: ["pulled_in"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+        delta: {},
+      },
+      no_answer: {
+        id: "no_answer",
+        name: "No Answer",
+        cost: 1,
+        prerequisites: ["slack_water"],
+        leaning: "boldness",
+        // Root of the tree's one `selfHeal` chain. Inside, out of reach,
+        // the animal gets on with knitting itself back together — and this
+        // is what makes the branch fight-usable under 60% HP.
+        delta: { selfHeal: { fraction: 0.1 } },
+      },
+      not_at_home: {
+        id: "not_at_home",
+        name: "Not at Home",
+        cost: 1,
+        prerequisitesAnyOf: [["no_answer"], ["both_of_us_inside"]],
+        leaning: "boldness",
+        // LANE Q NOTABLE. The difference from the other lane, stated: the
+        // hit is not being stopped, it is arriving at an empty room.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { selfHeal: { fraction: 0.18 } },
+      },
+      long_quiet: {
+        id: "long_quiet",
+        name: "Long Quiet",
+        cost: 1,
+        prerequisites: ["not_at_home"],
+        leaning: "boldness",
+        grantsPassive: { kind: "regen", value: 0.008 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      an_empty_shell: {
+        id: "an_empty_shell",
+        name: "An Empty Shell",
+        cost: 1,
+        prerequisitesAnyOf: [["sealed_seam"], ["long_quiet"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes end here. +4 is where the Defense
+        // ladder stops being worth climbing — stat stages clamp at +6 and
+        // `statStageMultiplier` is already 3x here.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.08 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 4, ticks: 120 }] },
+      },
+      settled_inside: {
+        id: "settled_inside",
+        name: "Settled Inside",
+        cost: 1,
+        prerequisites: ["an_empty_shell"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      nothing_to_hit: {
+        id: "nothing_to_hit",
+        name: "Nothing to Hit",
+        cost: 1,
+        prerequisites: ["settled_inside"],
+        leaning: "boldness",
+        // CAPSTONE. Not tougher — absent. A third of its health back every
+        // time it shuts, and it never had to stop moving to get it, which
+        // is the whole difference between this move and Harden.
+        grantsPassive: { kind: "damageReduction", value: 0.05 },
+        delta: { selfHeal: { fraction: 0.3 } },
+      },
+
+      // ===== AGGRESSION: the shell keeps moving =====
+      tucked_and_rolling: {
+        id: "tucked_and_rolling",
+        name: "Tucked and Rolling",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER. A Speed stage on a defensive move is the thesis: this
+        // one does not cost you the turn. `actionSpeedOf` (simulation.ts)
+        // folds a Speed stage into how often the agent acts, so this is a
+        // real action-economy gain, not a display number.
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 2, ticks: 50 }] },
+      },
+      // --- Lane R: carried. Let the water do it.
+      let_it_carry: {
+        id: "let_it_carry",
+        name: "Let It Carry",
+        cost: 1,
+        prerequisites: ["tucked_and_rolling"],
+        leaning: "aggression",
+        // `aquaticHaste` is the shipped herd-scoped water Speed aura
+        // (support.ts's `aquaticHasteMultiplier`): every same-herd agent
+        // standing on water near the holder moves faster, itself included.
+        grantsPassive: { kind: "aquaticHaste", value: 0.05 },
+        delta: {},
+      },
+      downstream: {
+        id: "downstream",
+        name: "Downstream",
+        cost: 1,
+        prerequisites: ["let_it_carry"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -4 },
+      },
+      carried_off: {
+        id: "carried_off",
+        name: "Carried Off",
+        cost: 1,
+        prerequisitesAnyOf: [["downstream"], ["closed_and_going"]],
+        leaning: "aggression",
+        // LANE R NOTABLE. A shut shell in moving water is not hiding, it
+        // is travelling.
+        grantsPassive: { kind: "aquaticHaste", value: 0.08 },
+        delta: { cooldownTicks: -4 },
+      },
+      wake_behind: {
+        id: "wake_behind",
+        name: "Wake Behind",
+        cost: 1,
+        prerequisites: ["carried_off"],
+        leaning: "aggression",
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: {},
+      },
+      // --- Lane K: the kick. Do it yourself.
+      hard_kick: {
+        id: "hard_kick",
+        name: "Hard Kick",
+        cost: 1,
+        prerequisites: ["tucked_and_rolling"],
+        excludes: ["braced_lip"],
+        leaning: "aggression",
+        // FORK, against Braced Lip. One hard shove off the bottom: a third
+        // Speed stage while shut.
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 3, ticks: 60 }] },
+      },
+      braced_lip: {
+        id: "braced_lip",
+        name: "Braced Lip",
+        cost: 1,
+        prerequisites: ["tucked_and_rolling"],
+        excludes: ["hard_kick"],
+        leaning: "aggression",
+        // FORK, against Hard Kick. Different in kind: no extra speed at
+        // all — it comes back out already covered.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      out_and_back: {
+        id: "out_and_back",
+        name: "Out and Back",
+        cost: 1,
+        prerequisitesAnyOf: [["hard_kick"], ["braced_lip"], ["the_ferry"]],
+        leaning: "aggression",
+        // LANE K NOTABLE. In, out, in again — the shell spends less of the
+        // fight open than the opponent spends swinging at it.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: { cooldownTicks: -4 },
+      },
+      no_gap: {
+        id: "no_gap",
+        name: "No Gap",
+        cost: 1,
+        prerequisites: ["out_and_back"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      never_out_long: {
+        id: "never_out_long",
+        name: "Never Out Long",
+        cost: 1,
+        prerequisitesAnyOf: [["wake_behind"], ["no_gap"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: carried when it can be,
+        // kicking when it has to be.
+        grantsPassive: { kind: "aquaticHaste", value: 0.1 },
+        delta: {
+          cooldownTicks: -3,
+          statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 60 }],
+        },
+      },
+      slick_shell: {
+        id: "slick_shell",
+        name: "Slick Shell",
+        cost: 1,
+        prerequisites: ["never_out_long"],
+        leaning: "aggression",
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: {},
+      },
+      the_shell_gets_there_first: {
+        id: "the_shell_gets_there_first",
+        name: "The Shell Gets There First",
+        cost: 1,
+        prerequisites: ["slick_shell"],
+        leaning: "aggression",
+        // CAPSTONE. A closed Blastoise arriving before the thing that was
+        // chasing it. Four Speed stages for 200 ticks is a genuine
+        // action-rate change (Agility, the roster's actual speed move,
+        // still reaches further at 6 — this is a shell, not a sprint).
+        grantsPassives: [
+          { kind: "defenseBoost", value: 1 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: { statChangesOnHit: [{ target: "self", stat: "speed", stage: 4, ticks: 200 }] },
+      },
+
+      // ===== SOCIABILITY: there is room in here =====
+      room_inside: {
+        id: "room_inside",
+        name: "Room Inside",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER. `targetsAlly` gives the move a dedicated support use on
+        // a nearby herd-mate (support.ts's `applySupportMove`) — the shell
+        // opened for somebody else. Splits into taking one in and keeping
+        // a place open.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.05 }] },
+      },
+      // --- Lane C: take them in.
+      pulled_alongside: {
+        id: "pulled_alongside",
+        name: "Pulled Alongside",
+        cost: 1,
+        prerequisites: ["room_inside"],
+        excludes: ["over_the_back"],
+        leaning: "sociability",
+        // FORK, against Over the Back. One ally, right now, hard: a real
+        // +2 Defense stage on whoever gets pulled in.
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 2, ticks: 60 } }] },
+      },
+      over_the_back: {
+        id: "over_the_back",
+        name: "Over the Back",
+        cost: 1,
+        prerequisites: ["room_inside"],
+        excludes: ["pulled_alongside"],
+        leaning: "sociability",
+        // FORK, against Pulled Alongside. Different in kind: nobody is
+        // pulled anywhere and nothing is cast — they ride on the shell and
+        // heal while they do (`healAura` is continuous and needs no use).
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {},
+      },
+      under_the_shell: {
+        id: "under_the_shell",
+        name: "Under the Shell",
+        cost: 1,
+        prerequisitesAnyOf: [["pulled_alongside"], ["over_the_back"], ["the_ferry"]],
+        leaning: "sociability",
+        // LANE C NOTABLE. Room for one more, properly: a real heal and a
+        // real Defense stage on the herd-mate that got in.
+        delta: {
+          targetsAlly: true,
+          allyEffects: [{ healFraction: 0.14, buff: { stat: "defense", stage: 3, ticks: 90 } }],
+        },
+      },
+      dry_inside: {
+        id: "dry_inside",
+        name: "Dry Inside",
+        cost: 1,
+        prerequisites: ["under_the_shell"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Lane N: the nursery. A place, not a rescue.
+      hollow_kept_clean: {
+        id: "hollow_kept_clean",
+        name: "Hollow Kept Clean",
+        cost: 1,
+        prerequisites: ["room_inside"],
+        leaning: "sociability",
+        // A shell somebody keeps swept out is where a pair settles.
+        // `matingRadiusBoost` really does double the caster's mate-search
+        // radius (reproduction.ts) for the window — the engine applies a
+        // fixed x2 whatever `multiplier` says, so this says 2.
+        delta: { matingRadiusBoost: { multiplier: 2, ticks: 150 } },
+      },
+      shallows: {
+        id: "shallows",
+        name: "Shallows",
+        cost: 1,
+        prerequisites: ["hollow_kept_clean"],
+        leaning: "sociability",
+        grantsPassive: { kind: "aquaticHaste", value: 0.05 },
+        delta: {},
+      },
+      the_nursery: {
+        id: "the_nursery",
+        name: "The Nursery",
+        cost: 1,
+        prerequisitesAnyOf: [["shallows"], ["both_of_us_inside"]],
+        leaning: "sociability",
+        // LANE N NOTABLE. A stretch of warm shallow water with an adult
+        // sitting in it: everything nearby heals, and moves faster on the
+        // water while it does.
+        grantsPassives: [
+          { kind: "healAura", value: 0.005 },
+          { kind: "aquaticHaste", value: 0.08 },
+        ],
+        delta: {},
+      },
+      quiet_water: {
+        id: "quiet_water",
+        name: "Quiet Water",
+        cost: 1,
+        prerequisites: ["the_nursery"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -3 },
+      },
+      // --- Convergence, filler, capstone.
+      everyone_fits: {
+        id: "everyone_fits",
+        name: "Everyone Fits",
+        cost: 1,
+        prerequisitesAnyOf: [["dry_inside"], ["quiet_water"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here — and it braces the user as
+        // well as the ally, which is what makes this branch spendable as a
+        // real fight action rather than only an idle-tick support use.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {
+          targetsAlly: true,
+          allyEffects: [{ healFraction: 0.18, buff: { stat: "speed", stage: 2, ticks: 60 } }],
+          statChangesOnHit: [{ target: "self", stat: "defense", stage: 3, ticks: 90 }],
+        },
+      },
+      close_quarters: {
+        id: "close_quarters",
+        name: "Close Quarters",
+        cost: 1,
+        prerequisites: ["everyone_fits"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      a_shell_is_a_room: {
+        id: "a_shell_is_a_room",
+        name: "A Shell Is a Room",
+        cost: 1,
+        prerequisites: ["close_quarters"],
+        leaning: "sociability",
+        // CAPSTONE. The shell has stopped being a defence and become an
+        // address: the herd heals around it, moves faster on the water
+        // near it, and breeds inside it.
+        grantsPassives: [
+          { kind: "healAura", value: 0.006 },
+          { kind: "aquaticHaste", value: 0.12 },
+        ],
+        delta: { matingRadiusBoost: { multiplier: 2, ticks: 300 } },
+      },
+
+      // ===== Bridges =====
+      shut_mid_stroke: {
+        id: "shut_mid_stroke",
+        name: "Shut Mid-Stroke",
+        cost: 1,
+        prerequisites: ["pulled_in", "tucked_and_rolling"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Aggression. Closing without breaking
+        // stride: `defenseBoost` is a permanent Defense stat-stage, so it
+        // is on whether the shell is shut or not.
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: {},
+      },
+      no_wasted_motion: {
+        id: "no_wasted_motion",
+        name: "No Wasted Motion",
+        cost: 1,
+        prerequisites: ["shut_mid_stroke"],
+        leaning: "boldness",
+        grantsPassive: { kind: "defenseBoost", value: 0.5 },
+        delta: {},
+      },
+      closed_and_going: {
+        id: "closed_and_going",
+        name: "Closed and Going",
+        cost: 1,
+        prerequisites: ["no_wasted_motion"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Its own crosslink's lever escalated. Lands on
+        // Nobody Home (Boldness) and Carried Off (Aggression).
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.5 },
+          { kind: "damageReductionFlat", value: 1 },
+        ],
+        delta: {},
+      },
+
+      two_aboard: {
+        id: "two_aboard",
+        name: "Two Aboard",
+        cost: 1,
+        prerequisites: ["tucked_and_rolling", "room_inside"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Sociability. A loaded shell still moves.
+        grantsPassive: { kind: "aquaticHaste", value: 0.04 },
+        delta: {},
+      },
+      even_loaded: {
+        id: "even_loaded",
+        name: "Even Loaded",
+        cost: 1,
+        prerequisites: ["two_aboard"],
+        leaning: "aggression",
+        grantsPassive: { kind: "aquaticHaste", value: 0.04 },
+        delta: {},
+      },
+      the_ferry: {
+        id: "the_ferry",
+        name: "The Ferry",
+        cost: 1,
+        prerequisites: ["even_loaded"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Lands on Out and Back (Aggression) and Under the
+        // Shell (Sociability).
+        grantsPassive: { kind: "aquaticHaste", value: 0.06 },
+        delta: { cooldownTicks: -2 },
+      },
+
+      two_can_hide: {
+        id: "two_can_hide",
+        name: "Two Can Hide",
+        cost: 1,
+        prerequisites: ["room_inside", "pulled_in"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Boldness. Two of them in one shell, and
+        // the door still shuts.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      shoulder_to_shoulder: {
+        id: "shoulder_to_shoulder",
+        name: "Shoulder to Shoulder",
+        cost: 1,
+        prerequisites: ["two_can_hide"],
+        leaning: "sociability",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      both_of_us_inside: {
+        id: "both_of_us_inside",
+        name: "Both of Us Inside",
+        cost: 1,
+        prerequisites: ["shoulder_to_shoulder"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Lands on The Nursery (Sociability) and Not at
+        // Home (Boldness).
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 2, ticks: 60 } }] },
+      },
+    },
   },
   defense_curl: {
     id: "defense_curl",
@@ -12844,6 +13419,591 @@ export const MOVES: Record<string, MoveSpec> = {
     // the caster plus every living same-herd ally within radius get a real
     // window of new-status immunity (Agent.statusImmuneTicksRemaining).
     statusImmunityAura: { ticks: 60, radius: 4 },
+    // v4 (two-lane standard).
+    //
+    // THE FANTASY. Safeguard is a watch, not a shield. One animal stays
+    // awake and draws a line around the ones that are asleep, and while it
+    // holds, nothing that gets carried — venom, rot, a thing circling in
+    // the dark — crosses it. It does nothing for the warden. Its whole
+    // value is who else is standing inside it, which is why Chansey,
+    // Clefairy, Lapras and Seel are the ones that know it.
+    //
+    // SOCIABILITY — the ring. This is where the aura itself lives. Lane W
+    // is WIDTH (how many are inside: the `statusImmunityAura` ladder, and
+    // a ring nothing picks a fight inside); lane T is TENDING (nothing to
+    // do with how many — what the warden does FOR the ones already inside:
+    // `targetsAlly` heals and Defense buffs). Converges on a warden that
+    // does both, and ends on a ring the herd can breed inside.
+    // BOLDNESS — the vigil, and what it costs the watcher. Lane V is
+    // ENDURANCE (the night is long: `selfHeal`, `regen` — the watcher out-
+    // lasts it); lane P is THE POST (a place, not a duration: `immovable`
+    // at the boundary, or walking it often instead). Differ in kind: time
+    // versus ground.
+    // AGGRESSION — the warden goes out to meet it. Lane D WEARS IT DOWN
+    // (`drainNeeds`: an outsider hanging around a warded herd gets nothing
+    // done and leaves hungrier than it came — a real, visible hunger
+    // transfer, not a hidden aura); lane S STANDS IN FRONT (`thorns`,
+    // `unshaken`, flat mitigation, a braced Defense stage). Absorb versus
+    // deny.
+    //
+    // WHAT A `utilityMove` CAN REACH, checked at the call sites.
+    // `pickBestMove` (combat.ts) excludes every `utilityMove` from hostile
+    // selection, so `resolveHit` never runs with Safeguard and every field
+    // downstream of it — `power`, `accuracy`, `shape`/`hitsArea`, `range`,
+    // `statusChance`, `forcedMovement`, `defensePenetration`,
+    // `weightScaling`, `selfCostPerUse` and the rest — is dead here. The
+    // live surface is `cooldownTicks`/`lockTicks` (`useMove`),
+    // `selfHeal`/`statChangesOnHit`/`statusImmunityAura`/`drainNeeds`/
+    // `matingRadiusBoost` (utilityMoves.ts), `targetsAlly` + `allyEffects`
+    // (support.ts's `applySupportMove`, which does not exclude utility
+    // moves), and every `grantsPassive` kind.
+    //
+    // COMBAT REACHABILITY, the check that matters most:
+    // `maybeUseUtilityMoveInCombat` decides by EFFECT FIELD and spends a
+    // fight action only on `selfHeal`, a positive self stat change, or a
+    // `statusImmunityAura`. Sociability reaches the aura, Boldness both a
+    // heal and a Defense stage, Aggression an Attack and a Defense stage —
+    // so no branch here is a tree that can never fire in a fight.
+    // `drainNeeds` and `matingRadiusBoost` are the two levers that fire on
+    // idle ticks ONLY (`maybeUseUtilityMove`); both are real, and neither
+    // is the sole payoff of any branch.
+    //
+    // Every `statChangesOnHit`/`allyEffects` here is the PLURAL, appending
+    // form on purpose: the singular fields are overwrites, and two
+    // co-takeable nodes setting one produce whichever the engine reaches
+    // last. The genuinely-overwrite levers (`statusImmunityAura`,
+    // `drainNeeds`, `selfHeal`, `matingRadiusBoost`) each sit on a single
+    // ancestry chain, so a later node escalates an earlier one instead of
+    // racing it.
+    tree: {
+      // ===== SOCIABILITY: the ring =====
+      drawn_ring: {
+        id: "drawn_ring",
+        name: "Drawn Ring",
+        cost: 1,
+        leaning: "sociability",
+        // OPENER, and the root of the tree's one `statusImmunityAura`
+        // chain. Splits into how WIDE the ring is and what happens to the
+        // ones already inside it.
+        delta: { statusImmunityAura: { ticks: 90, radius: 5 } },
+      },
+      // --- Lane W: width. How many are inside.
+      head_count: {
+        id: "head_count",
+        name: "Head Count",
+        cost: 1,
+        prerequisites: ["drawn_ring"],
+        excludes: ["close_ring"],
+        leaning: "sociability",
+        // FORK, against Close Ring. A wide, shallow watch: the warden
+        // counts everyone and re-draws the line often. Nothing near it
+        // starts anything (`calmingPresence`, herdConflict.ts).
+        grantsPassive: { kind: "calmingPresence", value: 0.06 },
+        delta: { cooldownTicks: -6 },
+      },
+      close_ring: {
+        id: "close_ring",
+        name: "Close Ring",
+        cost: 1,
+        prerequisites: ["drawn_ring"],
+        excludes: ["head_count"],
+        leaning: "sociability",
+        // FORK, against Head Count. The other answer: fewer inside, and
+        // the warden is close enough to touch all of them (`healAura`).
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      the_line: {
+        id: "the_line",
+        name: "The Line",
+        cost: 1,
+        prerequisitesAnyOf: [["head_count"], ["close_ring"], ["nothing_gets_in"]],
+        leaning: "sociability",
+        // LANE W NOTABLE. The ring is a real boundary now: 120 ticks of
+        // new-status immunity out to 6 tiles, for every living same-herd
+        // agent inside it.
+        delta: { statusImmunityAura: { ticks: 120, radius: 6 } },
+      },
+      held_line: {
+        id: "held_line",
+        name: "Held Line",
+        cost: 1,
+        prerequisites: ["the_line"],
+        leaning: "sociability",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: { statusImmunityAura: { ticks: 150, radius: 6 } },
+      },
+      // --- Lane T: tending. Not how many — what you do for them.
+      warm_flank: {
+        id: "warm_flank",
+        name: "Warm Flank",
+        cost: 1,
+        prerequisites: ["drawn_ring"],
+        leaning: "sociability",
+        // LANE T entry. `targetsAlly` gives the move a real support use on
+        // a nearby herd-mate (support.ts's `applySupportMove`), which does
+        // not go through the hostile pipeline at all.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.06 }] },
+      },
+      licked_clean: {
+        id: "licked_clean",
+        name: "Licked Clean",
+        cost: 1,
+        prerequisites: ["warm_flank"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.003 },
+        delta: {},
+      },
+      nightnurse: {
+        id: "nightnurse",
+        name: "Night Nurse",
+        cost: 1,
+        prerequisitesAnyOf: [["licked_clean"], ["nobody_stirs"]],
+        leaning: "sociability",
+        // LANE T NOTABLE. The warden that patches up what it is guarding
+        // instead of only fencing it.
+        delta: {
+          targetsAlly: true,
+          allyEffects: [{ healFraction: 0.12, buff: { stat: "defense", stage: 2, ticks: 60 } }],
+        },
+      },
+      kept_warm: {
+        id: "kept_warm",
+        name: "Kept Warm",
+        cost: 1,
+        prerequisites: ["nightnurse"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      the_watch: {
+        id: "the_watch",
+        name: "The Watch",
+        cost: 1,
+        prerequisitesAnyOf: [["held_line"], ["kept_warm"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here: a warden that holds the line
+        // AND tends what is behind it.
+        grantsPassive: { kind: "calmingPresence", value: 0.12 },
+        delta: {
+          targetsAlly: true,
+          allyEffects: [{ healFraction: 0.1, buff: { stat: "defense", stage: 3, ticks: 90 } }],
+        },
+      },
+      no_one_sleeps_alone: {
+        id: "no_one_sleeps_alone",
+        name: "No One Sleeps Alone",
+        cost: 1,
+        prerequisites: ["the_watch"],
+        leaning: "sociability",
+        // A guarded night is when a herd pairs off. `matingRadiusBoost`
+        // doubles the caster's own mate-search radius (reproduction.ts's
+        // `mateSearchRadius`) for the window — a real reproduction effect,
+        // not flavour. Note the engine applies a FIXED x2 regardless of
+        // the `multiplier` written here, so this says 2.
+        delta: { matingRadiusBoost: { multiplier: 2, ticks: 150 } },
+      },
+      nothing_crosses: {
+        id: "nothing_crosses",
+        name: "Nothing Crosses",
+        cost: 1,
+        prerequisites: ["no_one_sleeps_alone"],
+        leaning: "sociability",
+        // CAPSTONE. 220 ticks, 8 tiles: most of a herd, most of a night.
+        // The warden itself never starts anything (`nonTerritorial`) — the
+        // line is not a challenge, it is just where things stop.
+        grantsPassives: [
+          { kind: "nonTerritorial", value: 1 },
+          { kind: "healAura", value: 0.006 },
+        ],
+        delta: { statusImmunityAura: { ticks: 220, radius: 8 } },
+      },
+
+      // ===== BOLDNESS: the vigil =====
+      stays_awake: {
+        id: "stays_awake",
+        name: "Stays Awake",
+        cost: 1,
+        leaning: "boldness",
+        // OPENER. The watcher is the one that is still up. Splits into
+        // outlasting the night and holding a specific piece of ground.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { cooldownTicks: -8 },
+      },
+      // --- Lane V: endurance. The night is long.
+      second_wind: {
+        id: "second_wind",
+        name: "Second Wind",
+        cost: 1,
+        prerequisites: ["stays_awake"],
+        leaning: "boldness",
+        // Root of the tree's one `selfHeal` chain, and what makes this
+        // branch fight-usable: `maybeUseUtilityMoveInCombat` spends an
+        // action on a `selfHeal` once the user is under 60% HP.
+        delta: { selfHeal: { fraction: 0.08 } },
+      },
+      bitten_through: {
+        id: "bitten_through",
+        name: "Bitten Through",
+        cost: 1,
+        prerequisites: ["second_wind"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+        delta: {},
+      },
+      still_standing: {
+        id: "still_standing",
+        name: "Still Standing",
+        cost: 1,
+        prerequisitesAnyOf: [["bitten_through"], ["does_not_blink"]],
+        leaning: "boldness",
+        // LANE V NOTABLE. Whatever happened, the watch did not end.
+        grantsPassive: { kind: "regen", value: 0.008 },
+        delta: { selfHeal: { fraction: 0.16 } },
+      },
+      dawn: {
+        id: "dawn",
+        name: "Dawn",
+        cost: 1,
+        prerequisites: ["still_standing"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Lane P: the post. A place, not a duration.
+      at_the_edge: {
+        id: "at_the_edge",
+        name: "At the Edge",
+        cost: 1,
+        prerequisites: ["stays_awake"],
+        excludes: ["walks_the_line"],
+        leaning: "boldness",
+        // FORK, against Walks the Line. Take one post and do not leave it:
+        // `immovable` (checked in `applyForcedMovement`) means nothing
+        // drags this warden off the boundary.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: {},
+      },
+      walks_the_line: {
+        id: "walks_the_line",
+        name: "Walks the Line",
+        cost: 1,
+        prerequisites: ["stays_awake"],
+        excludes: ["at_the_edge"],
+        leaning: "boldness",
+        // FORK, against At the Edge. The opposite answer: hold no post,
+        // walk the whole perimeter, and put the ward up far more often.
+        // Base cooldown 80, so -10 is a real tempo change on a move whose
+        // aura is measured in ticks of coverage.
+        delta: { cooldownTicks: -10 },
+      },
+      unrelieved: {
+        id: "unrelieved",
+        name: "Unrelieved",
+        cost: 1,
+        prerequisitesAnyOf: [["at_the_edge"], ["walks_the_line"], ["nobody_stirs"]],
+        leaning: "boldness",
+        // LANE P NOTABLE. Nobody came to take over. `unshaken` makes the
+        // first thing to reach this warden do nothing at all
+        // (`resolveHitAgainstTarget` checks it before anything else).
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.08 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: {},
+      },
+      long_hours: {
+        id: "long_hours",
+        name: "Long Hours",
+        cost: 1,
+        prerequisites: ["unrelieved"],
+        leaning: "boldness",
+        // The watcher settles into the post. A self Defense stage is read
+        // by `calculateDamage` like any other stage.
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 80 }] },
+      },
+      // --- Convergence, filler, capstone.
+      does_not_sleep: {
+        id: "does_not_sleep",
+        name: "Does Not Sleep",
+        cost: 1,
+        prerequisitesAnyOf: [["dawn"], ["long_hours"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes end here — the endurance to last the
+        // night and the refusal to be moved off the spot.
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: { selfHeal: { fraction: 0.24 } },
+      },
+      heavy_eyes: {
+        id: "heavy_eyes",
+        name: "Heavy Eyes",
+        cost: 1,
+        prerequisites: ["does_not_sleep"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      the_whole_night: {
+        id: "the_whole_night",
+        name: "The Whole Night",
+        cost: 1,
+        prerequisites: ["heavy_eyes"],
+        leaning: "boldness",
+        // CAPSTONE. The watch is now the warden's whole day: it heals
+        // while it stands, the first hit against it does nothing, and it
+        // can raise the ward roughly three times as often as it could
+        // untrained.
+        grantsPassives: [
+          { kind: "regen", value: 0.015 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: {
+          cooldownTicks: -10,
+          statChangesOnHit: [{ target: "self", stat: "defense", stage: 3, ticks: 200 }],
+        },
+      },
+
+      // ===== AGGRESSION: the warden goes out to meet it =====
+      steps_out: {
+        id: "steps_out",
+        name: "Steps Out",
+        cost: 1,
+        leaning: "aggression",
+        // OPENER. The warden does not wait behind its own line. Splits
+        // into wearing an outsider down and standing in front of one.
+        delta: { statChangesOnHit: [{ target: "self", stat: "attack", stage: 1, ticks: 60 }] },
+      },
+      // --- Lane D: wear it down. Nothing settles near a warded herd.
+      no_grazing_here: {
+        id: "no_grazing_here",
+        name: "No Grazing Here",
+        cost: 1,
+        prerequisites: ["steps_out"],
+        leaning: "aggression",
+        // Root of the `drainNeeds` chain. Real, visible resource theft
+        // (utilityMoves.ts): the nearest non-herd agent within 4 tiles
+        // loses hunger and the warden gains it. An outsider loitering at
+        // the edge of a warded herd leaves worse off than it arrived.
+        // Idle-tick only — `maybeUseUtilityMoveInCombat` does not drain.
+        delta: { drainNeeds: { need: "hunger", amount: 0.06, radius: 4 } },
+      },
+      not_here: {
+        id: "not_here",
+        name: "Not Here",
+        cost: 1,
+        prerequisites: ["no_grazing_here"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
+      },
+      moved_on: {
+        id: "moved_on",
+        name: "Moved On",
+        cost: 1,
+        prerequisitesAnyOf: [["not_here"], ["does_not_blink"]],
+        leaning: "aggression",
+        // LANE D NOTABLE. Whatever was circling gives up on this patch and
+        // goes to find an easier one.
+        delta: { drainNeeds: { need: "hunger", amount: 0.14, radius: 5 } },
+      },
+      nothing_takes_root: {
+        id: "nothing_takes_root",
+        name: "Nothing Takes Root",
+        cost: 1,
+        prerequisites: ["moved_on"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Lane S: stand in front. The body between.
+      broad_side: {
+        id: "broad_side",
+        name: "Broad Side",
+        cost: 1,
+        prerequisites: ["steps_out"],
+        excludes: ["bared_teeth"],
+        leaning: "aggression",
+        // FORK, against Bared Teeth. Take the hit yourself: a flat 2 HP
+        // off everything that lands.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      bared_teeth: {
+        id: "bared_teeth",
+        name: "Bared Teeth",
+        cost: 1,
+        prerequisites: ["steps_out"],
+        excludes: ["broad_side"],
+        leaning: "aggression",
+        // FORK, against Broad Side. Different in kind, not degree: this
+        // one does not absorb anything — it makes the hit cost something
+        // (`thorns` reflects damage back onto the attacker).
+        grantsPassive: { kind: "thorns", value: 0.08 },
+        delta: {},
+      },
+      between_you_and_them: {
+        id: "between_you_and_them",
+        name: "Between You and Them",
+        cost: 1,
+        prerequisitesAnyOf: [["broad_side"], ["bared_teeth"], ["nothing_gets_in"]],
+        leaning: "aggression",
+        // LANE S NOTABLE. The warden is now the thing in the way, and the
+        // first hit against it does nothing at all.
+        grantsPassive: { kind: "unshaken", value: 1 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 2, ticks: 80 }] },
+      },
+      braced: {
+        id: "braced",
+        name: "Braced",
+        cost: 1,
+        prerequisites: ["between_you_and_them"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -6 },
+      },
+      // --- Convergence, filler, capstone.
+      the_one_that_stays: {
+        id: "the_one_that_stays",
+        name: "The One That Stays",
+        cost: 1,
+        prerequisitesAnyOf: [["nothing_takes_root"], ["braced"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. When the rest of the herd moves off, this is the
+        // one still standing where the herd used to be.
+        grantsPassives: [
+          { kind: "damageReduction", value: 0.1 },
+          { kind: "thorns", value: 0.06 },
+        ],
+        delta: {},
+      },
+      sore_to_circle: {
+        id: "sore_to_circle",
+        name: "Sore to Circle",
+        cost: 1,
+        prerequisites: ["the_one_that_stays"],
+        leaning: "aggression",
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: {},
+      },
+      not_worth_the_walk: {
+        id: "not_worth_the_walk",
+        name: "Not Worth the Walk",
+        cost: 1,
+        prerequisites: ["sore_to_circle"],
+        leaning: "aggression",
+        // CAPSTONE. A predator that shadows this herd goes hungry doing
+        // it: 22% of its hunger, out to 6 tiles, every time the warden
+        // uses the move — and the warden itself is stronger for it.
+        grantsPassive: { kind: "thorns", value: 0.06 },
+        delta: {
+          drainNeeds: { need: "hunger", amount: 0.22, radius: 6 },
+          statChangesOnHit: [{ target: "self", stat: "attack", stage: 3, ticks: 150 }],
+        },
+      },
+
+      // ===== Bridges =====
+      sleepless_teeth: {
+        id: "sleepless_teeth",
+        name: "Sleepless Teeth",
+        cost: 1,
+        prerequisites: ["steps_out", "stays_awake"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. The warden that goes out to
+        // meet things is also the one that never sits down.
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      worn_but_awake: {
+        id: "worn_but_awake",
+        name: "Worn but Awake",
+        cost: 1,
+        prerequisites: ["sleepless_teeth"],
+        leaning: "aggression",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      does_not_blink: {
+        id: "does_not_blink",
+        name: "Does Not Blink",
+        cost: 1,
+        prerequisites: ["worn_but_awake"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Its own crosslink's lever escalated. Lands on
+        // Moved On (Aggression) and Still Standing (Boldness).
+        grantsPassives: [
+          { kind: "damageReductionFlat", value: 2 },
+          { kind: "unshaken", value: 1 },
+        ],
+        delta: {},
+      },
+
+      the_ring_and_the_watcher: {
+        id: "the_ring_and_the_watcher",
+        name: "The Ring and the Watcher",
+        cost: 1,
+        prerequisites: ["stays_awake", "drawn_ring"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. A watcher inside its own ring:
+        // nothing near it picks a fight.
+        grantsPassive: { kind: "calmingPresence", value: 0.06 },
+        delta: {},
+      },
+      quiet_rounds: {
+        id: "quiet_rounds",
+        name: "Quiet Rounds",
+        cost: 1,
+        prerequisites: ["the_ring_and_the_watcher"],
+        leaning: "boldness",
+        grantsPassive: { kind: "calmingPresence", value: 0.08 },
+        delta: {},
+      },
+      nobody_stirs: {
+        id: "nobody_stirs",
+        name: "Nobody Stirs",
+        cost: 1,
+        prerequisites: ["quiet_rounds"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Lands on Unrelieved (Boldness) and Night Nurse
+        // (Sociability).
+        grantsPassives: [
+          { kind: "calmingPresence", value: 0.12 },
+          { kind: "nonTerritorial", value: 1 },
+        ],
+        delta: {},
+      },
+
+      the_line_has_teeth: {
+        id: "the_line_has_teeth",
+        name: "The Line Has Teeth",
+        cost: 1,
+        prerequisites: ["drawn_ring", "steps_out"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. The ring is not only a line;
+        // it is unpleasant to lean on.
+        grantsPassive: { kind: "thorns", value: 0.02 },
+        delta: {},
+      },
+      hedged: {
+        id: "hedged",
+        name: "Hedged",
+        cost: 1,
+        prerequisites: ["the_line_has_teeth"],
+        leaning: "sociability",
+        grantsPassive: { kind: "thorns", value: 0.03 },
+        delta: {},
+      },
+      nothing_gets_in: {
+        id: "nothing_gets_in",
+        name: "Nothing Gets In",
+        cost: 1,
+        prerequisites: ["hedged"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Lands on The Line (Sociability) and Between You
+        // and Them (Aggression).
+        grantsPassive: { kind: "thorns", value: 0.05 },
+        delta: { cooldownTicks: -4 },
+      },
+    },
   },
   rain_dance: {
     id: "rain_dance",
