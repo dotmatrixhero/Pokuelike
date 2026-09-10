@@ -23,7 +23,9 @@ import { describeMoveTreeNode, summarizeBuildEffects } from "../../web/src/moveT
 
 const count = Number(process.argv[2] ?? 5);
 const seed = Number(process.argv[3] ?? 42);
-const onlyMove = process.argv[4];
+const onlyMove = process.argv[4] && process.argv[4] !== "--md" ? process.argv[4] : undefined;
+/** `--md` anywhere in the args switches to Markdown, for reading in a doc viewer rather than a terminal. */
+const md = process.argv.includes("--md");
 
 /** Deterministic rng so a printed build can be reproduced from its seed. */
 function rngFrom(s: number): () => number {
@@ -42,9 +44,12 @@ const learnersOf = (moveId: string) =>
 
 const rng = rngFrom(seed);
 const pick = <T,>(xs: T[]) => xs[Math.floor(rng() * xs.length)];
+/** Identity/immutable fields — never differ between a base move and its build, so listing them is noise. */
+const SKIP_FIELDS = new Set(["id", "name", "tree", "type", "category", "pp"]);
 const fmt = (v: any): string => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v));
 
-console.log(`${count} random builds — seed ${seed}\n`);
+if (md) console.log(`# ${count} random builds\n\nSeed \`${seed}\` — reproduce with \`npx tsx packages/runner/src/rollBuilds.ts ${count} ${seed} --md\`.\n\nEvery point below was spent by the engine's own \`maybeAutoRespec\` on a real spawned agent with a real disposition — these are builds the sim actually produces, not ones I picked.\n`);
+else console.log(`${count} random builds — seed ${seed}\n`);
 
 for (let i = 0; i < count; i++) {
   const move = onlyMove ? treedMoves.find((m) => m.id === onlyMove) : pick(treedMoves);
@@ -68,10 +73,15 @@ for (let i = 0; i < count; i++) {
   const dispStr = ["aggression", "boldness", "sociability"]
     .map((k) => `${k[0].toUpperCase()}${(disp[k] ?? 0).toFixed(2)}`).join(" ");
 
-  console.log("=".repeat(74));
-  console.log(`BUILD ${i + 1}: ${species.name ?? species.id} (lv ${level}) — ${move.name}`);
-  console.log(`  disposition ${dispStr}   |   ${points} points granted, ${chosen.length} nodes taken`);
-  console.log("=".repeat(74));
+  if (md) {
+    console.log(`\n---\n\n# ${i + 1}. ${species.name ?? species.id} — ${move.name}`);
+    console.log(`\nLevel ${level} · disposition ${dispStr} · ${points} points granted, **${chosen.length} nodes taken**`);
+  } else {
+    console.log("=".repeat(74));
+    console.log(`BUILD ${i + 1}: ${species.name ?? species.id} (lv ${level}) — ${move.name}`);
+    console.log(`  disposition ${dispStr}   |   ${points} points granted, ${chosen.length} nodes taken`);
+    console.log("=".repeat(74));
+  }
 
   // Where the points ACTUALLY went. `maybeAutoRespec` spends across every
   // move the agent knows, not just the one being sampled, and it banks when
@@ -81,31 +91,30 @@ for (let i = 0; i < count; i++) {
   const spread = Object.entries(agent.moveTreeChoices ?? {})
     .map(([k, v]) => `${k.toLowerCase()} ${(v as string[]).length}`)
     .join(", ");
-  console.log(`  points went to: ${spread || "nothing"}   |   still banked: ${agent.skillPoints?.[type] ?? 0} typed + ${agent.wildcardSkillPoints ?? 0} wildcard`);
+  const bankLine = `points went to: ${spread || "nothing"} — still banked: ${agent.skillPoints?.[type] ?? 0} typed + ${agent.wildcardSkillPoints ?? 0} wildcard`;
+  console.log(md ? `\n> ${bankLine}` : `  ${bankLine}`);
 
   if (chosen.length === 0) {
-    console.log(`  (nothing bought on ${move.name} itself — see the spread above)\n`);
+    console.log(md ? `\n_Nothing bought on ${move.name} itself — see the spread above._` : `  (nothing bought on ${move.name} itself — see the spread above)\n`);
     continue;
   }
 
-  console.log("\n  NODES TAKEN, in the order the engine bought them:");
-  for (const id of chosen) {
-    const node = move.tree[id];
-    if (!node) continue;
-    const lines = describeMoveTreeNode(node).filter((l) => !l.startsWith("Leans:"));
-    console.log(`    • ${node.name}  [${node.leaning}, ${node.cost}pt]`);
-    for (const l of lines) console.log(`        ${l}`);
-  }
+  const nodeBlock = () => {
+    for (const id of chosen) {
+      const node = move.tree[id];
+      if (!node) continue;
+      const lines = describeMoveTreeNode(node).filter((l) => !l.startsWith("Leans:"));
+      if (md) {
+        console.log(`- **${node.name}** — _${node.leaning}, ${node.cost}pt_`);
+        for (const l of lines) console.log(`  - ${l}`);
+      } else {
+        console.log(`    • ${node.name}  [${node.leaning}, ${node.cost}pt]`);
+        for (const l of lines) console.log(`        ${l}`);
+      }
+    }
+  };
 
   const built = applyMoveTree(move, chosen);
-  console.log("\n  FINAL MOVE vs. its base:");
-  const keys = new Set([...Object.keys(move), ...Object.keys(built)]);
-  const skip = new Set(["id", "name", "tree", "type", "category", "pp"]);
-  for (const k of [...keys].sort()) {
-    if (skip.has(k)) continue;
-    const a = fmt((move as any)[k]), b = fmt((built as any)[k]);
-    if (a !== b) console.log(`    ${k.padEnd(20)} ${a}  ->  ${b}`);
-  }
 
   // The numbers a balance read actually needs, computed the way the engine
   // computes them rather than eyeballed off the field list: damage per ACTION
@@ -117,18 +126,61 @@ for (let i = 0; i < count; i++) {
     return ((m.power + weight) * hits) / (m.cooldownTicks + 1);
   };
   const before = perAction(move), after = perAction(built);
-  console.log("\n  AT A GLANCE:");
-  console.log(`    power           ${move.power} -> ${built.power}${built.weightScaling ? `  (+${(built.weightScaling.factor * (agent.maxHp ?? 0)).toFixed(1)} from weight at ${agent.maxHp} maxHp)` : ""}`);
-  console.log(`    cooldown        ${move.cooldownTicks} -> ${built.cooldownTicks} ticks  (usable every ${built.cooldownTicks + 1} actions)`);
-  console.log(`    accuracy        ${move.accuracy} -> ${built.accuracy}`);
-  console.log(`    damage/action   ${before.toFixed(1)} -> ${after.toFixed(1)}   (${(after / before).toFixed(2)}x)`);
+  const weightNote = built.weightScaling
+    ? `  (+${(built.weightScaling.factor * (agent.maxHp ?? 0)).toFixed(1)} from weight at ${agent.maxHp} maxHp)`
+    : "";
+  const glance: [string, string][] = [
+    ["power", `${move.power} → ${built.power}${weightNote}`],
+    ["cooldown", `${move.cooldownTicks} → ${built.cooldownTicks} ticks (usable every ${built.cooldownTicks + 1} actions)`],
+    ["accuracy", `${move.accuracy} → ${built.accuracy}`],
+    ["damage/action", `${before.toFixed(1)} → ${after.toFixed(1)} (**${(after / before).toFixed(2)}×**)`],
+  ];
 
   const { totalCost, deltaLines, passiveLines } = summarizeBuildEffects(move.tree, chosen);
-  console.log(`\n  WHAT THE BUILD DOES (${totalCost} points spent):`);
-  for (const l of deltaLines) console.log(`    - ${l}`);
-  if (passiveLines.length) {
-    console.log("\n  PASSIVES IT NOW CARRIES (these stack across every move it knows):");
-    for (const l of passiveLines) console.log(`    - ${l}`);
+
+  if (md) {
+    console.log("\n## At a glance\n");
+    console.log("| | |\n|---|---|");
+    for (const [k, v] of glance) console.log(`| ${k} | ${v} |`);
+
+    console.log("\n## Nodes\n");
+    nodeBlock();
+
+    console.log(`\n## What the build does\n\n_${totalCost} points spent._\n`);
+    for (const l of deltaLines) console.log(`- ${l}`);
+    if (passiveLines.length) {
+      console.log("\n## Passives it now carries\n\n_These stack across every move the agent knows._\n");
+      for (const l of passiveLines) console.log(`- ${l}`);
+    }
+
+    console.log("\n<details><summary>Final spec vs. base</summary>\n");
+    console.log("| field | base | built |\n|---|---|---|");
+    for (const k of [...new Set([...Object.keys(move), ...Object.keys(built)])].sort()) {
+      if (SKIP_FIELDS.has(k)) continue;
+      const a = fmt((move as any)[k]), b = fmt((built as any)[k]);
+      if (a !== b) console.log(`| \`${k}\` | ${a} | ${b} |`);
+    }
+    console.log("\n</details>");
+  } else {
+    console.log("\n  AT A GLANCE:");
+    for (const [k, v] of glance) console.log(`    ${k.padEnd(15)} ${v.replace(/\*\*/g, "")}`);
+
+    console.log("\n  NODES TAKEN, in the order the engine bought them:");
+    nodeBlock();
+
+    console.log(`\n  WHAT THE BUILD DOES (${totalCost} points spent):`);
+    for (const l of deltaLines) console.log(`    - ${l}`);
+    if (passiveLines.length) {
+      console.log("\n  PASSIVES IT NOW CARRIES (these stack across every move it knows):");
+      for (const l of passiveLines) console.log(`    - ${l}`);
+    }
+
+    console.log("\n  FINAL MOVE vs. its base:");
+    for (const k of [...new Set([...Object.keys(move), ...Object.keys(built)])].sort()) {
+      if (SKIP_FIELDS.has(k)) continue;
+      const a = fmt((move as any)[k]), b = fmt((built as any)[k]);
+      if (a !== b) console.log(`    ${k.padEnd(20)} ${a}  ->  ${b}`);
+    }
   }
   console.log();
 }
