@@ -844,6 +844,33 @@ describe("guardians", () => {
     expect(protector.pos.x).toBeLessThan(8); // closing in — TEST_MOVE is melee-only, can't hit from 2 away yet
   });
 
+  it("a same-herd guardian that's ALSO a predator species never selects itself as the threat it's defending its herd-mate from", () => {
+    // Real bug, confirmed live via a screenshot + a headless multi-seed run
+    // (24 self-fought events across 8 seeds/10,000 ticks): a Weepinbell
+    // repeatedly fought and killed itself — "Weepinbell vs Weepinbell
+    // fighting! Weepinbell used Poison Jab! Weepinbell takes 89 damage!
+    // Weepinbell fainted!" with the SAME agent id as both attacker and
+    // defender. Root cause: the guardian branch's threat scan is centered
+    // on the herd-mate being protected, not the guardian itself, so
+    // `agentsWithin` only excludes the herd-mate — the guardian (well
+    // within its own detection radius of the herd-mate it's approaching)
+    // was never excluded. A same-herd, `isPredator`-flagged guardian
+    // (Weepinbell IS one) defending a weaker, different-species herd-mate
+    // could pass its own `isGenuineThreat` check against that herd-mate
+    // and get picked as the "threat" — itself.
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const PREDATOR_GUARDIAN_RULES: HuntRules = { venusaur: true }; // the guardian's own species flagged as a hunter — the exact shape of the real bug (Weepinbell is isPredator)
+    const protector = guardian({ x: 6, y: 5 }, { herdId: "herd-a" });
+    const weakmate = prey({ x: 5, y: 5 }, { id: "bulbasaur-weak", herdId: "herd-a", behavior: "flee" });
+    world.agents.push(protector, weakmate);
+    const log = new EventLog();
+
+    tickWorld(world, log, PREDATOR_GUARDIAN_RULES, undefined, SAFE_RNG);
+
+    expect(protector.fightTarget).not.toBe(protector.id);
+    expect(log.events.some((e) => e.kind === "fought" && e.attackerId === e.defenderId)).toBe(false);
+  });
+
   it("a guardian with no herd-mate in danger behaves normally", () => {
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const protector = guardian({ x: 8, y: 5 }, { herdId: "herd-a" });
