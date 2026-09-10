@@ -95,6 +95,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.agentId, event.species)} burned to death at (${event.pos.x},${event.pos.y})`;
     case "starved":
       return `${idLabel(world, event.agentId, event.species)} starved to death (${event.cause})`;
+    case "startedFollowing":
+      return `${idLabel(world, event.agentId, event.species)} started following ${idLabel(world, event.targetId, event.targetSpecies)}`;
+    case "stoppedFollowing":
+      return `${idLabel(world, event.agentId, event.species)} stopped following ${idLabel(world, event.targetId, event.targetSpecies)}`;
     case "diedOfAge":
       return `${idLabel(world, event.agentId, event.species)} died of old age (${event.age} ticks)`;
     case "leveledUp":

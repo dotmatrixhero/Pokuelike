@@ -87,6 +87,16 @@ export const RAPPORT_MAX_EDGES_PER_AGENT = 16;
 export const RAPPORT_FOOD_DELIVERY_DELTA = 0.03;
 
 /**
+ * ROADMAP.md M6's Feed verb: a berry set down by a stranger and eaten. Bigger
+ * than a herd-mate's routine delivery (0.03) because it is a deliberate gift
+ * across a species line, and it is the one lever the player has on day one.
+ * Sim-original guess: at trust.ts's thresholds, ~3 eaten offerings reach
+ * `curious`, ~7 reach `bonded`, decay permitting. For the user to judge
+ * against validateBond.ts.
+ */
+export const RAPPORT_OFFERED_FOOD_DELTA = 0.08;
+
+/**
  * Deliberately socializing (`needs.ts`'s `applySocializing`, the idle-stack
  * fallback right before `applyTraining`) — direct ask: "socialize as an
  * intention/unit action to spend time, could help create rapport with your

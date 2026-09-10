@@ -26,6 +26,10 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) burned to death at (${event.pos.x},${event.pos.y})`;
     case "starved":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) starved to death (${event.cause}) at (${event.pos.x},${event.pos.y})`;
+    case "startedFollowing":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) started following ${speciesDisplayName(event.targetSpecies)} (${event.targetId})`;
+    case "stoppedFollowing":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) stopped following ${speciesDisplayName(event.targetSpecies)} (${event.targetId})`;
     case "diedOfAge":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) died of old age (${event.age} ticks) at (${event.pos.x},${event.pos.y})`;
     case "leveledUp":

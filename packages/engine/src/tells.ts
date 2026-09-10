@@ -2,6 +2,8 @@ import type { Agent, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { hasLineOfSight } from "./fov.js";
 import { FLEE_DETECT_RADIUS } from "./predation.js";
+import { playerFleeRadius } from "./threat.js";
+import { trustStage } from "./trust.js";
 
 /**
  * Tells — what an observer can see a creature doing, ROADMAP.md's M4.
@@ -58,7 +60,10 @@ function pronoun(agent: Agent): string {
 export function hasNoticed(world: World, agent: Agent, observer: Agent): boolean {
   if (agent.layer !== observer.layer) return false;
   if (agent.asleep || agent.fainted || agent.alive === false) return false;
-  if (Math.hypot(agent.pos.x - observer.pos.x, agent.pos.y - observer.pos.y) > FLEE_DETECT_RADIUS) return false;
+  // ROADMAP.md M6: for the player, "noticed" is the threat-signature radius
+  // predation uses, so "has seen you" still means "will react to you".
+  const radius = observer.controlledBy === "player" ? Math.max(1, playerFleeRadius(world, observer, FLEE_DETECT_RADIUS, agent)) : FLEE_DETECT_RADIUS;
+  if (Math.hypot(agent.pos.x - observer.pos.x, agent.pos.y - observer.pos.y) > radius) return false;
   const elevation = tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.elevation ?? 0;
   return hasLineOfSight(world, agent.layer, agent.pos, observer.pos, elevation);
 }
@@ -127,6 +132,10 @@ export function describeBehavior(world: World, agent: Agent, opts: TellOptions =
       return `${me} is training.`;
     case "socialize":
       return `${me} is with its herd.`;
+    case "follow": {
+      const who = other(agent.followingId);
+      return who ? `${me} is following ${who}.` : `${me} is following someone.`;
+    }
     case "idle":
       return `${me} is standing still.`;
   }
@@ -142,7 +151,11 @@ export function examine(world: World, agent: Agent, opts: TellOptions = {}): str
   if (agent.isEgg || agent.alive === false) return first;
   const p = pronoun(agent);
   if (opts.observer && opts.observer.id !== agent.id) {
-    return `${first} ${hasNoticed(world, agent, opts.observer) ? `${p} has seen you.` : `${p} has not noticed you.`}`;
+    // ROADMAP.md M6: the trust stage is the third sentence, and only once
+    // there is something to say — "wary" is the default and says nothing.
+    const stage = opts.observer.controlledBy === "player" ? trustStage(world, agent, opts.observer.id) : "wary";
+    const trust = stage === "tolerant" ? ` ${p} has stopped watching you.` : stage === "curious" ? ` ${p} comes a little closer.` : stage === "bonded" ? ` ${p} stays beside you.` : "";
+    return `${first} ${hasNoticed(world, agent, opts.observer) ? `${p} has seen you.` : `${p} has not noticed you.`}${trust}`;
   }
   if (agent.status) {
     const s = agent.status.kind;

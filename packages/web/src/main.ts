@@ -471,7 +471,7 @@ function renderPack(player: Agent): void {
     const slot = held ? ` (held${fuel})` : player.equipment?.worn === i.itemKey ? " (worn)" : "";
     return `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}${slot}`;
   });
-  hudPackEl.textContent = `Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
+  hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
   if (player.lastNotice) {
     if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
     player.lastNotice = undefined;
@@ -512,6 +512,11 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
     }
     case "stow":
       return ok ? "You put it away." : "Your hands are empty.";
+    case "crouch":
+      return ok ? "You crouch. You move slowly and read as less of a threat." : "You stand up.";
+    case "offer":
+      if (ok) return "You set a berry down beside you.";
+      return countOf(player, "food") > 0 ? "No free ground beside you." : "You have no berries. Gather some from a patch.";
   }
 }
 
@@ -664,6 +669,8 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
   " ": { kind: "wait" },
   e: { kind: "eat" },
   q: { kind: "drink" },
+  z: { kind: "crouch" },
+  o: { kind: "offer" },
 };
 
 window.addEventListener("keydown", (e) => {
@@ -1013,7 +1020,7 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button").forEach((btn) =>
       playerAct({ kind: "gather" });
       runActivity();
     } else if (act === "pack") openPackMenu();
-    else if (act === "wait" || act === "eat" || act === "drink") playerAct({ kind: act });
+    else if (act === "wait" || act === "eat" || act === "drink" || act === "crouch" || act === "offer") playerAct({ kind: act });
   });
 });
 

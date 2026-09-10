@@ -18,6 +18,47 @@ Contents:
 - 6. Rulings needed from the user
 - 7. Sizing
 
+## Update, second session: M5 done, M6 built but not done — start here
+
+M5 (gather, pack, crafting, torch), the Watch/Play switch, tap-to-play on
+phones, layer-1 flint and herbs, 1000-tick torch fuel, and the
+exhaustion penalty (−20% speed at 0 energy, only under 20%) are all on
+master and verified. M6 is fully built and unit-tested but **no bot has
+earned a follower on any of 5 seeds** — see ROADMAP.md's M6 STATUS and
+TODO.md's "M6 Bond" section for the numbers.
+
+**The user's ruling on this: "we just have to let them actually grow
+bond."** That is the next agent's first task. Do it like this:
+
+1. Run `pnpm --filter @pokuelike/runner exec tsx src/validateBond.ts`
+   first, unchanged, to get the baseline table (treats taken, best trust,
+   stage, follower, 5 seeds). Keep that table.
+2. The lever is decay, not delta. `rapport.ts`'s `RAPPORT_DECAY_PER_TICK`
+   (0.9977, half-life ~300 ticks) applies to a creature's edge toward the
+   player exactly like to any edge, and a player cannot feed every 60
+   ticks while also gathering, drinking and chasing. Add a
+   `RAPPORT_PLAYER_EDGE_DECAY_PER_TICK` (start at 0.9995, half-life ~1400
+   ticks) and use it in `decayedRapportScore` when the *other* id is the
+   player (`world.agents.find(a => a.controlledBy === "player")?.id`; the
+   decay function does not have the world today — pass the player id in
+   from `rapportScore`'s callers or look it up once per tick in
+   `tickWorld` and stash it on the world). Re-run the bot. Show both
+   tables to the user.
+3. If curious (0.2) is still not reached on most seeds, the second lever
+   is the treat cooldown (`needs.ts` `TREAT_COOLDOWN_TICKS`, 60) — halve
+   it — and only then the thresholds (`trust.ts`). One lever at a time,
+   a table after each, the user picks.
+4. The bot itself has two known weaknesses you may fix freely (they are
+   not balance): it starves when berry patches are far, and it chases a
+   Sandshrew into map edges. The user has ruled a cornered Sandshrew
+   killing the player is fine — do not soften that.
+5. When a seed produces a follower, walk 25 tiles into the dark and
+   report `distAfter25`. That number, on 5 seeds, is M6's acceptance.
+   Then, and only then, build the dispersal-offer overlay (§4.4 below).
+
+Everything else below is still accurate; §3 (M5) is done, §4 (M6) is
+built, the remaining open items are in TODO.md.
+
 State at handoff (master, 2026-09-10): M0–M4 are built, verified live and
 pushed. The player is a human in a cave with fog of war, hunger, thirst,
 eat/drink, a death screen, and an examine verb that tells you what a

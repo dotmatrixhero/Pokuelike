@@ -242,6 +242,24 @@ export type SimEvent =
       hp: number;
     }
   | {
+      /** ROADMAP.md M6: a creature decided to come along with the player (trust.ts). */
+      kind: "startedFollowing";
+      tick: number;
+      agentId: string;
+      species: string;
+      targetId: string;
+      targetSpecies: string;
+    }
+  | {
+      /** ROADMAP.md M6: trust fell away and it stopped. */
+      kind: "stoppedFollowing";
+      tick: number;
+      agentId: string;
+      species: string;
+      targetId: string;
+      targetSpecies: string;
+    }
+  | {
       kind: "looted";
       tick: number;
       looterId: string;

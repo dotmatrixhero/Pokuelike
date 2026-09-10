@@ -5,6 +5,7 @@ import { stepAlongPath } from "./pathfinding.js";
 import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
 import {
   RAPPORT_SLEPT_NEAR_DELTA,
+  RAPPORT_OFFERED_FOOD_DELTA,
   RAPPORT_SOCIALIZE_DELTA,
   RAPPORT_TRAINED_TOGETHER_DELTA,
   rapportScore,
@@ -1274,6 +1275,109 @@ export function tickAgentNeeds(
  * modeled as two independent mechanisms here too rather than one that
  * approximates both.
  */
+/**
+ * "Calm" for M6's treat and follow rules: no need pressing. NOT
+ * `chooseBehavior(needs) === "idle"` — that returns the *preferred*
+ * behaviour, and a well-fed creature prefers seekMate or socialize almost
+ * always, which silently disabled both rules on the first bot run.
+ */
+export function hasUrgentNeed(needs: Needs): boolean {
+  // Energy deliberately not included: chamber Sandshrew sit at 0 energy
+  // for hundreds of ticks without sleeping (TODO.md, "energy has no
+  // teeth"), and a tired animal still takes a berry and still walks with
+  // a friend. Sleep has its own gate.
+  return needs.hunger < 0.3 || needs.thirst < 0.3;
+}
+
+/** How far a calm creature notices a set-down berry and goes to take it. */
+export const TREAT_RADIUS = 4;
+/** One treat per this many ticks per creature — so a pocketful of berries is a courtship, not a vending machine. */
+export const TREAT_COOLDOWN_TICKS = 60;
+
+/**
+ * ROADMAP.md M6's Feed verb, the half that makes it a verb: a berry the
+ * player set down (`Tile.offeredBy`) is a *treat*, not a meal. The needs
+ * tree only sends a creature to food when it is hungry, and the chamber's
+ * Sandshrew never are — `validateBond.ts`'s first run set down 28 berries
+ * across 5 seeds and none was taken. So a calm creature (no urgent need,
+ * not fleeing — this runs after predation has had its say) within
+ * `TREAT_RADIUS` walks over and eats it, once per `TREAT_COOLDOWN_TICKS`.
+ * Eating it goes through the same `consume`/rapport path as any meal.
+ */
+/** The nearest set-down berry within `TREAT_RADIUS` (Chebyshev), or undefined. */
+export function nearestTreat(world: World, agent: Agent): { x: number; y: number; d: number } | undefined {
+  let best: { x: number; y: number; d: number } | undefined;
+  for (let dy = -TREAT_RADIUS; dy <= TREAT_RADIUS; dy++) {
+    for (let dx = -TREAT_RADIUS; dx <= TREAT_RADIUS; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      const tile = tileAt(world, agent.layer, x, y);
+      if (!tile?.offeredBy || tile.offeredBy === agent.id || tile.terrain !== "food" || (tile.stock ?? 0) <= 0) continue;
+      const d = Math.max(Math.abs(dx), Math.abs(dy)); // the box IS the radius (Chebyshev), so a diagonal berry is not "far"
+      if (!best || d < best.d) best = { x, y, d };
+    }
+  }
+  return best;
+}
+
+/** Why `applyTreatSeeking` would not act for this agent right now, or undefined if it would. Diagnostic; validateBond.ts prints it. */
+export function treatBlockedReason(world: World, agent: Agent): string | undefined {
+  if (agent.controlledBy) return "is the player";
+  if ((agent.lastTreatTick ?? -Infinity) + TREAT_COOLDOWN_TICKS > world.tick) return "cooldown";
+  if (hasUrgentNeed(agent.needs)) return "urgent need";
+  if (!nearestTreat(world, agent)) return "no berry in range";
+  return undefined;
+}
+
+export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rng: () => number = Math.random): boolean {
+  if (treatBlockedReason(world, agent)) return false;
+  const best = nearestTreat(world, agent)!;
+  if (best.d === 0) {
+    const tile = tileAt(world, agent.layer, best.x, best.y)!;
+    consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+    tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+    recordGrazing(tile);
+    const giver = world.agents.find((a) => a.id === tile.offeredBy);
+    if (giver) strengthenRapportMutual(world, agent, giver, RAPPORT_OFFERED_FOOD_DELTA, "receivedFood", "gaveFood", rng);
+    tile.offeredBy = undefined;
+    agent.lastTreatTick = world.tick;
+    log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+    return true;
+  }
+  if (agent.behavior !== "seekFood") {
+    logBehaviorChange(log, world, agent, "seekFood");
+    agent.behavior = "seekFood";
+  }
+  agent.pos = stepToward(world, agent.layer, agent.pos, best, agent, agent);
+  return true;
+}
+
+/** Follower distance kept: closer than this it idles, farther it steps in. */
+export const FOLLOW_KEEP_DISTANCE = 2;
+
+/**
+ * ROADMAP.md M6's follower door, the movement half (trust.ts decides who
+ * follows). Steps toward `followingId` when farther than
+ * `FOLLOW_KEEP_DISTANCE`; otherwise stands with them. Yields to the needs
+ * tree when a need is urgent, and lets go if the followed one is gone.
+ */
+export function applyFollowing(world: World, agent: Agent, log?: EventLog): boolean {
+  if (!agent.followingId) return false;
+  const leader = world.agents.find((a) => a.id === agent.followingId);
+  if (!leader || leader.alive === false || leader.layer !== agent.layer) {
+    agent.followingId = undefined;
+    return false;
+  }
+  if (hasUrgentNeed(agent.needs)) return false;
+  const distance = Math.max(Math.abs(leader.pos.x - agent.pos.x), Math.abs(leader.pos.y - agent.pos.y));
+  if (agent.behavior !== "follow") {
+    logBehaviorChange(log, world, agent, "follow");
+    agent.behavior = "follow";
+  }
+  if (distance > FOLLOW_KEEP_DISTANCE) agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+  return true;
+}
+
 export function tickAgentAction(
   world: World,
   agent: Agent,
@@ -1315,6 +1419,11 @@ export function tickAgentAction(
   // without a single drink and died of thirst mid-search.
   const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
+  // and fighting have had their say, before the needs tree, and only while
+  // no need is urgent (a follower that starves is a bug).
+  if (applyTreatSeeking(world, agent, log, rng)) return;
+  if (applyFollowing(world, agent, log)) return;
   // Egg-eating (point 5 — "eggs are highly edible... super desired as food
   // by any Pokémon that does not share egg type... given the chance") — a
   // real, opportunistic feeding source checked at the same priority tier as
@@ -1722,6 +1831,15 @@ export function tickAgentAction(
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
+          }
+          // ROADMAP.md M6's Feed verb: this berry was set down by someone.
+          // The eater remembers who — the same `receivedFood`/`gaveFood`
+          // pair a herd delivery writes, so the inspector's rapport prose
+          // ("She has given me food.") already knows how to say it.
+          if (targetTile?.offeredBy) {
+            const giver = world.agents.find((a) => a.id === targetTile.offeredBy);
+            if (giver && giver.id !== agent.id) strengthenRapportMutual(world, agent, giver, RAPPORT_OFFERED_FOOD_DELTA, "receivedFood", "gaveFood", rng);
+            targetTile.offeredBy = undefined;
           }
           // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
           // short status-immunity grant on eat, well under Safeguard's own

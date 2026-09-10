@@ -48,6 +48,8 @@ export * from "./travel.js";
 export * from "./inventory.js";
 export { carryCapacityOf, usedCarryWeight } from "./support.js";
 export * from "./harvest.js";
+export * from "./threat.js";
+export * from "./trust.js";
 export * from "./notables.js";
 export * from "./herdLeadership.js";
 export * from "./directions.js";

@@ -191,7 +191,9 @@ export const SPECIES: Record<string, SpeciesDef> = {
     spriteKey: "human",
     placeholderColor: "#e8c39e",
     homeLayer: "surface",
-    isPredator: true,
+    // M0's `isPredator: true` stopgap is gone (ROADMAP.md M6): prey now
+    // react to the player's *threat signature* — speed, posture, what is
+    // in hand — see engine threat.ts and predation.ts's player branch.
     baseStats: { hp: 45, attack: 28, defense: 25, spAttack: 20, spDefense: 25, speed: 40 },
     types: ["normal"],
     moves: ["tackle"],

@@ -21,6 +21,7 @@ import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
+import { playerFleeRadius } from "./threat.js";
 import { activeWeatherAt, isInColdSnap, stormAccuracyMultiplier } from "./weather.js";
 import {
   applyStatStage,
@@ -512,7 +513,16 @@ export function agentsWithin(world: World, agent: Agent, radius: number): Agent[
  * export those two just for this.
  */
 export function hasNearbyThreat(world: World, agent: Agent, rules: HuntRules): boolean {
-  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).some((other) => isGenuineThreat(rules, agent, other));
+  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).some((other) => {
+    // ROADMAP.md M6: the player is a threat to a would-be sleeper only
+    // inside their signature-and-trust radius (threat.ts), same as for
+    // fleeing. A crouched human three tiles off does not keep a wary
+    // creature awake; a bonded creature sleeps beside a standing one. This
+    // is the Presence verb's precondition — traced: with the flat radius
+    // no creature would ever fall asleep within watch range of the player.
+    if (other.controlledBy === "player") return manhattan(agent.pos, other.pos) <= playerFleeRadius(world, other, FLEE_DETECT_RADIUS, agent);
+    return isGenuineThreat(rules, agent, other);
+  });
 }
 
 /**
@@ -1757,6 +1767,14 @@ export function applyPredationInstincts(
   const threats = agent.asleep
     ? []
     : agentsWithin(world, agent, wideFleeRadius).filter((other) => {
+        // ROADMAP.md M6: the player is not a predator by flag any more.
+        // Prey read the player's threat signature (threat.ts) — a crouched,
+        // unarmed, still human is half the ordinary radius; a running one
+        // with a club is well past it. Under 1 tile reads as no threat.
+        if (other.controlledBy === "player") {
+          const radius = playerFleeRadius(world, other, baseFleeRadius, agent);
+          return radius >= 1 && isDetectable(world, agent.pos, other, radius);
+        }
         if (!isGenuineThreat(rules, agent, other)) return false;
         const distance = manhattan(agent.pos, other.pos);
         if (distance <= baseFleeRadius) return isDetectable(world, agent.pos, other, baseFleeRadius);
@@ -1775,7 +1793,12 @@ export function applyPredationInstincts(
     // "fight" even against a hopelessly stronger threat. Falls through to
     // the flee logic below instead — direct ask: lower-level Pokémon "need
     // to try to survive more."
-    if (distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent) && levelGap(threat, agent) < SEVERE_LEVEL_GAP) {
+    // ROADMAP.md M6: prey never mob the player. The player is in this list
+    // by threat signature (how they move and what they hold), not because
+    // they attacked anyone — traced on the bond bot: a Sandshrew walked up
+    // to a crouched, empty-handed human and started a fight. Prey flee the
+    // player or ignore them; fighting back waits for a player attack verb.
+    if (threat.controlledBy !== "player" && distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent) && levelGap(threat, agent) < SEVERE_LEVEL_GAP) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;

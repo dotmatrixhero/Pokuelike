@@ -194,7 +194,9 @@ describe("craft and equip (ROADMAP M5)", () => {
     expect(me.torchFuel).toBe(TORCH_FUEL_TICKS);
     while (me.equipment?.held === "torch" && world.tick < TORCH_FUEL_TICKS + 50) advancePlayerTurn(world, { kind: "wait" });
     expect(world.tick).toBeGreaterThanOrEqual(TORCH_FUEL_TICKS);
-    expect(world.tick).toBeLessThan(TORCH_FUEL_TICKS + 10);
+    // One wait spans up to ~6 ticks once the exhaustion penalty kicks in (energy is
+    // near 0 by tick 1000), so the burnout lands within a wait of the fuel limit.
+    expect(world.tick).toBeLessThan(TORCH_FUEL_TICKS + 12);
     expect(countOf(me, "torch")).toBe(1);
     expect(me.equipment?.held).toBeUndefined();
     expect(me.lastNotice?.kind).toBe("torchBurnedOut");

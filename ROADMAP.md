@@ -369,6 +369,46 @@ Build:
 
 **Done when:** something follows you out of the chamber.
 
+**STATUS: BUILT, NOT DONE — 0 of 5 seeds followed. The numbers are the
+user's to rule on.** Everything in the Build list above exists except the
+dispersal-offer overlay (deferred until a follower happens at all):
+- **Threat signature** (`threat.ts`) replaces the human's `isPredator`
+  stopgap: base 1, crouched ×0.5, just moved ×1.25, club +0.5, torch +0.3,
+  cloak ×0.6. Prey flee the player inside their own radius × signature ×
+  trust. `z` crouches (a crouched step costs 1.5 turns). Prey never mob
+  the player (traced: a Sandshrew walked up to a crouched, empty-handed
+  human and started a fight).
+- **Feed** — `o` sets a berry down beside you (`Tile.offeredBy`). A calm
+  creature within 4 tiles takes it whether or not it is hungry, once per
+  60 ticks (`applyTreatSeeking`; without this rule 28 berries across 5
+  seeds went untouched, because chamber Sandshrew are never hungry), and
+  remembers you (`receivedFood`, +0.08).
+- **Presence** — `keptWatch`/`sleptSafely` fire for the player like for
+  any awake agent; verified. The sleep gate now uses the trust-aware
+  radius, else no creature would ever sleep within watch range of you.
+- **Trust stages** (`trust.ts`): wary/tolerant/curious/bonded at rapport
+  0.05/0.2/0.5, each shrinking the flee radius (×1, ×0.5, ×0.25, 0). Third
+  sentence of examine: "She has stopped watching you." / "She comes a
+  little closer." / "She stays beside you."
+- **The follower door** — a curious creature within 3 tiles rolls 5% per
+  player turn to follow (`startedFollowing` event), walks with you
+  (`applyFollowing`, needs override), stops when trust decays to wary.
+Measured (`runner/validateBond.ts`, a bot that gathers berries, chases the
+nearest Sandshrew, crouches at 3 tiles, sets a berry down, backs off,
+waits out the cooldown, repeats): treats taken 0–3 per seed, best trust
+0.08–0.18 — **tolerant on 4 seeds, curious on none, so no follower**. Why:
+rapport decays ×0.9977/tick (half-life ~300 ticks); at one 0.08 treat per
+60-tick cooldown the ceiling is ~0.6, but the bot's real cadence (chasing
+a roaming Sandshrew, restocking, drinking) is one treat per several
+hundred ticks, and the stage decays between. Two deaths on the way: the
+bot starved twice (its own upkeep), and on seed 202 it chased a Sandshrew
+into the map edge; a cornered creature strikes back (existing rule), one
+Fury Cutter fainted the 19-HP human, and the finishing-blow rule killed
+it. Everything built is unit-tested (`bond.test.ts`, 11) and the offer,
+crouch and treat paths were traced live in the cave. Rulings needed are
+in TODO.md: the three thresholds, the decay, the treat delta and cooldown,
+and whether a fainted player can be finished off.
+
 **This is where the design's open question gets answered.** If a player who
 has never read a design doc can work out that moving slowly, feeding, and
 staying near a sleeping creature earns its trust — from tells alone — the

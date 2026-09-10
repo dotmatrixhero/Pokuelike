@@ -329,6 +329,13 @@ export interface Tile {
    */
   harvested?: number;
   /**
+   * ROADMAP.md M6's Feed verb: the player who set this food down. Whoever
+   * eats from it gains rapport toward them (needs.ts's consume site) and
+   * the mark is cleared. A one-tile items-on-tiles primitive, not the cache
+   * system.
+   */
+  offeredBy?: string;
+  /**
    * "fire" tiles only: ticks of fuel left before the fire burns out and the
    * tile reverts to scorched "floor" (fire.ts's `tickFires`). Re-igniting a
    * burning tile refreshes this rather than stacking.
@@ -529,7 +536,9 @@ export type BehaviorKind =
   | "restAtShelter"
   | "scavenge"
   | "train"
-  | "socialize";
+  | "socialize"
+  /** ROADMAP.md M6: walking with the agent in `followingId`. */
+  | "follow";
 
 /**
  * What a player can do on a turn — ROADMAP.md's M0 vocabulary, deliberately
@@ -555,7 +564,11 @@ export type PlayerAction =
   | { kind: "cancel" }
   /** ROADMAP.md M5: hold or wear an item you carry, or put it away. */
   | { kind: "equip"; itemKey: string }
-  | { kind: "stow" };
+  | { kind: "stow" }
+  /** ROADMAP.md M6: toggle crouching. Halves your threat signature; a crouched step costs extra action energy. */
+  | { kind: "crouch" }
+  /** ROADMAP.md M6: set one berry from your pack down on a free tile beside you, for whoever comes. */
+  | { kind: "offer" };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -689,6 +702,19 @@ export interface Agent {
   equipment?: { held?: string; worn?: string };
   /** Ticks of burn left in the torch currently held. Ruling: 1000 per torch; at 0 the torch is used up. See player.ts `TORCH_FUEL_TICKS`. */
   torchFuel?: number;
+  /** ROADMAP.md M6: crouched reads as half the threat. Player only. See threat.ts. */
+  posture?: "crouch";
+  /**
+   * ROADMAP.md M6: the agent this one follows — the follower door. Set by
+   * trust.ts when a curious-enough creature decides to come along; cleared
+   * when trust decays or the followed one dies. Movement in needs.ts's
+   * `applyFollowing`; needs still override (a follower that starves is a bug).
+   */
+  followingId?: string;
+  /** ROADMAP.md M6: the dispersal offer's refusal is permanent per individual (CAMPAIGN_DESIGN.md). Not yet used; reserved. */
+  refusedFollow?: boolean;
+  /** ROADMAP.md M6: `World.tick` this agent last took a set-down berry (needs.ts `applyTreatSeeking`'s cooldown). */
+  lastTreatTick?: number;
   /** Something that happened to the player between actions (a torch burning out) — the HUD reads and clears it. */
   lastNotice?: { kind: "torchBurnedOut"; tick: number };
   /** Agents in the same herd share a home range and will regroup. */

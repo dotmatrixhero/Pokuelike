@@ -22,6 +22,7 @@ import { recordDeathWitnesses } from "./witness.js";
 import { applyPlayerAction, findPlayer, tickTorch } from "./player.js";
 import { updatePlayerVision } from "./vision.js";
 import { tickHarvestRegrowth } from "./harvest.js";
+import { tickFollowers } from "./trust.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { canFlyOverObstacle } from "./movement.js";
 
@@ -130,10 +131,29 @@ export function accumulateActionEnergy(agent: Agent, speed: number): boolean {
  * paralysis, then injury last. Exported (like `accumulateActionEnergy`) so
  * it's directly testable without needing a full `tickWorld` pass.
  */
+/** Below this energy the exhaustion penalty starts. Ruling: "you only have that penalty under 20% energy". */
+export const LOW_ENERGY_THRESHOLD = 0.2;
+/** Speed lost at zero energy. Ruling: "at 0 your speed is 20% lowered". Linear from the threshold down. */
+export const LOW_ENERGY_SPEED_PENALTY = 0.2;
+
+/**
+ * Exhaustion — direct ruling: "Everything should slow down slightly when
+ * low energy. Like at 0 your speed is 20% lowered. But you only have that
+ * penalty under 20% energy." Everyone, the player included; the first
+ * consequence energy has ever had for the player (TODO.md, "energy has no
+ * teeth"). 1 at or above the threshold, 0.8 at zero, linear between.
+ */
+export function lowEnergySpeedMultiplier(agent: Agent): number {
+  const energy = agent.needs?.energy ?? 1;
+  if (energy >= LOW_ENERGY_THRESHOLD) return 1;
+  return 1 - LOW_ENERGY_SPEED_PENALTY * (1 - energy / LOW_ENERGY_THRESHOLD);
+}
+
 export function actionSpeedOf(world: World, agent: Agent, tick: number): number {
   const baseSpeed =
     (agent.stats?.speed ?? ACTION_THRESHOLD) *
     (agent.terrainSpeedFactor ?? 1) *
+    lowEnergySpeedMultiplier(agent) *
     activityScheduleMultiplier(agent.activityPattern, tick) *
     coldSnapSpeedMultiplier(world, agent.layer, agent.pos) *
     canopySpeedMultiplier(agent.layer) *
@@ -291,7 +311,10 @@ export function advancePlayerTurn(
   }
   // What the player sees when it is their turn again — after the world has
   // moved, not before. See vision.ts.
-  if (player.alive !== false) updatePlayerVision(world, player);
+  if (player.alive !== false) {
+    updatePlayerVision(world, player);
+    tickFollowers(world, player, log, rng); // ROADMAP.md M6: the follower door, once per player turn
+  }
   return ticks;
 }
 
@@ -384,6 +407,12 @@ export function tickWorld(
     }
 
     tickAgentNeeds(agent, world, ctx, log, rng);
+    // A torch burns per WORLD tick, whether or not the player acts this
+    // tick — above the action gate on purpose. It sat inside the player's
+    // action branch at first and burned per action tick instead, which
+    // only showed once the exhaustion penalty made a tired player act less
+    // than every tick (the 1000-tick torch lasted 1050+).
+    if (agent.controlledBy === "player") tickTorch(world, agent);
 
     const acted = accumulateActionEnergy(agent, actionSpeedOf(world, agent, world.tick));
     if (!acted) continue;
@@ -392,7 +421,6 @@ export function tickWorld(
     const beforeLayer = agent.layer;
     const beforeElevation = tileAt(world, beforeLayer, before.x, before.y)?.elevation ?? 0;
     if (agent.controlledBy === "player") {
-      tickTorch(world, agent);
       // Input decides, not the behaviour tree — see player.ts. If nothing is
       // queued the turn is simply held: energy stays banked at threshold
       // (accumulateActionEnergy caps it), so the world is effectively paused

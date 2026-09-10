@@ -7972,3 +7972,44 @@ way, not acted on:
   verb builds rapport yet (Feed and Presence are M6). Nothing the player
   can do today moves a rapport edge toward them. M6 is next; HANDOFF §4
   has the plan and the bot that will measure whether it works.
+
+## ROADMAP M6 Bond — built, 0/5 followers; rulings needed
+
+Numbers, then the menu. All from `runner/validateBond.ts`, 5 seeds.
+
+| seed | treats taken | best trust | stage reached |
+|---|---|---|---|
+| 20260903 | 0 | 0.00 | wary (bot starved) |
+| 11 | 1 | 0.14 | tolerant |
+| 202 | 3 | 0.13 | tolerant (bot killed, see below) |
+| 3003 | 0 | 0.08 | tolerant (bot starved) |
+| 40404 | 0 | 0.18 | tolerant |
+
+The mechanics work when traced one at a time: a calm Sandshrew walks to a
+set-down berry and takes it; a crouched human three tiles off is not a
+threat; a sleeper beside you remembers being watched; a curious creature
+follows and keeps up over 12 tiles. What does not happen is *reaching*
+curious (0.2) in the real cave, because trust decays faster than a
+player can feed.
+
+Rulings (all sim-original guesses today; none tuned):
+1. **Trust thresholds** 0.05 / 0.2 / 0.5. Lower curious to 0.12?
+2. **Rapport decay** ×0.9977 per tick (half-life ~300 ticks) applies to
+   the player's edges like everyone's. Slower decay for edges toward the
+   player, or a floor once tolerant is reached?
+3. **Treat delta** 0.08 per berry, **cooldown** 60 ticks. Two berries in
+   a row should probably not be two treats; but 60 ticks between treats
+   plus decay is what starves the curve.
+4. ~~A fainted player can be finished off~~ — **RULED: "I think it's
+   okay to have a sandshrew attack player and let em die lol."** Kept
+   as is. Corner a wild animal and it strikes; a 19-HP human dies to it.
+5. **Chamber Sandshrew roam constantly** (explore at 0 energy, mate
+   drive over sleep). Courting is a chase. The energy penalty you just
+   ruled on will slow them a little; the sleep gate quirk is item 6.
+6. **Mate drive beats sleep.** A creature that wants a mate never sleeps,
+   even at zero energy (traced). Sleep should probably win below some
+   energy. Your call on where.
+
+Also built this round on your ruling: **exhaustion** — under 20% energy,
+speed drops linearly to −20% at zero, for everyone (`simulation.ts`
+`lowEnergySpeedMultiplier`, tested).

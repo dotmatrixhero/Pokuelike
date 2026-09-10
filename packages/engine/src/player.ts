@@ -8,6 +8,7 @@ import type { EventLog } from "./events.js";
 import { GATHER_TURNS, MATERIALS, harvestLeft, harvestableAt, takeHarvest, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
 import { carryCapacityOf } from "./support.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -73,6 +74,9 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       const next = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
       if (!canStepTo(world, agent, agent.layer, next, agent)) return false;
       agent.pos = next;
+      // ROADMAP.md M6: moving slowly matters. A crouched step pays extra
+      // action energy, so the world moves more between your steps.
+      if (agent.posture === "crouch") agent.actionEnergy = (agent.actionEnergy ?? 0) - CROUCH_STEP_EXTRA_ENERGY;
       return true;
     }
     case "eat": {
@@ -128,7 +132,47 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       agent.equipment.held = undefined;
       return true;
     }
+    case "crouch": {
+      agent.posture = agent.posture === "crouch" ? undefined : "crouch";
+      return agent.posture === "crouch";
+    }
+    case "offer": {
+      if (countOf(agent, "food") <= 0) return false;
+      const spot = freeTileBeside(world, agent);
+      if (!spot) return false;
+      removeItem(agent, "food", 1);
+      const tile = tileAt(world, agent.layer, spot.x, spot.y)!;
+      tile.terrain = "food";
+      tile.stock = OFFERED_FOOD_STOCK;
+      tile.flavor = undefined;
+      tile.offeredBy = agent.id;
+      invalidateResourceIndex(world);
+      return true;
+    }
   }
+}
+
+/**
+ * Two bites (a sim `consume` takes `CONSUME_STOCK_AMOUNT` = 0.35). Flora's
+ * natural decay eats ~0.008 a tick, so a single bite's worth was gone in
+ * ~45 ticks — before a wary creature had backed-off room to come and eat
+ * it. This lasts ~90.
+ */
+const OFFERED_FOOD_STOCK = CONSUME_STOCK_AMOUNT * 2;
+
+/** A walkable, empty floor tile among the eight around the player — the offering goes down beside you, not under you. */
+function freeTileBeside(world: World, agent: Agent): { x: number; y: number } | undefined {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const pos = { x: agent.pos.x + dx, y: agent.pos.y + dy };
+      const tile = tileAt(world, agent.layer, pos.x, pos.y);
+      if (!tile || tile.terrain !== "floor") continue;
+      if (world.agents.some((a) => a.alive !== false && a.layer === agent.layer && a.pos.x === pos.x && a.pos.y === pos.y)) continue;
+      return pos;
+    }
+  }
+  return undefined;
 }
 
 function finishGather(world: World, agent: Agent, out: PlayerActionOutcome): boolean {
@@ -182,6 +226,9 @@ export function holdsLight(world: World, agent: Agent): boolean {
 
 /** Ruling: "1000 ticks torch." Roughly 250 keys of light per torch. */
 export const TORCH_FUEL_TICKS = 1000;
+
+/** Half an `ACTION_THRESHOLD` (40): a crouched step takes one and a half turns' worth of world. Kept here, not imported, to avoid a simulation.ts cycle. */
+export const CROUCH_STEP_EXTRA_ENERGY = 20;
 
 /**
  * One world tick of burn while a light is held. At 0 the torch is used up:
