@@ -171,6 +171,26 @@ Build:
 
 **Done when:** you cannot see the chamber until you are in it.
 
+**STATUS: DONE.** `vision.ts` is the caller `computeVisible` never had:
+`updatePlayerVision` runs at the end of every player turn and once at
+spawn; `Agent.vision` holds the visible set and a per-layer explored set.
+Three decisions made here, not in fov.ts: underground has no day (ambient
+light is 0 unless you stand on or beside a sunbeam, then 1); a lit tile is
+visible from up to 14 tiles away in the dark given line of sight, so the
+chamber is a glow you walk toward rather than a surprise; memory is per
+layer and only grows. Renderer: unseen tiles are solid dark, remembered
+tiles dimmed, agents on unseen tiles are not drawn at all, and a click on
+an unseen tile finds nothing. Measured (`runner/validateCaveVision.ts`, 8
+seeds): no lit tile visible from spawn on any seed; first glow after 6–23
+keys; 69 tiles visible in the dark vs 200+ in the chamber. Live
+(Playwright, seed 20260903): fog pixel count off the canvas matched the
+engine's set exactly (69 at spawn, 447 explored at the light); clicking an
+unseen Sandshrew selected nothing, clicking the one in view selected it.
+Also found and fixed: M1's macro-map hide set `hidden`, which the wrap's
+own `display: flex` defeats — the panel was still there in the M2
+screenshot. `.force-hide` now, and the canvas wrap measures 922px tall,
+not 470.
+
 ### M3 — Need
 
 Hunger and thirst on the player, and the consequence.

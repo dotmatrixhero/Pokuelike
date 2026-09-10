@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tileAt } from "@pokuelike/engine";
+import { tileAt, tileIndex } from "@pokuelike/engine";
 import { CAVE_SPAWN_MAX_STEPS, CAVE_SPAWN_MIN_STEPS, createCaveScenario, walkDistances } from "../src/scenario.js";
 
 /**
@@ -43,6 +43,14 @@ describe("createCaveScenario (ROADMAP M1)", () => {
 
       // And the player is standing in the dark, not on a lit tile.
       expect(tileAt(world, "underground", player.pos.x, player.pos.y)?.terrain).not.toBe("sunbeam");
+
+      // ROADMAP M2: "you cannot see the chamber until you are in it." Vision
+      // is computed at spawn, and no sunbeam is in it. (Measured on 8 seeds
+      // by runner/validateCaveVision.ts: the first lit tile appears after
+      // 6-23 keys of walking.)
+      expect(player.vision).toBeDefined();
+      expect(player.vision!.visible.size).toBeGreaterThan(0);
+      expect(sunbeams.some((p) => player.vision!.visible.has(tileIndex(world, p.x, p.y)))).toBe(false);
     });
   }
 

@@ -83,7 +83,7 @@ function bresenhamLine(from: Vec2, to: Vec2): Vec2[] {
  * ridge between two low points blocks the view over it, but doesn't block
  * a view along its own slope. Walls always block, regardless of elevation.
  */
-function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, observerElevation: number): boolean {
+export function hasLineOfSight(world: World, layer: Layer, origin: Vec2, target: Vec2, observerElevation: number): boolean {
   const targetTile = tileAt(world, layer, target.x, target.y);
   if (!targetTile) return false;
 

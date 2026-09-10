@@ -540,6 +540,17 @@ export interface InventoryItem {
   weight: number;
 }
 
+/**
+ * The player's field of view and map memory. Tile indices
+ * (`y * world.width + x`) rather than `Vec2`s so the renderer can test
+ * membership per tile per frame without allocating. `explored` is per layer
+ * and only grows; `visible` is replaced whole each turn.
+ */
+export interface Vision {
+  visible: Set<number>;
+  explored: Partial<Record<Layer, Set<number>>>;
+}
+
 export interface Agent {
   id: string;
   species: string;
@@ -567,6 +578,14 @@ export interface Agent {
    * applied. Ignored on a sim-driven agent.
    */
   queuedAction?: PlayerAction;
+  /**
+   * What a player-controlled agent can see right now and has ever seen —
+   * ROADMAP.md's M2. Rebuilt by vision.ts's `updatePlayerVision` at the end
+   * of every player turn; the renderer draws only these tiles. Absent on
+   * sim-driven agents: their perception is fov.ts's per-tick
+   * `computeVisible` inside the behaviour tree, not a remembered map.
+   */
+  vision?: Vision;
   /** Agents in the same herd share a home range and will regroup. */
   herdId?: string;
   /**

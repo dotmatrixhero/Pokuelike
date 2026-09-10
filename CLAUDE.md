@@ -180,6 +180,14 @@ argument, and starting to implement mid-discussion reads as not listening.
   `eventText.ts` (web), `format.ts` (runner) and any other formatter have no
   `default` — adding a `SimEvent` kind without a case there is a compile
   error the engine's own typecheck will not catch.
+- **`el.hidden = true` reads back `true` and can hide nothing.** M1's
+  macro-map fix set the attribute and measured `hidden === true`; the
+  wrap's own `display: flex` rule beats the attribute, and the panel was
+  still in the next milestone's screenshot. index.html already documented
+  this and provides `.force-hide`. Measure computed style or layout
+  (`getComputedStyle(el).display`, a bounding rect), never the flag you
+  just set. Same shape as the `-s` lesson: a check that can only agree
+  with you is not a check.
 - **A test that passes for the wrong reason is worse than no test.** Two happened here: an
   always-zero rng that fired a different trigger than the test named, and an `if (walkable)`
   precondition that made a test silently vacuous. When a test fails after a change, work out

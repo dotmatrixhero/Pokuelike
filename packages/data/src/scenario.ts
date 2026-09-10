@@ -5,6 +5,7 @@ import {
   createNeeds,
   setTile,
   tileAt,
+  updatePlayerVision,
   type Agent,
   type Layer,
   type TerrainKind,
@@ -171,6 +172,7 @@ export function createPlayerDemoWorld(seed: number = SCENARIO_SEED): World {
     sex: "female",
   };
   world.agents.push(player);
+  updatePlayerVision(world, player);
   return world;
 }
 
@@ -290,6 +292,8 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   };
 
   world.agents.push(...herd, player);
+  // The first frame is honest: fog is already down before the first key.
+  updatePlayerVision(world, player);
   return world;
 }
 

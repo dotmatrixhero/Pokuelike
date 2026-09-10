@@ -343,14 +343,17 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   // Same "leaving Overworld mode" dance as the manual toggle below: the
   // macro map has no meaning in player mode, and left visible it sat as an
   // empty panel over the top half of the map, squeezing the cave into the
-  // bottom (seen live in the M1 screenshot).
+  // bottom (seen live in the M1 screenshot). `.force-hide`, not `hidden`:
+  // the wrap's own `display: flex` defeats the attribute (see index.html's
+  // `.force-hide` comment). M1 set `hidden` and measured `hidden === true`,
+  // which was true and hid nothing — the M2 screenshot still had the panel.
   macroMapWrapEl.hidden = true;
+  macroMapWrapEl.classList.add("force-hide");
   mapModeSwitchEl.hidden = true;
   minimapWidgetEl.hidden = true;
   overworldToggleBtn.textContent = "Overworld: Off";
   overworldToggleBtn.classList.remove("playing");
   canvasWrap.classList.remove("force-hide");
-  macroMapWrapEl.classList.remove("force-hide");
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
   world = scene === "cave" ? createCaveScenario(seed) : createPlayerDemoWorld(seed);
@@ -1272,6 +1275,17 @@ if (playerParam === "1" || playerParam === "cave") {
   enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
 }
 speedLabel.textContent = `${SPEED_STEPS[speedIndex]}x`;
+
+// Dev-server only: lets a Playwright check read the real world (positions,
+// the player's vision set) instead of scraping the inspector's text, which
+// only shows the selected agent. Not shipped in the production build.
+if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
+  (window as unknown as { __pokuelike: unknown }).__pokuelike = {
+    get world() {
+      return world;
+    },
+  };
+}
 
 function frame(): void {
   // Run before drawWorld (was after) so this frame's highlight box below

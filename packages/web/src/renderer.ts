@@ -1,5 +1,5 @@
-import type { Agent, TerrainKind, Tile, World, Layer } from "@pokuelike/engine";
-import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
+import type { Agent, TerrainKind, Tile, Vision, World, Layer } from "@pokuelike/engine";
+import { biomeWeightsAt, findPlayer, isLitTile, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
@@ -628,6 +628,51 @@ function frameDeltaSeconds(): number {
  */
 let activeViewLayer: Layer = "surface";
 
+/**
+ * The player's field of view for this frame, or undefined in the spectator
+ * app (no player, nothing hidden) — ROADMAP.md M2. Read once per frame here
+ * and threaded through the two passes that care (agents, fog) rather than
+ * looked up per tile: `findPlayer` is a linear scan of `world.agents`.
+ */
+function playerVision(world: World): Vision | undefined {
+  return findPlayer(world)?.vision;
+}
+
+/** Whether the frame's viewer can see tile `(x, y)` on the active layer. */
+function tileVisible(world: World, vision: Vision | undefined, x: number, y: number): boolean {
+  return !vision || vision.visible.has(y * world.width + x);
+}
+
+/**
+ * Fog of war, drawn after the ground, agents and weather so it covers all
+ * three: a tile never seen is solid dark; a tile seen before but not now is
+ * drawn dimmed — the memory of the map, with nothing alive on it (agents on
+ * unseen tiles are never drawn at all, see the agent pass). Underground,
+ * tiles the player can see but that no sunbeam lights get a lighter wash
+ * too, so the chamber reads as *lit* and the corridor as merely *seen*.
+ */
+function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | undefined): void {
+  if (!vision) return;
+  const explored = vision.explored[activeViewLayer];
+  const underground = activeViewLayer !== "surface";
+  ctx.save();
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      const idx = y * world.width + x;
+      if (vision.visible.has(idx)) {
+        if (!underground || isLitTile(world, activeViewLayer, { x, y })) continue;
+        ctx.fillStyle = "rgba(4, 6, 16, 0.32)";
+      } else if (explored?.has(idx)) {
+        ctx.fillStyle = "rgba(4, 6, 14, 0.66)";
+      } else {
+        ctx.fillStyle = "#05060a";
+      }
+      ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
+  }
+  ctx.restore();
+}
+
 export function drawWorld(
   ctx: CanvasRenderingContext2D,
   world: World,
@@ -888,13 +933,18 @@ function drawWorldTiles(
   for (const { x, y, tile } of cropIdentityTiles) drawCropIdentity(ctx, tile, x, y);
 
   pruneStaleFacings(world);
+  const vision = playerVision(world);
   for (const agent of world.agents) {
     if (agent.layer !== activeViewLayer) continue;
+    // Out of sight is out of the frame entirely — not dimmed, absent. A
+    // Sandshrew you cannot see is not there yet.
+    if (!tileVisible(world, vision, agent.pos.x, agent.pos.y)) continue;
     drawAgent(ctx, agent, agent.id === selectedAgentId, dt, jigglingAgentIds?.has(agent.id) ?? false);
   }
 
   drawWarmLights(ctx, world);
   drawWeather(ctx, world);
+  drawFog(ctx, world, vision);
 
   if (autoCamHighlightIds && autoCamHighlightIds.size > 0) drawAutoCamHighlight(ctx, world, autoCamHighlightIds);
   if (passiveHighlights) {
@@ -943,9 +993,12 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
+  const vision = playerVision(world);
   const agentAt = new Map<string, Agent>();
   for (const agent of world.agents) {
-    if (agent.layer === activeViewLayer) agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
+    if (agent.layer !== activeViewLayer) continue;
+    if (!tileVisible(world, vision, agent.pos.x, agent.pos.y)) continue;
+    agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
   }
 
   // Things that stand *on* the ground rather than being their own kind of
@@ -1029,6 +1082,7 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
   ctx.restore();
 
   drawWeather(ctx, world);
+  drawFog(ctx, world, vision);
 }
 
 /**
@@ -1499,6 +1553,10 @@ function drawWeather(ctx: CanvasRenderingContext2D, world: World): void {
  * than an oversight; see DESIGN.md/TODO.md.
  */
 function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
+  // No day underground: the cave's darkness is fog-of-war's job (see
+  // `drawFog`), not the surface clock's. Before M2 the cave was drawn at
+  // whatever brightness the surface happened to be.
+  if (activeViewLayer !== "surface") return;
   const darkness = 1 - lightLevel(world.tick);
   if (darkness <= 0.02) return;
   ctx.save();
@@ -1511,6 +1569,9 @@ function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
 export function agentAtCanvasPos(world: World, canvasX: number, canvasY: number, layer: Layer = activeViewLayer): Agent | undefined {
   const tileX = Math.floor(canvasX / TILE_SIZE);
   const tileY = Math.floor(canvasY / TILE_SIZE);
+  // What you cannot see you cannot click — the inspector would otherwise be
+  // a wallhack.
+  if (!tileVisible(world, playerVision(world), tileX, tileY)) return undefined;
   // Last-drawn-wins order (same order world.agents is iterated for drawing) so
   // a click resolves to whichever agent visually renders on top of the others.
   let found: Agent | undefined;

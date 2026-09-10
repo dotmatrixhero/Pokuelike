@@ -20,6 +20,7 @@ import { updateNotables } from "./notables.js";
 import { updateHerdLeadership } from "./herdLeadership.js";
 import { recordDeathWitnesses } from "./witness.js";
 import { applyPlayerAction, findPlayer } from "./player.js";
+import { updatePlayerVision } from "./vision.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
 import { canFlyOverObstacle } from "./movement.js";
 
@@ -287,6 +288,9 @@ export function advancePlayerTurn(
     tickWorld(world, log, rules, ctx, rng, immigration);
     ticks++;
   }
+  // What the player sees when it is their turn again — after the world has
+  // moved, not before. See vision.ts.
+  if (player.alive !== false) updatePlayerVision(world, player);
   return ticks;
 }
 

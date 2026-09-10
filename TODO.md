@@ -7867,3 +7867,27 @@ not simply re-buy the branch it came from.
       clause. Confirmed via `git stash` that the new regression test
       genuinely fails without the fix. Real before/after, same 8 seeds:
       24 self-fought events -> 0. Full engine suite (1311, 1 new) green.
+
+## ROADMAP M2 See — built; side notes
+
+Built per ROADMAP.md (STATUS there has the numbers). Things noticed on the
+way, not acted on:
+
+- **Leaving Overworld mode by the toggle probably leaves the macro map
+  displayed.** `overworldToggleBtn`'s off-branch in main.ts sets
+  `macroMapWrapEl.hidden = true` and *removes* `force-hide` — the same
+  pattern that hid nothing in player mode (the wrap's `display: flex`
+  beats the attribute). Hypothesis from reading the code, NOT reproduced
+  live; the boot path never takes that branch. Two-line fix if confirmed.
+- **The day/night tint no longer applies underground** (renderer's
+  `drawDayNightTint` returns early off the surface). Before M2 the cave was
+  drawn at whatever brightness the surface clock happened to be at. Fog is
+  now the cave's darkness. If a real underground light model comes (M5's
+  torch), it belongs in `vision.ts`'s `ambientLightAt`.
+- **Cave floor still uses surface biome textures** (carried from M1).
+- **Sim agents have no memory and no fog** — `Agent.vision` is
+  player-only. If "did the Sandshrew see me?" ever needs to be asked from
+  the sim side, `playerVisibleTiles` is agent-agnostic already.
+- **Dev hook:** `window.__pokuelike.world` on the vite dev server only
+  (`import.meta.env.DEV`). Playwright checks should read state from it
+  rather than scraping the inspector, which only shows the selected agent.
