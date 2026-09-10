@@ -10239,6 +10239,602 @@ export const MOVES: Record<string, MoveSpec> = {
     range: { min: 0, max: 3 },
     statusChance: 0.1,
     statusKind: "freeze",
+    // v4 (two-lane standard). 45 nodes: 3 branches x 12, plus 3 three-node
+    // bridges.
+    //
+    // WHAT FREEZE ACTUALLY DOES, read at its call sites before any of this
+    // was designed (principle 3) — it is weaker than the word suggests, and
+    // the whole tree is built around the real one, not the imagined one:
+    //   - `isFrozen` gates `tickAgentAction` (needs.ts:1469) exactly like
+    //     fainted/asleep. A frozen agent takes NO action at all: no step, no
+    //     flee, no hunt, no attack. That is the entire effect.
+    //   - It deals ZERO damage. `tickStatusEffects` (status.ts) only spends
+    //     `severityMultiplier` inside its burn/poison branch, so
+    //     `statusSeverity` is DEAD CONTENT on this move and appears nowhere
+    //     below. That is the single easiest wrong node to write here.
+    //   - It is short and unreliable: `FREEZE_THAW_CHANCE` is 0.2 rolled
+    //     EVERY world tick, so the mean hold is ~5 ticks and it can end on
+    //     the first one. Base `statusChance` is 0.1.
+    //   - Any landed Fire-type hit clears it outright
+    //     (`maybeThawOnFireHit`), on the first hit that connects, whether or
+    //     not that move carries a status of its own.
+    //   - Ice types are immune (`STATUS_IMMUNE_TYPES.freeze === ["ice"]`) —
+    //     and every species that learns this move (Seel, Dewgong, Lapras,
+    //     Jynx) is Ice-typed, so Ice Beam can never freeze another Ice Beam
+    //     user.
+    //   - One status at a time: a target already burned/poisoned/asleep
+    //     cannot be frozen at all.
+    // So freeze is a coin-flip pin worth about five ticks, not a kill. The
+    // tree therefore never treats the freeze roll as the payoff by itself.
+    // Its reliable, always-on cousin is a Speed stage on the defender
+    // (`statChangesOnHit`), which `actionSpeedOf` (simulation.ts) really
+    // reads — the thing slows down whether or not the freeze lands, and a
+    // slowed thing is visible on the map in a way a status icon is not.
+    //
+    // THE FANTASY. A beam that stops things. The creatures that fire it —
+    // an arctic pinniped, a ferry the size of a boat, something that lives
+    // in the frigid highlands — are heavy, slow and in no hurry. They do
+    // not out-race anything. They take the target's motion away and then
+    // deal with it at their own pace.
+    //
+    // AGGRESSION — the hunt under the floe. Lane HOLD is the FREEZE: more
+    // chance, and it jumps to whatever is standing next to it, so two
+    // things stop at once. Lane TAKE has no freeze lever anywhere in it —
+    // it is the HARPOON: the beam hauls the target across the ice toward
+    // the hunter and opens it up. Stop it there vs. bring it here: kinds,
+    // not degrees.
+    // BOLDNESS — the line held from the floe. Lane REACH buys DISTANCE and
+    // pays for it: `rollAccuracy` charges 5 accuracy per tile past the
+    // first, so a 7-tile beam is 30 accuracy in the hole before the shot is
+    // rolled, and the lane's accuracy nodes are that bill, not a bonus.
+    // Lane GROUND buys no distance at all — it takes the TERRAIN, glazing
+    // the tile it lands on and hitting harder in a real cold snap.
+    // SOCIABILITY — the floe the pod hauls out on. Lane WALL is a
+    // FOOTPRINT: the beam opens into a cone the herd stands behind and
+    // stops catching its own. Lane KEEP has no footprint at all — it is
+    // the beam turned inward, healing and bracing a herd-mate, and finally
+    // trading places with the thing that is on them.
+    //
+    // Checked at the call site and NOT buildable, so it is not in here:
+    //   - Freezing a lake into a walkway. `terrainFill` only converts
+    //     `TERRAIN_FILLABLE` = floor/sand/mud (predation.ts:45); water is
+    //     not in that set, so an Ice Beam cannot freeze water, even though
+    //     an "ice" tile is exactly the walkable-over-water bridge the
+    //     terrain doc comment describes. Real engine gap, logged not faked.
+    //   - `statusImmunityAura`/`selfHeal`/`spawnsRain` all require
+    //     `utilityMove`, which this is not — they would be dead fields.
+    //   - `terrainBurn` is not a frost lever any more: it now calls
+    //     `igniteNear` and lights a real, spreading fire (predation.ts),
+    //     and fire is the one thing that thaws this move's own freezes.
+    // What `terrainFill: "ice"` DOES do on dry ground, spelled out because
+    // it is a real world change: the tile becomes walkable ice, and out of
+    // winter `advanceWaterCycle` thaws it back to WATER at 1/30 per tick.
+    // A herd built around Glazed Ground leaves meltwater behind it. That is
+    // deliberate and visible; it is the same class of thing Water Gun's own
+    // puddle already does.
+    tree: {
+      // ================= AGGRESSION: the hunt under the floe =================
+      numbing_beam: {
+        id: "numbing_beam",
+        name: "Numbing Beam",
+        cost: 1,
+        leaning: "aggression",
+        // The branch's thesis, and the answer to freeze being a 10% coin
+        // flip: the cold gets into it whether or not the freeze takes.
+        // `actionSpeedOf` really multiplies by the Speed stage, so this is a
+        // slower animal on the map, not a number in a panel.
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 80 }] },
+      },
+      // --- Lane HOLD: the freeze itself, made worth rolling for.
+      deeper_chill: {
+        id: "deeper_chill",
+        name: "Deeper Chill",
+        cost: 1,
+        prerequisites: ["numbing_beam"],
+        leaning: "aggression",
+        delta: { statusChance: 0.1, accuracy: 5 },
+      },
+      stiffened: {
+        id: "stiffened",
+        name: "Stiffened",
+        cost: 1,
+        prerequisites: ["deeper_chill"],
+        leaning: "aggression",
+        // Not a second freeze roll — the cold in the joints. Everything the
+        // target already had winding down takes longer to come back.
+        delta: { jamCooldownTicks: 8 },
+      },
+      caught_fast: {
+        id: "caught_fast",
+        name: "Caught Fast",
+        cost: 1,
+        prerequisitesAnyOf: [["stiffened"], ["run_it_down"]],
+        leaning: "aggression",
+        // LANE HOLD NOTABLE. 35% freeze chance, and `maybeSpreadStatus`
+        // rolls a second, independent infliction on one living neighbour
+        // within 1 tile. Two things stop where they stand. This lane's
+        // product is the pin landing at all, which is why the whole thing
+        // is built on `statusChance` rather than on damage.
+        delta: { statusChance: 0.15, statusSpreads: true },
+      },
+      rimebound: {
+        id: "rimebound",
+        name: "Rimebound",
+        cost: 1,
+        prerequisites: ["caught_fast"],
+        leaning: "aggression",
+        // `targetStatused` is a real condition (`oneSituationalMultiplier`,
+        // predation.ts: `defender.status !== undefined`) — so this pays out
+        // on anything already held, including the neighbour Caught Fast
+        // just caught.
+        delta: { situationalBonuses: [{ condition: "targetStatused", multiplier: 1.35 }] },
+      },
+      // --- Lane TAKE: no freeze lever anywhere. The beam is a harpoon line.
+      harpoon_shot: {
+        id: "harpoon_shot",
+        name: "Harpoon Shot",
+        cost: 1,
+        prerequisites: ["numbing_beam"],
+        leaning: "aggression",
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
+      },
+      hauled_in: {
+        id: "hauled_in",
+        name: "Hauled In",
+        cost: 1,
+        prerequisitesAnyOf: [["harpoon_shot"], ["it_stops_running"]],
+        leaning: "aggression",
+        // LANE TAKE NOTABLE. Deliberately NOT more freeze — lane HOLD owns
+        // that. Two tiles of drag on the same chain the opener of this lane
+        // started, so it escalates one `forcedMovement` rather than racing a
+        // second setter of an overwrite field.
+        delta: {
+          forcedMovement: { mover: "defender", direction: "closer", tiles: 2, timing: "onHit" },
+          defensePenetration: 0.15,
+        },
+      },
+      blubber_behind_it: {
+        id: "blubber_behind_it",
+        name: "Blubber Behind It",
+        cost: 1,
+        prerequisites: ["hauled_in"],
+        excludes: ["cold_appetite"],
+        leaning: "aggression",
+        // FORK, half one. `weightScaling` adds a fraction of the user's own
+        // maxHp as power at the moment of the hit, so this is worth wildly
+        // different amounts to a Lapras and to a Jynx — the same node reads
+        // as a different build depending on who bought it.
+        delta: { weightScaling: { factor: 0.12 } },
+      },
+      cold_appetite: {
+        id: "cold_appetite",
+        name: "Cold Appetite",
+        cost: 1,
+        prerequisites: ["hauled_in"],
+        excludes: ["blubber_behind_it"],
+        leaning: "aggression",
+        // FORK, half two. The other reason to haul something in: eating it.
+        delta: { lifestealFraction: 0.18 },
+      },
+      // --- Convergence, one filler, capstone.
+      taken_under: {
+        id: "taken_under",
+        name: "Taken Under",
+        cost: 1,
+        prerequisitesAnyOf: [["rimebound"], ["blubber_behind_it"], ["cold_appetite"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: something held, and something
+        // dragged. `lockTicks` is a real cost — two action ticks the hunter
+        // cannot abort out of — paid for in the same node, not somewhere
+        // downstream (principle 4).
+        delta: { power: 12, lockTicks: 2, defensePenetration: 0.15 },
+      },
+      under_the_ice: {
+        id: "under_the_ice",
+        name: "Under the Ice",
+        cost: 1,
+        prerequisites: ["taken_under"],
+        leaning: "aggression",
+        delta: { critRateStage: 1, cooldownTicks: -1 },
+      },
+      nothing_surfaces: {
+        id: "nothing_surfaces",
+        name: "Nothing Surfaces",
+        cost: 1,
+        prerequisites: ["under_the_ice"],
+        leaning: "aggression",
+        // CAPSTONE. It stops firing and goes under. `chargeAttack` is a real
+        // mid-commit agent state (`Agent.chargingAttack`): two ticks
+        // invulnerable and unable to act, then a three-tile lunge and the
+        // hit at +45 power — and a genuine fizzle for nothing if the target
+        // is gone by then. The tree's ONLY `chargeAttack`; it is an
+        // overwrite field, so a second one anywhere would silently race it.
+        delta: { chargeAttack: { ticks: 2, bonusPower: 45, leapTiles: 3 } },
+      },
+
+      // ================= BOLDNESS: the line held from the floe =================
+      from_the_floe: {
+        id: "from_the_floe",
+        name: "From the Floe",
+        cost: 1,
+        leaning: "boldness",
+        // One more tile, and the 5 accuracy that tile costs. The branch
+        // states its own bill in its first node.
+        delta: { rangeBonus: 1, accuracy: 5 },
+      },
+      // --- Lane REACH: distance, and paying for distance.
+      long_sight: {
+        id: "long_sight",
+        name: "+15 Accuracy",
+        cost: 1,
+        prerequisites: ["from_the_floe"],
+        leaning: "boldness",
+        // Named for its real number, not a boilerplate one (principle 5).
+        // At this depth it is covering the 15 accuracy `situationalAccuracy
+        // Penalty` charges for shooting at night, not padding the base.
+        delta: { accuracy: 15 },
+      },
+      drawn_out: {
+        id: "drawn_out",
+        name: "Drawn Out",
+        cost: 1,
+        prerequisites: ["long_sight"],
+        leaning: "boldness",
+        delta: { rangeBonus: 1, accuracy: 5 },
+      },
+      across_the_water: {
+        id: "across_the_water",
+        name: "Across the Water",
+        cost: 1,
+        prerequisitesAnyOf: [["drawn_out"], ["it_stops_running"]],
+        leaning: "boldness",
+        // LANE REACH NOTABLE. Seven tiles of reach and +35 accuracy against
+        // the 30 that distance costs. `flanking` is literally true of a shot
+        // like this — the check is `defender.fightTarget !== attacker.id`,
+        // and something seven tiles away is usually reacting to somebody
+        // else, or to nothing.
+        delta: { rangeBonus: 2, accuracy: 10, situationalBonuses: [{ condition: "flanking", multiplier: 1.3 }] },
+      },
+      no_wasted_shot: {
+        id: "no_wasted_shot",
+        name: "No Wasted Shot",
+        cost: 1,
+        prerequisites: ["across_the_water"],
+        leaning: "boldness",
+        delta: { critRateStage: 1 },
+      },
+      // --- Lane GROUND: no reach at all. It takes the tile instead.
+      glazed_ground: {
+        id: "glazed_ground",
+        name: "Glazed Ground",
+        cost: 1,
+        prerequisites: ["from_the_floe"],
+        leaning: "boldness",
+        // The tree's only `terrainFill` (overwrite field, one owner). The
+        // tile the target is standing on becomes ice — walkable, not water
+        // any more for anything that checks for water, and out of winter it
+        // thaws back to water on its own. A build that fires this a lot
+        // rewrites the ground it fought on.
+        delta: { terrainFill: { terrain: "ice" } },
+      },
+      hard_freeze: {
+        id: "hard_freeze",
+        name: "Hard Freeze",
+        cost: 1,
+        prerequisitesAnyOf: [["glazed_ground"], ["the_high_ground"]],
+        leaning: "boldness",
+        // LANE GROUND NOTABLE. `coldSnap` is a real weather cell
+        // (`isInColdSnap`, weather.ts), which already slows everything
+        // standing in it — so this is the beam being at its best in the
+        // weather that is already doing half the work.
+        delta: { situationalBonuses: [{ condition: "coldSnap", multiplier: 1.4 }], jamCooldownTicks: 8 },
+      },
+      footing_lost: {
+        id: "footing_lost",
+        name: "Footing Lost",
+        cost: 1,
+        prerequisites: ["hard_freeze"],
+        excludes: ["standing_frost"],
+        leaning: "boldness",
+        // FORK, half one: spend it on the target. Restates the full stage
+        // rather than adding to the opener's -1 — `resolveStatChangesOnHit`
+        // keeps the largest magnitude per target+stat, which is how every
+        // ladder in this roster is written.
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -2, ticks: 120 }] },
+      },
+      standing_frost: {
+        id: "standing_frost",
+        name: "Standing Frost",
+        cost: 1,
+        prerequisites: ["hard_freeze"],
+        excludes: ["footing_lost"],
+        leaning: "boldness",
+        // FORK, half two: spend it on yourself. Flat, so it is worth most to
+        // the small user and least to the Lapras — the deliberate opposite
+        // scaling to the percentage passives.
+        grantsPassive: { kind: "damageReductionFlat", value: 2 },
+        delta: {},
+      },
+      // --- Convergence, one filler, capstone.
+      no_one_gets_close: {
+        id: "no_one_gets_close",
+        name: "No One Gets Close",
+        cost: 1,
+        prerequisitesAnyOf: [["no_wasted_shot"], ["footing_lost"], ["standing_frost"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. An accuracy STAGE on the user, not flat points —
+        // `rollAccuracy` really reads `getStatStage(attacker, "accuracy")`
+        // now (predation.ts and herdConflict.ts both pass it), and a stage
+        // multiplies AFTER the flat penalties, so it is the only lever in
+        // the tree that scales with how bad the shot already was.
+        delta: { statChangesOnHit: [{ target: "self", stat: "accuracy", stage: 1, ticks: 120 }], power: 8 },
+      },
+      never_hurried: {
+        id: "never_hurried",
+        name: "Never Hurried",
+        cost: 1,
+        prerequisites: ["no_one_gets_close"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1, accuracy: 5 },
+      },
+      the_iceberg: {
+        id: "the_iceberg",
+        name: "The Iceberg",
+        cost: 1,
+        prerequisites: ["never_hurried"],
+        leaning: "boldness",
+        // CAPSTONE. It stops being something you can move. `immovable`
+        // refuses every drag, knockback and lunge in the game, which is the
+        // exact counter to the lane the other half of this tree is built on
+        // — and the second accuracy stage escalates the deep notable on its
+        // own chain rather than racing it.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: { statChangesOnHit: [{ target: "self", stat: "accuracy", stage: 2, ticks: 200 }] },
+      },
+
+      // ================= SOCIABILITY: the floe the pod hauls out on =================
+      the_herd_sees_it: {
+        id: "the_herd_sees_it",
+        name: "The Herd Sees It",
+        cost: 1,
+        leaning: "sociability",
+        // `rallyCallTicks` is the additive form — the tree sets the mark in
+        // five different places and they all sum instead of racing.
+        delta: { rallyCallTicks: 60 },
+      },
+      // --- Lane WALL: a footprint the pod stands behind.
+      broadening_beam: {
+        id: "broadening_beam",
+        name: "Broadening Beam",
+        cost: 1,
+        prerequisites: ["the_herd_sees_it"],
+        leaning: "sociability",
+        // `areaBonus` is area SIZE and it also turns `hitsArea` on, which is
+        // what makes `shape` mean anything at all — only `resolveAreaHit`
+        // reads shape, so a shape node with nothing setting `hitsArea` is
+        // dead content.
+        delta: { areaBonus: 1 },
+      },
+      the_screen: {
+        id: "the_screen",
+        name: "The Screen",
+        cost: 1,
+        prerequisites: ["broadening_beam"],
+        leaning: "sociability",
+        // The move's own flaw is this lane's hook: an area hit genuinely
+        // does not tell friend from foe until something sets this.
+        delta: { excludesAllies: true, accuracy: 5 },
+      },
+      wall_of_frost: {
+        id: "wall_of_frost",
+        name: "Wall of Frost",
+        cost: 1,
+        prerequisitesAnyOf: [["the_screen"], ["the_high_ground"]],
+        leaning: "sociability",
+        // LANE WALL NOTABLE. The beam stops being a beam. The tree's only
+        // `shape` node (a form is an overwrite, and a cone is not a line
+        // plus anything), and area SIZE keeps accumulating separately on
+        // top of it — a full wall build ends at a 4-long, 3-wide cone.
+        // Weaker per target on purpose: it is a screen, not a finisher.
+        delta: { shape: { kind: "cone", length: 2, width: 3 }, power: -8 },
+      },
+      nobody_crosses: {
+        id: "nobody_crosses",
+        name: "Nobody Crosses",
+        cost: 1,
+        prerequisites: ["wall_of_frost"],
+        leaning: "sociability",
+        delta: { statusChance: 0.1 },
+      },
+      // --- Lane KEEP: no footprint at all. The beam turned inward.
+      warmth_kept_in: {
+        id: "warmth_kept_in",
+        name: "Warmth Kept In",
+        cost: 1,
+        prerequisites: ["the_herd_sees_it"],
+        leaning: "sociability",
+        // `targetsAlly` adds a real support use on the herd's own idle tick
+        // WITHOUT taking the move out of hostile selection — `pickBestMove`
+        // does not exclude it, unlike `burrow`/`utilityMove`.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.12 }] },
+      },
+      the_pod: {
+        id: "the_pod",
+        name: "The Pod",
+        cost: 1,
+        prerequisitesAnyOf: [["warmth_kept_in"], ["run_it_down"]],
+        leaning: "sociability",
+        // LANE KEEP NOTABLE. No footprint anywhere in this lane — the pod
+        // does not screen, it holds each other up. `allyEffectOnAttack` is
+        // the second, independent trigger: every hostile use also finds the
+        // nearest hurt herd-mate and pays them too, for free.
+        delta: {
+          allyEffects: [{ healFraction: 0.2, buff: { stat: "defense", stage: 1, ticks: 120 } }],
+          allyEffectOnAttack: true,
+        },
+      },
+      shoulder_to_shoulder: {
+        id: "shoulder_to_shoulder",
+        name: "Shoulder to Shoulder",
+        cost: 1,
+        prerequisites: ["the_pod"],
+        excludes: ["carried_across"],
+        leaning: "sociability",
+        // FORK, half one: constant and passive. Well under the 10%/tick
+        // per-move healing cap on its own, and it is the only healing
+        // passive in the tree.
+        grantsPassive: { kind: "healAura", value: 0.006 },
+        delta: {},
+      },
+      carried_across: {
+        id: "carried_across",
+        name: "Carried Across",
+        cost: 1,
+        prerequisites: ["the_pod"],
+        excludes: ["shoulder_to_shoulder"],
+        leaning: "sociability",
+        // FORK, half two: momentary and positional. It takes the spot the
+        // threat was standing in and shoves the threat a tile further off —
+        // the ferry putting itself where the herd-mate was. Note this swaps
+        // over whatever reach the build has bought elsewhere, so a Boldness
+        // reach build crossing into this lane really does cross the map.
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      // --- Convergence, one filler, capstone.
+      the_floe_holds: {
+        id: "the_floe_holds",
+        name: "The Floe Holds",
+        cost: 1,
+        prerequisitesAnyOf: [["nobody_crosses"], ["shoulder_to_shoulder"], ["carried_across"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes end here. The mark is what turns several
+        // agents' separately-run target picks onto one thing (`preferMarked`,
+        // predation.ts) — coordination is the payoff, not more damage.
+        delta: { rallyCallTicks: 60, jamCooldownTicks: 6 },
+      },
+      long_watch: {
+        id: "long_watch",
+        name: "Long Watch",
+        cost: 1,
+        prerequisites: ["the_floe_holds"],
+        leaning: "sociability",
+        delta: { rallyCallTicks: 40 },
+      },
+      cold_enough_for_fire: {
+        id: "cold_enough_for_fire",
+        name: "Cold Enough for Fire",
+        cost: 1,
+        prerequisites: ["long_watch"],
+        leaning: "sociability",
+        // CAPSTONE. The pod's answer to the one thing that undoes this
+        // entire move: a Fire-type hit clears any freeze it lands, and the
+        // type chart resists Ice into the bargain. `bonusVsType` multiplies
+        // on top of the chart's own result in `calculateDamage`, so 1.6
+        // against a 0.5 resist brings a Vulpix or a Rapidash back up to
+        // roughly neutral. A capstone that answers the move's own worst
+        // matchup, on a lever the roster has barely used.
+        delta: { bonusVsType: { type: "fire", multiplier: 1.6 }, areaBonus: 1, power: 6 },
+      },
+
+      // ================= Bridges =================
+      lead_the_runner: {
+        id: "lead_the_runner",
+        name: "Lead the Runner",
+        cost: 1,
+        prerequisites: ["numbing_beam", "from_the_floe"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Its lever is the thing that is
+        // true on the map: a target mid-sprint costs the shooter 5 accuracy
+        // per consecutive move action, up to 4 stacks
+        // (`situationalAccuracyPenalty`). A slower target sprints less.
+        delta: { accuracy: 10, statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 60 }] },
+      },
+      frozen_mid_stride: {
+        id: "frozen_mid_stride",
+        name: "Frozen Mid-Stride",
+        cost: 1,
+        prerequisites: ["lead_the_runner"],
+        leaning: "aggression",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -2, ticks: 100 }] },
+      },
+      it_stops_running: {
+        id: "it_stops_running",
+        name: "It Stops Running",
+        cost: 1,
+        prerequisites: ["frozen_mid_stride"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Its own crosslink's lever, escalated to the floor
+        // of what a Speed stage can do rather than swapped for a generic
+        // stat. Lands on Hauled In (Aggression — a thing that cannot run is
+        // a thing you can drag) and Across the Water (Boldness — and it is
+        // a thing you can hit from seven tiles).
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -3, ticks: 140 }], accuracy: 5 },
+      },
+
+      high_and_cold: {
+        id: "high_and_cold",
+        name: "High and Cold",
+        cost: 1,
+        prerequisites: ["from_the_floe", "the_herd_sees_it"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. `elevation` compares the two
+        // tiles' real elevation at the moment of the hit — the pod picking
+        // the high cold ground and shooting down off it.
+        delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.25 }] },
+      },
+      the_ridge: {
+        id: "the_ridge",
+        name: "The Ridge",
+        cost: 1,
+        prerequisites: ["high_and_cold"],
+        leaning: "boldness",
+        delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.4 }] },
+      },
+      the_high_ground: {
+        id: "the_high_ground",
+        name: "The High Ground",
+        cost: 1,
+        prerequisites: ["the_ridge"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. The same high-ground lever taken as far as it
+        // goes. Lands on Hard Freeze (Boldness) and Wall of Frost
+        // (Sociability) — both lanes that hold a piece of ground, and both
+        // carry a DIFFERENT condition, so the two compose instead of one
+        // overwriting the other.
+        delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.7 }], critRateStage: 1 },
+      },
+
+      marked_by_the_cold: {
+        id: "marked_by_the_cold",
+        name: "Marked by the Cold",
+        cost: 1,
+        prerequisites: ["the_herd_sees_it", "numbing_beam"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. The pod hunts what the beam
+        // touched.
+        delta: { rallyCallTicks: 40 },
+      },
+      the_pod_converges: {
+        id: "the_pod_converges",
+        name: "The Pod Converges",
+        cost: 1,
+        prerequisites: ["marked_by_the_cold"],
+        leaning: "sociability",
+        delta: { rallyCallTicks: 50 },
+      },
+      run_it_down: {
+        id: "run_it_down",
+        name: "Run It Down",
+        cost: 1,
+        prerequisites: ["the_pod_converges"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Its crosslink's lever is the MARK, so the mark
+        // gets longer and finally starts paying damage on itself:
+        // `rallyMarked` reads the same `rallyMarkTicksRemaining` the mark
+        // sets. Lands on The Pod (Sociability) and Caught Fast (Aggression).
+        delta: { rallyCallTicks: 60, situationalBonuses: [{ condition: "rallyMarked", multiplier: 1.5 }] },
+      },
+    },
   },
   psybeam: {
     id: "psybeam",

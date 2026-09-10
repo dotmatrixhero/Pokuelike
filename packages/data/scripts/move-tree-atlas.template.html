@@ -987,25 +987,40 @@
     if (has("defensePenetration")) lines.push("Ignores " + pct(delta.defensePenetration) + " of the target's Defense/Sp. Defense.");
     if (has("hits")) lines.push("Strikes " + (delta.hits.min === delta.hits.max ? delta.hits.min + " times" : delta.hits.min + "–" + delta.hits.max + " times") + " per use.");
     if (has("lockTicks")) lines.push("Locks the user out of acting " + signed(delta.lockTicks) + " extra tick" + (Math.abs(delta.lockTicks) === 1 ? "" : "s") + " after use.");
-    if (has("situationalBonus")) lines.push("×" + delta.situationalBonus.multiplier + " damage when the target is " + conditionLabel(delta.situationalBonus.condition) + ".");
+    if (has("hitsBonus")) lines.push(signed(delta.hitsBonus) + " strike" + (Math.abs(delta.hitsBonus) === 1 ? "" : "s") + " per use, on top of however many it already makes.");
+    if (has("situationalBonus")) lines.push("×" + delta.situationalBonus.multiplier + " damage " + conditionClause(delta.situationalBonus.condition) + ".");
+    (delta.situationalBonuses || []).forEach(function (sb) {
+      lines.push("×" + sb.multiplier + " damage " + conditionClause(sb.condition) + " — stacks with this move's other conditions.");
+    });
     if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
-    if (has("statChangeOnHit")) {
-      var sc = delta.statChangeOnHit;
+    // The singular and the APPEND form, together — the append forms shipped
+    // (`statChangesOnHit`, `allyEffects`, `situationalBonuses`, `rangeBonus`,
+    // `hitsBonus`, `areaBonus`, `rallyCallTicks`) and this describer was
+    // never taught any of them, so 24 shipped nodes rendered with no
+    // description at all in this atlas. Measured, not guessed.
+    [].concat(delta.statChangeOnHit ? [delta.statChangeOnHit] : [], delta.statChangesOnHit || []).forEach(function (sc) {
       var who = sc.target === "self" ? "its own" : "the target's";
       lines.push((sc.stage > 0 ? "Raises " : "Lowers ") + who + " " + (STAT_LABEL[sc.stat] || sc.stat) + " by " + Math.abs(sc.stage) + " stage" + (Math.abs(sc.stage) === 1 ? "" : "s") + (sc.ticks ? " for " + sc.ticks + " ticks" : " permanently") + (sc.target === "self" ? " the instant it's used" : " on a landed, non-killing hit") + ".");
-    }
+    });
     if (has("positionSwap") && delta.positionSwap) lines.push("Swaps places with the target on a landed, non-killing hit.");
     if (has("positionSwapPull")) lines.push("Hauls the target " + delta.positionSwapPull + " extra tile" + (delta.positionSwapPull === 1 ? "" : "s") + " past the swap.");
     if (has("targetsAlly") && delta.targetsAlly) lines.push("Gains a dedicated support use on a nearby ally, on top of staying a real attack.");
-    if (has("allyEffect")) {
-      var ae = delta.allyEffect;
+    [].concat(delta.allyEffect ? [delta.allyEffect] : [], delta.allyEffects || []).forEach(function (ae) {
       var parts = [];
       if (ae.healFraction) parts.push("heals " + pct(ae.healFraction) + " of max HP");
       if (ae.buff) parts.push("buffs " + (STAT_LABEL[ae.buff.stat] || ae.buff.stat) + " +" + ae.buff.stage + " stage" + (ae.buff.stage === 1 ? "" : "s") + (ae.buff.ticks ? " for " + ae.buff.ticks + " ticks" : ""));
       lines.push("That ally effect: " + parts.join(" and ") + ".");
-    }
+    });
     if (has("allyEffectOnAttack") && delta.allyEffectOnAttack) lines.push("The ally effect also fires for free whenever this move lands on an enemy, no extra cost.");
     if (has("hitsArea") && delta.hitsArea) lines.push("Hits everyone caught in the move's shape, not just the one target picked.");
+    // Also never described here before, though the atlas's own build-a-spec
+    // code right below reads them: an `excludesAllies` node rendered as if
+    // it did nothing at all.
+    if (has("excludesAllies") && delta.excludesAllies) lines.push("Never affects a herd-mate, even if they'd otherwise be caught in its area.");
+    if (has("terrainBurn") && delta.terrainBurn) lines.push("Sets fire to the terrain wherever it lands.");
+    if (has("selfHeal")) lines.push("Heals the user " + Math.round(delta.selfHeal.fraction * 100) + "% of its own max HP on use" + (delta.selfHeal.sunbeamBonus ? ", +" + Math.round(delta.selfHeal.sunbeamBonus * 100) + "% more near a sunbeam" : "") + ".");
+    if (has("statusImmunityAura")) lines.push("Grants " + (delta.statusImmunityAura.radius === 0 ? "the user" : "the user and every herd-mate within " + delta.statusImmunityAura.radius + " tiles") + " " + delta.statusImmunityAura.ticks + " ticks of immunity to new status effects.");
+    if (has("spawnsRain") && delta.spawnsRain) lines.push("Pulls a real rain cell down over the user's own position.");
     if (has("weightScaling")) lines.push("Adds " + pct(delta.weightScaling.factor) + " of the user's own max HP as bonus power (heavier users hit harder).");
     if (has("critRateStage")) lines.push(signed(delta.critRateStage) + " crit-rate stage" + (Math.abs(delta.critRateStage) === 1 ? "" : "s") + ".");
     if (has("lifestealFraction")) lines.push("Heals the user " + pct(delta.lifestealFraction) + " of the damage a landed hit dealt.");
@@ -1015,6 +1030,7 @@
     if (has("resistanceBreaker")) lines.push("Partially ignores its own type resist — a resisted hit claws back up toward neutral (×" + delta.resistanceBreaker.multiplier + ", capped there, never becomes super-effective).");
     if (has("selfCostPerUse")) lines.push("Costs the user " + pct(delta.selfCostPerUse.amount) + " " + delta.selfCostPerUse.need + " every time it's used.");
     if (has("rallyCall")) lines.push("On a landed, non-killing hit, marks the target as a priority for every nearby ally for " + delta.rallyCall.ticks + " ticks.");
+    if (has("rallyCallTicks")) lines.push(signed(delta.rallyCallTicks) + " tick" + (Math.abs(delta.rallyCallTicks) === 1 ? "" : "s") + " on the ally-priority mark a landed hit leaves.");
     if (has("critCooldownReset") && delta.critCooldownReset) lines.push("A landed critical hit resets this move's own cooldown to 0.");
     if (has("statusSeverity")) lines.push("×" + delta.statusSeverity + " status severity (a stronger damage-over-time, not a longer one).");
     if (has("statusChance")) lines.push(signed(Math.round(delta.statusChance * 100)) + "% status chance.");
@@ -1027,10 +1043,14 @@
     if (has("gatherBurst")) lines.push("+" + delta.gatherBurst + " gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.");
     if (has("forcedMovement")) {
       var fm = delta.forcedMovement;
-      var mover = fm.mover === "attacker" ? "The user" : "The target";
-      var dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
+      // "toward the other side" named neither party. Say who moves and who
+      // they move relative to.
       var timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
-      lines.push(mover + " moves " + fm.tiles + " tile" + (fm.tiles === 1 ? "" : "s") + " " + dir + ", " + timing + ".");
+      var tiles = fm.tiles + " tile" + (fm.tiles === 1 ? "" : "s");
+      var verb = fm.mover === "attacker"
+        ? "The user " + (fm.direction === "closer" ? "closes " + tiles + " on the target" : "backs off " + tiles + " from the target")
+        : "The target is " + (fm.direction === "closer" ? "dragged " + tiles + " toward the user" : "knocked " + tiles + " away from the user");
+      lines.push(verb + ", " + timing + ".");
     }
     if (has("chargeAttack")) {
       var ca = delta.chargeAttack;
@@ -1038,17 +1058,33 @@
     }
     if (has("shape")) lines.push("Changes its own shape to " + shapeLabel(delta.shape) + ".");
     if (has("range")) lines.push("Changes its max reach to " + (delta.range.max != null ? delta.range.max + " tiles" : JSON.stringify(delta.range)) + ".");
+    if (has("rangeBonus")) lines.push(signed(delta.rangeBonus) + " tile" + (Math.abs(delta.rangeBonus) === 1 ? "" : "s") + " of max reach.");
+    if (has("areaBonus")) lines.push(signed(delta.areaBonus) + " to the size of its area, and it hits everyone caught in that area.");
     return lines;
   }
 
-  function conditionLabel(c) {
-    var labels = {
-      targetLowHp: "at or below half HP", flanking: "caught off guard (flanking)", night: "it's night",
-      elevation: "the user is standing higher up", concealed: "the user is concealed in a bush",
-      coldSnap: "there's a cold snap", storm: "there's a storm", drought: "there's a drought",
-      rain: "it's raining", targetBurning: "the target is burning", targetStatused: "the target is already statused",
+  // The WHOLE clause, not a fragment. It used to be a fragment slotted into
+  // a hardcoded "when the target is ...", which is only grammatical for the
+  // four conditions actually about the target — the rest printed things like
+  // "when the target is the user is standing higher up". Half of
+  // `SituationalCondition` is a fact about the ATTACKER or the WEATHER.
+  // `rallyMarked` had no entry at all and printed the raw key.
+  function conditionClause(c) {
+    var clauses = {
+      targetLowHp: "when the target is at or below half HP",
+      flanking: "when the target isn't already reacting to the user",
+      night: "at night",
+      elevation: "when the user is standing higher up than the target",
+      concealed: "when the user is concealed in a bush",
+      coldSnap: "during a cold snap",
+      storm: "during a storm",
+      drought: "during a drought",
+      rain: "in the rain",
+      targetBurning: "when the target is burning",
+      targetStatused: "when the target already has a status on it",
+      rallyMarked: "when the target is carrying the herd's priority mark",
     };
-    return labels[c] || c;
+    return clauses[c] || ("when " + c);
   }
   function shapeLabel(shape) {
     if (shape.kind === "point") return "a point-blank hit";
