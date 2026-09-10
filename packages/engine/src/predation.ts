@@ -13,6 +13,7 @@ import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
 import { maybeUseUtilityMoveInCombat } from "./utilityMoves.js";
 import { FINISHING_POOL_FRACTION, applyAllyEffect, nearestAllyEffectTarget } from "./support.js";
 import { RAPPORT_MOB_DEFENSE_DELTA, strengthenRapportMutual } from "./rapport.js";
+import { trustFleeFactor, trustStage } from "./trust.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
@@ -1912,6 +1913,29 @@ function applyFightOrFlight(
   return true;
 }
 
+/**
+ * Direct report, after the player was killed by a Charmeleon they had fed
+ * twice: "i think kinda surprising cuz i had good rapport with it." Direct
+ * follow-up ruling on the fix, given three options (leave predation
+ * trust-blind and just narrate it; reduce the odds; block it outright at
+ * Bonded): "i think both 2 and 3." Scoped to the player specifically — this
+ * mirrors `threat.ts`'s existing player-trust mechanic (a wary/tolerant/
+ * curious/bonded creature already scales how close the player can come
+ * before it flees, via this same `trustFleeFactor` ladder) in the opposite
+ * direction: instead of the PREY trusting the player enough to stop
+ * fleeing, this is the PREDATOR trusting the player enough to reconsider
+ * hunting them. Non-player prey are completely unaffected — wild-on-wild
+ * predation keeps its existing trust-blind "Pokémon are what they are"
+ * behavior (NARRATIVE_PILLARS.md's Pillar 4), which is the one part of the
+ * original report the user was explicitly fine with keeping.
+ */
+export function eligibleDespitePlayerTrust(world: World, predator: Agent, candidate: Agent, rng: () => number): boolean {
+  if (candidate.controlledBy !== "player") return true;
+  const stage = trustStage(world, predator, candidate.id);
+  if (stage === "bonded") return false; // never prey, full stop — not just unlikely
+  return rng() < trustFleeFactor(stage); // wary: always eligible; tolerant/curious: reduced odds
+}
+
 export function applyPredationInstincts(
   world: World,
   agent: Agent,
@@ -2166,7 +2190,8 @@ export function applyPredationInstincts(
           (other) =>
             isPreyOf(rules, agent, other) &&
             !isProtectedByMob(world, other) &&
-            isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+            isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS) &&
+            eligibleDespitePlayerTrust(world, agent, other, rng)
         );
     let target = preferMarked(agent, soloCandidates);
 
@@ -2183,7 +2208,8 @@ export function applyPredationInstincts(
         (other) =>
           isPackPreyOf(rules, agent, other) &&
           !isProtectedByMob(world, other) &&
-          isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS)
+          isDetectable(world, agent.pos, other, HUNT_DETECT_RADIUS) &&
+          eligibleDespitePlayerTrust(world, agent, other, rng)
       );
       const packTarget = preferMarked(agent, packCandidates);
       if (packTarget && nearbySameSpeciesConspecifics(world, agent, packTarget.pos, PACK_MUSTER_RADIUS).length >= MIN_PACK_ALLIES) {

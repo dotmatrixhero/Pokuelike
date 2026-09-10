@@ -63,7 +63,11 @@ export const ITEMS: Record<string, ItemDef> = {
   cordage: { key: "cordage", name: "Cordage", weight: 1 },
   boundHaft: { key: "boundHaft", name: "Bound haft", weight: 2 },
   knappedFlint: { key: "knappedFlint", name: "Knapped flint", weight: 1 },
-  torch: { key: "torch", name: "Torch", weight: 2, slot: "held", light: true, threat: 0.3 },
+  // Direct ask: "the held torch should give me access to ember (1 range) as
+  // a move." A held flame is fire, same reasoning as the knife/club/axe
+  // grants below — `MOVES.ember` unmodified (base move, no skill-tree
+  // deltas; those are wild-agent auto-respec only), range 1 already.
+  torch: { key: "torch", name: "Torch", weight: 2, slot: "held", light: true, threat: 0.3, grantsMoves: [MOVES.ember!] },
   // MOVES_AND_TOOLS.md's worked table: knife -> Scratch (the damage slice).
   flintKnife: { key: "flintKnife", name: "Flint knife", weight: 2, slot: "held", threat: 0.3, grantsMoves: [MOVES.scratch!] },
   // Club -> Pound. Direct correction: "Club should not be body slam...

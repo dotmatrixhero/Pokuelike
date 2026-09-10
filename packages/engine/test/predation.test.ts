@@ -3003,3 +3003,104 @@ describe("predation.ts: two predator species don't mutually, endlessly flee each
     expect(target.behavior).toBe("flee");
   });
 });
+
+describe('Direct report: killed by a Charmeleon "i had good rapport with it" — trust gates predation against the player', () => {
+  function humanPlayer(pos: { x: number; y: number }, overrides: Partial<Agent> = {}): Agent {
+    return {
+      id: "human-0",
+      species: "human",
+      pos,
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      controlledBy: "player",
+      maxHp: 10, // small enough that predator()'s default treats it as prey, same as prey()
+      ...overrides,
+    };
+  }
+
+  it("bonded trust (>= TRUST_BONDED) blocks predation on the player outright, every tick, regardless of rng", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = humanPlayer({ x: 5, y: 5 });
+    // Max boldness — otherwise the SEPARATE, pre-existing "flee a
+    // threatening human" mechanic (threat.ts's playerFleeRadius, checked
+    // earlier in applyPredationInstincts's own priority order than hunting)
+    // can dominate the outcome at distance 3 regardless of this fix; maxing
+    // boldness floors that unrelated radius below this test's own distance,
+    // isolating what's actually under test here.
+    const hunter = predator({ x: 8, y: 5 }, 0.1, {
+      disposition: { boldness: 1, aggression: 0.5, sociability: 0.5 },
+      rapport: { "human-0": { score: 0.9, lastInteractionTick: 0 } },
+    });
+    world.agents.push(target, hunter);
+
+    // rng() => 0 would pass literally any nonzero-odds roll — if the block
+    // were merely "very unlikely" rather than a hard exclude, this rng would
+    // expose it immediately.
+    for (let i = 0; i < 10; i++) applyPredationInstincts(world, hunter, RULES, undefined, undefined, () => 0);
+
+    expect(hunter.behavior).not.toBe("hunt");
+    expect(hunter.huntTarget).toBeUndefined();
+  });
+
+  it("wary (no rapport) is unaffected — the player is hunted exactly like any other eligible prey", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = humanPlayer({ x: 5, y: 5 });
+    const hunter = predator({ x: 8, y: 5 }, 0.1, { disposition: { boldness: 1, aggression: 0.5, sociability: 0.5 } });
+    world.agents.push(target, hunter);
+
+    applyPredationInstincts(world, hunter, RULES, undefined, undefined, SAFE_RNG);
+
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.huntTarget).toBe("human-0");
+  });
+
+  it("tolerant/curious reduce the odds rather than block them — a favorable roll still lets the hunt through", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = humanPlayer({ x: 5, y: 5 });
+    // TRUST_CURIOUS (0.2) <= score < TRUST_BONDED (0.5) — curious, factor 0.25.
+    const hunter = predator({ x: 8, y: 5 }, 0.1, {
+      disposition: { boldness: 1, aggression: 0.5, sociability: 0.5 },
+      rapport: { "human-0": { score: 0.3, lastInteractionTick: 0 } },
+    });
+    world.agents.push(target, hunter);
+
+    // rng() => 0 always passes a nonzero-odds roll (0 < 0.25).
+    applyPredationInstincts(world, hunter, RULES, undefined, undefined, () => 0);
+
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.huntTarget).toBe("human-0");
+  });
+
+  it("tolerant/curious: an unfavorable roll excludes the player this tick", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const target = humanPlayer({ x: 5, y: 5 });
+    const hunter = predator({ x: 8, y: 5 }, 0.1, {
+      disposition: { boldness: 1, aggression: 0.5, sociability: 0.5 },
+      rapport: { "human-0": { score: 0.3, lastInteractionTick: 0 } },
+    });
+    world.agents.push(target, hunter);
+
+    // rng() => 0.99 always fails a sub-1 odds roll (0.99 >= 0.25).
+    applyPredationInstincts(world, hunter, RULES, undefined, undefined, () => 0.99);
+
+    expect(hunter.behavior).not.toBe("hunt");
+    expect(hunter.behavior).not.toBe("flee"); // excluded by trust, not scared off by the unrelated player-threat mechanic
+  });
+
+  it("does not affect wild-on-wild predation — a non-player target with the same rapport score is hunted normally", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    // Same high rapport score toward the prey's own id (not the player's) —
+    // trustFleeFactor/trustStage exist for any agent pair, but this gate is
+    // deliberately scoped to `controlledBy === "player"` only.
+    const target = prey({ x: 5, y: 5 });
+    const hunter = predator({ x: 8, y: 5 }, 0.1, { rapport: { "bulbasaur-0": { score: 0.9, lastInteractionTick: 0 } } });
+    world.agents.push(target, hunter);
+
+    applyPredationInstincts(world, hunter, RULES, undefined, undefined, SAFE_RNG);
+
+    expect(hunter.behavior).toBe("hunt");
+    expect(hunter.huntTarget).toBe("bulbasaur-0");
+  });
+});

@@ -8914,3 +8914,83 @@ the Potato.
 21 new unit tests (`test/inventoryActions.test.ts`, `test/playerCombat.test.ts`
 additions) plus the live Playwright/engine verification above. Full suite:
 engine 1474/1474, data 387/387.
+
+## Trust gates predation against the player, torch grants Ember, human player XP
+
+Direct report, after the user pasted their own death log — a Charmeleon's
+`dragon_breath` killing "Human (player)" for 56 damage: *"i'm okay with
+this, but uh... i dont know why the charmeleon killed me."* Investigated
+live (not guessed): Charmeleon is a real `isPredator: true` species, and
+`predation.ts`'s hunt-candidate filter (`isPreyOf`) has no
+`controlledBy === "player"` exclusion at all — a hungry predator treats the
+player exactly like any other eligible prey, and human is one of the
+weakest base stat blocks in the roster. Not retaliation (that mechanic
+explicitly excludes predators), not territorial defense (a separate
+same-species mechanic). Dragon Breath's 56 damage checked out as real,
+intended math (power 60 special move, a leveled Charmeleon vs. a low-level
+human's weak special defense, plus a crit) — not a bug.
+
+Follow-up: *"i think it killing me is fine... i think it's kinda
+surprising cuz i had good rapport with it... just the vibe."* Genuine
+design tension, not a bug: `NARRATIVE_PILLARS.md`'s Pillar 4 — "Pokémon
+roles come from instinct/typing" — argues predation should stay trust-
+blind, but the game's own precedent cuts the other way: a bonded PREY
+animal already stops fleeing the player once trust clears Bonded
+(`trust.ts`'s `trustFleeFactor`), so instinct already bends to earned,
+individual trust in one direction. Offered three options (leave it and fix
+only the narration; reduce predation odds by trust; block it outright at
+Bonded). Ruling: *"i think both 2 and 3."*
+
+**Built** (`predation.ts`): new `eligibleDespitePlayerTrust(world, predator,
+candidate, rng)`, scoped to `candidate.controlledBy === "player"` only —
+wild-on-wild predation is completely untouched, keeping the one part of
+the original mechanic the user was explicitly fine with. Reuses
+`threat.ts`'s own `trustStage`/`trustFleeFactor` ladder (the same wary/
+tolerant/curious/bonded stages and 1/0.5/0.25/0 multipliers the flee-radius
+mechanic already established) in the opposite direction: at Bonded, the
+player is excluded from the hunt-candidate list outright, every tick,
+regardless of rng; below that, `rng() < trustFleeFactor(stage)` gives
+tolerant/curious a real, reduced (not zero) chance of still being hunted.
+Wired into both the solo and pack hunt-candidate filters. 5 new unit tests
+(`test/predation.test.ts`) — including a real gotcha caught mid-build: the
+first attempt at these tests used adjacent positions and neutral
+disposition, and tripped a completely separate, pre-existing mechanic
+(any creature, predator or not, can independently decide to flee a nearby
+"threatening" human via `threat.ts`'s `playerFleeRadius`) — fixed by giving
+the test fixtures max boldness and real hunt-range distance, isolating what
+was actually under test. Full engine suite: 1479/1479.
+
+Two more direct asks, same round: *"also i want to gain xp as a human
+player too. the held torch should give me access to ember (1 range) as a
+move."*
+
+- **Torch grants Ember**: `crafting.ts`'s `torch` `ItemDef` gained
+  `grantsMoves: [MOVES.ember]` — the exact same pattern the knife/club/axe/
+  machete grants already use, range 1 already on the base move. The torch
+  keeps being a light source too (additive, not a replacement).
+- **Player XP**: investigated live and found the real gap — `species.ts`'s
+  `human` entry is deliberately "not in the dex" (no Pokédex number, no
+  catch rate — it's a literal `SpeciesDef`, not `speciesFromDex`), which
+  meant `LEVELING_CONTEXT.getProfile("human")` always returned `undefined`.
+  `grantExp`'s entire level-up loop silently no-ops without a real profile
+  — `Agent.exp` was already climbing (`EXP_ON_CONSUME` on eat/drink), it
+  just had nowhere to go: no level-ups, no stat growth, nothing visible.
+  Fixed with one synthetic `LevelingProfile` (`leveling.ts`'s new
+  `HUMAN_LEVELING_PROFILE`, built from `SPECIES.human`'s own stats, not a
+  fake dex entry) — `levelMoves: []` deliberately, since the player's real
+  moveset comes from held items (`syncPlayerMoves`), not level-gated
+  learning, so this doesn't create a second, conflicting source of
+  `Agent.moves` mutations. Everything downstream (exp accumulation, real
+  level-ups, `calculateStats`-driven stat growth, `leveledUp` events, skill
+  points) is the ordinary generic pipeline every other agent already goes
+  through — no parallel player-only system. Free side effect, same gap from
+  the other direction: whatever kills the player now actually earns real
+  kill exp for it too (`grantKillExp` reads the DEFENDER's profile).
+
+Live-verified (Playwright, real dev server, `?player=cave`): holding a
+torch adds `"ember"` to the player's real move list alongside `"tackle"`.
+60 real 'e' (eat) key presses took the player from level 5 (exp 4) to
+level 8 (exp 693), with `maxHp` growing from 19 to 25 and every other stat
+scaling with it — the actual bundled game code, not a synthetic harness.
+4 new unit tests (`test/leveling.test.ts`, data package). Full suite:
+engine 1479/1479, data 392/392.
