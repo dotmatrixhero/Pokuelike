@@ -80,13 +80,21 @@ describe("accuracy and evasion stages actually reach the hit roll", () => {
   // debuffs that affect accuracy. And evasiveness does too."
   const nearMiss = () => 0.85; // clears 100 accuracy, fails anything much below it
 
-  it("a defender's evasion stage makes an otherwise-certain hit miss", () => {
-    const plain = fight(moveOf({ accuracy: 100 }), nearMiss);
-    expect(plain.damageEvents).toBe(1);
+  it("a defender's evasion stage lowers the hit CHANCE — it is not a wall", () => {
+    // +6 evasion against +0 accuracy is a 1/3 multiplier, so a 100-accuracy
+    // move still lands about a third of the time. Asserting a single roll
+    // would have read as "evasion means miss", which is wrong and is exactly
+    // how a probabilistic mechanic gets mis-designed later.
+    const rolls = Array.from({ length: 200 }, (_, i) => i / 200);
 
-    const evasive = fight(moveOf({ accuracy: 100 }), nearMiss, { evasion: 6 });
-    expect(evasive.damageEvents).toBe(0);
-    expect(evasive.missedEvents).toBe(1);
+    const plain = rolls.filter((r) => fight(moveOf({ accuracy: 100 }), () => r).damageEvents > 0).length;
+    const evasive = rolls.filter((r) => fight(moveOf({ accuracy: 100 }), () => r, { evasion: 6 }).damageEvents > 0).length;
+
+    expect(plain).toBe(200); // 100 accuracy, no evasion: never misses
+    // ~1/3 of rolls, not 0 and not all. Bounded loosely on purpose — this is
+    // pinning the SHAPE of the curve, not one exact constant.
+    expect(evasive).toBeGreaterThan(200 * 0.25);
+    expect(evasive).toBeLessThan(200 * 0.45);
   });
 
   it("the attacker's accuracy stage cancels it out — the roll is the NET of the two", () => {
