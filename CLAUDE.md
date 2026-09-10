@@ -163,6 +163,23 @@ argument, and starting to implement mid-discussion reads as not listening.
   clock. The engine even carried a comment describing that exact bug as
   something already fixed. A number with the wrong denominator looks just
   like a finding.
+- **Read the real exit code, and never `-s` a verification command.** I
+  pushed a broken `vite build` to master while reporting "typecheck clean."
+  The command was `pnpm -s typecheck 2>&1 | tail -5`: `-s` swallowed the
+  compiler errors, and `$?` after a pipe is **`tail`'s** status, which is
+  always 0. So "no output, exit 0" meant nothing. Run
+  `pnpm typecheck > /tmp/tc.log 2>&1; echo $?` and grep the log — and for the
+  web package specifically, run the actual `pnpm --filter @pokuelike/web
+  build`, since `tsc --noEmit` there is what type-checks engine source as the
+  app consumes it.
+- **After resolving a merge conflict, re-run everything.** The same incident:
+  a rename (`kin` → `standing`) was silently dropped when git auto-merged
+  `types.ts`, leaving the call sites referring to a field that no longer
+  existed. The conflict was in a different file, so nothing flagged it.
+- **An exhaustive `switch` over `SimEvent` breaks in three packages at once.**
+  `eventText.ts` (web), `format.ts` (runner) and any other formatter have no
+  `default` — adding a `SimEvent` kind without a case there is a compile
+  error the engine's own typecheck will not catch.
 - **A test that passes for the wrong reason is worse than no test.** Two happened here: an
   always-zero rng that fired a different trigger than the test named, and an `if (walkable)`
   precondition that made a test silently vacuous. When a test fails after a change, work out

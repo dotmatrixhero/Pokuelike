@@ -1694,12 +1694,21 @@ export interface RapportSubject {
   id?: string;
   /** Level where known — `rapport.ts` keeps the most notable subject, and this is how "notable" is judged. */
   level?: number;
+  /**
+   * Friend or foe. Added because *"three have died"* is ambiguous in the way
+   * that matters — *"were they foes that died? Allies?"* — and then kept
+   * blunt on a follow-up: *"Get rid of it was none of herd. Just say foe or
+   * friend."* A death is a `"friend"` when the dead agent shared a herd with
+   * both of the agents remembering it, and a `"foe"` otherwise. Absent where
+   * the question does not apply (the weather has no herd).
+   */
+  standing?: "friend" | "foe";
 }
 
 /**
  * One aggregated reason on a `RapportEdge` — "this happened between us, this
  * many times, most recently then." Aggregated rather than appended per event
- * so an edge holds at most one entry per `RapportReason` (8 kinds), which
+ * so an edge holds at most one entry per `RapportReason` (20 kinds), which
  * with `RAPPORT_MAX_EDGES_PER_AGENT` = 16 bounds an agent's whole social
  * memory without any pruning of its own: a long run cannot grow it.
  */

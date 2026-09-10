@@ -107,6 +107,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.agentId, event.species)} gained a ${event.pointType} skill point`;
     case "moveRespecced":
       return `${idLabel(world, event.agentId, event.species)} specced ${event.moveId} into ${event.nodeId}`;
+    case "forgotMove":
+      return `${idLabel(world, event.agentId, event.species)} forgot ${event.moveId} (${event.reason}), refunding ${event.refundedPoints} points`;
+    case "utilityMoveUsed":
+      return `${idLabel(world, event.agentId, event.species)} used ${event.moveId}${event.inCombat ? " in the fight" : ""}`;
     case "fainted":
       return `${idLabel(world, event.agentId, event.species)} fainted`;
     case "recovered":
