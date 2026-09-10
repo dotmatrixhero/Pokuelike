@@ -49,3 +49,26 @@ describe("exhaustion slows everyone (ruling: 20% slower at 0 energy, only under 
     console.log(`20 waits: rested ${restedTicks} ticks, exhausted ${tiredTicks} ticks`);
   });
 });
+
+describe('"Wait should recover [energy]" — the player has no other rest verb', () => {
+  it("repeatedly waiting raises a tired player's energy instead of draining it further", () => {
+    const world = createWorld(12, 12, 1);
+    const player = human(0.1);
+    world.agents.push(player);
+    for (let i = 0; i < 40; i++) advancePlayerTurn(world, { kind: "wait" });
+    expect(player.needs.energy).toBeGreaterThan(0.1);
+    expect(player.asleep).toBe(true);
+  });
+
+  it("any other action wakes the player back up, and energy resumes draining", () => {
+    const world = createWorld(12, 12, 1);
+    const player = human(0.1);
+    world.agents.push(player);
+    for (let i = 0; i < 40; i++) advancePlayerTurn(world, { kind: "wait" });
+    const rested = player.needs.energy;
+    advancePlayerTurn(world, { kind: "crouch" });
+    expect(player.asleep).toBe(false);
+    for (let i = 0; i < 40; i++) advancePlayerTurn(world, { kind: "crouch" });
+    expect(player.needs.energy).toBeLessThan(rested);
+  });
+});
