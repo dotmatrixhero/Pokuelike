@@ -9009,6 +9009,595 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("PSYBEAM"),
     cooldownTicks: 4,
     range: { min: 0, max: 2 },
+    // --- Template v4 (45 nodes). THE FANTASY, written before any node:
+    //
+    // Psybeam is held, not thrown. Nothing leaves the user's body: it fixes
+    // on something two tiles away and pushes, and the beam is only the part
+    // of that you can see. What breaks is not the target's ribs, it is the
+    // target's grip on what it was about to do. Everyone who learns it is a
+    // head that is too loud for the body carrying it — a duck with a
+    // headache it cannot put down, six eggs arguing with each other, a
+    // hypnotist, a ghost that eats the thing you were about to do.
+    //
+    // Mainline confuses with this. This sim has no confusion StatusKind, so
+    // confusion is spent as three separate, VISIBLE things instead of one
+    // hidden meter: stat stages that drop (it gets slower and stupider),
+    // `jamCooldownTicks` (whatever it was winding up takes longer), and
+    // telekinesis that moves it somewhere it did not choose. Every one of
+    // those is something an observer can watch happen on the map.
+    //
+    // AGGRESSION — the headache. Lane B is the BORE (one skull, all the
+    // pressure, straight through Sp. Defense — this lane's product is
+    // damage); lane S is the STATIC (it never pushes harder, it makes the
+    // target worse at everything: Speed, Sp. Attack, Attack, and every
+    // cooldown it had running). Break the body vs. break the plan. Converges
+    // on the target's own head hitting back at it, and ends in waves.
+    // BOLDNESS — the stare. Lane R is REACH (the beam gets longer via
+    // `areaBonus` until it stops being about one target and becomes a line
+    // that everything standing in it is in); lane G is GROUND (the user
+    // never moves and never flinches — `immovable`, `unshaken`, flat damage
+    // reduction, and a real `lockTicks` commitment paid for with power).
+    // Extend the weapon vs. anchor the wielder.
+    // SOCIABILITY — the shared head. Lane L is LIFT (telekinesis: the target
+    // is dragged, then swapped with, then hauled — the branch acting on
+    // BODIES); lane C is the CHORUS (the branch acting on HEADS: herd-mates
+    // healed and buffed, nobody nearby picking a fight). They converge on
+    // `allyEffectOnAttack`, which is exactly both at once.
+    //
+    // Checked at the call site, not in the doc (principle 3):
+    //   - `areaBonus` grows a `line` by LENGTH (`growShape`, moves.ts) and
+    //     forces `hitsArea` on, which is what makes `shape` mean anything at
+    //     all — `resolveAreaHit` is its only reader. 2 -> 3 -> 4 tiles.
+    //   - Speed stat stages are live: `simulation.ts:172` feeds
+    //     `getStatStage(agent, "speed")` into the agent's action speed. A
+    //     defender Speed drop really does cost it actions. Sp. Attack /
+    //     Sp. Defense / Attack / Defense stages are read by
+    //     `calculateDamage`. All five stats used here have real consumers.
+    //   - `resolveStatChangesOnHit` keeps the STRONGEST entry per
+    //     (target, stat) and composes across different stats — so the
+    //     Sp. Defense ladder on the bridge lands on -3, not -6, while the
+    //     Speed/Sp. Attack/Attack/Defense drops all apply together.
+    //   - `resistanceBreaker` returns early on effectiveness 0
+    //     (`calculateDamage:165`), so the capstone claws back the Steel and
+    //     Psychic resists and does nothing at all against Dark. Psychic
+    //     targets are all over this roster's psybeam learners, so it fires.
+    //   - `situationalBonus: "rallyMarked"` reads
+    //     `defender.rallyMarkTicksRemaining` (predation.ts:1048) — the same
+    //     mark this branch's own opener sets. The herd agreeing on a target
+    //     is literally the damage bonus.
+    //   - NO `chargeAttack` anywhere in this tree, deliberately.
+    //     `resolveHit` returns at the charge commit BEFORE it reaches
+    //     `if (move.hitsArea)`, and `resolveChargedAttack` calls
+    //     `resolveHitAgainstTarget` directly — so a build holding both a
+    //     charge and Boldness's own widened line would silently lose the
+    //     line on every use. That is the co-takeable-overwrite defect
+    //     wearing different clothes.
+    //   - Cooldown budget: base 4, floor `ceil(5/3)-1 = 1`, so -3 total is
+    //     the whole tree's allowance. All three ticks live on one bridge.
+    tree: {
+      // ================= AGGRESSION: the headache =================
+      pressure: {
+        id: "pressure",
+        name: "Pressure",
+        cost: 1,
+        leaning: "aggression",
+        // The opener is both halves of the branch in miniature: it hurts
+        // more, and whatever the target had winding down winds down slower.
+        delta: { power: 6, jamCooldownTicks: 4 },
+      },
+      // --- Lane B: the bore. One skull, all of the pressure.
+      narrow_it: {
+        id: "narrow_it",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["pressure"],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      hairline: {
+        id: "hairline",
+        name: "Hairline",
+        cost: 1,
+        prerequisites: ["narrow_it"],
+        leaning: "aggression",
+        delta: { critRateStage: 1, defensePenetration: 0.1 },
+      },
+      through_the_skull: {
+        id: "through_the_skull",
+        name: "Through the Skull",
+        cost: 1,
+        prerequisitesAnyOf: [["hairline"], ["never_stops"]],
+        leaning: "aggression",
+        // LANE B NOTABLE. Deliberately NOT a debuff — lane S owns those.
+        // This lane's answer to a tough target is to ignore 40% of its
+        // Sp. Defense and crit it, and that is all it does.
+        delta: { defensePenetration: 0.3, critRateStage: 1, power: 8 },
+      },
+      follow_through: {
+        id: "follow_through",
+        name: "Follow Through",
+        cost: 1,
+        prerequisites: ["through_the_skull"],
+        leaning: "aggression",
+        // Benefit and cost in the SAME node (principle 4): it does not let
+        // go for a full extra tick, and it hits for 12 more because of it.
+        delta: { power: 12, lockTicks: 1 },
+      },
+      // --- Lane S: the static. It never pushes harder; it makes the target
+      // --- worse at being a target.
+      white_noise: {
+        id: "white_noise",
+        name: "White Noise",
+        cost: 1,
+        prerequisites: ["pressure"],
+        leaning: "aggression",
+        delta: { jamCooldownTicks: 6 },
+      },
+      slurred: {
+        id: "slurred",
+        name: "Slurred",
+        cost: 1,
+        prerequisites: ["white_noise"],
+        leaning: "aggression",
+        // Speed stages are real here — a -1 costs the target actions, not
+        // just a number on a sheet.
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 120 }] },
+      },
+      nothing_but_static: {
+        id: "nothing_but_static",
+        name: "Nothing but Static",
+        cost: 1,
+        prerequisitesAnyOf: [["slurred"], ["it_stops_arguing"]],
+        leaning: "aggression",
+        // LANE S NOTABLE. Ten ticks onto every cooldown it had running, and
+        // its own special attacks come out two stages weaker. The target is
+        // still standing and can barely do anything with it.
+        delta: {
+          jamCooldownTicks: 10,
+          statChangesOnHit: [{ target: "defender", stat: "spAttack", stage: -2, ticks: 150 }],
+        },
+      },
+      lost_the_thread: {
+        id: "lost_the_thread",
+        name: "Lost the Thread",
+        cost: 1,
+        prerequisites: ["nothing_but_static"],
+        leaning: "aggression",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "attack", stage: -1, ticks: 150 }] },
+      },
+      // --- Convergence, one filler, capstone.
+      feedback: {
+        id: "feedback",
+        name: "Feedback",
+        cost: 1,
+        prerequisitesAnyOf: [["follow_through"], ["lost_the_thread"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here, and it is the one node that is
+        // both of them: the target's guard drops two stages for three
+        // minutes AND the user feeds off the damage. The headache runs both
+        // ways.
+        delta: {
+          lifestealFraction: 0.15,
+          statChangesOnHit: [{ target: "defender", stat: "defense", stage: -2, ticks: 180 }],
+        },
+      },
+      nosebleed: {
+        id: "nosebleed",
+        name: "Nosebleed",
+        cost: 1,
+        prerequisites: ["feedback"],
+        leaning: "aggression",
+        delta: { power: 10, recoilFraction: 0.06 },
+      },
+      splitting_headache: {
+        id: "splitting_headache",
+        name: "Splitting Headache",
+        cost: 1,
+        prerequisites: ["nosebleed"],
+        leaning: "aggression",
+        // CAPSTONE. The pressure stops being one push and arrives in waves —
+        // three of them, each its own accuracy roll, its own damage roll and
+        // its own application of every stat drop this branch bought. Nothing
+        // else on the roster uses `hitsBonus` (the whole shipped roster
+        // reaches for the overwrite `hits` instead), and it is the right
+        // shape here specifically because the debuffs re-apply per hit.
+        // Paid for honestly: holding it three times over costs real energy,
+        // and each individual wave is weaker than the single push was.
+        delta: { hitsBonus: 2, power: -8, selfCostPerUse: { need: "energy", amount: 0.05 } },
+      },
+
+      // ================= BOLDNESS: the stare =================
+      line_of_sight: {
+        id: "line_of_sight",
+        name: "Line of Sight",
+        cost: 1,
+        leaning: "boldness",
+        delta: { rangeBonus: 1, accuracy: 5 },
+      },
+      // --- Lane R: reach. The beam gets longer until it is not about one
+      // --- target any more.
+      farther: {
+        id: "farther",
+        name: "+1 Reach",
+        cost: 1,
+        prerequisites: ["line_of_sight"],
+        leaning: "boldness",
+        delta: { rangeBonus: 1 },
+      },
+      dont_blink: {
+        id: "dont_blink",
+        name: "+15 Accuracy",
+        cost: 1,
+        prerequisites: ["farther"],
+        leaning: "boldness",
+        delta: { accuracy: 15 },
+      },
+      through_and_through: {
+        id: "through_and_through",
+        name: "Through and Through",
+        cost: 1,
+        prerequisitesAnyOf: [["dont_blink"], ["it_cannot_watch_both"]],
+        leaning: "boldness",
+        // LANE R NOTABLE. The line goes from 2 tiles to 3 and starts
+        // resolving against everything standing in it, herd-mates included —
+        // this move has never distinguished. Spread costs concentration, so
+        // the beam is 6 power thinner for it.
+        delta: { areaBonus: 1, power: -6 },
+      },
+      long_look: {
+        id: "long_look",
+        name: "Long Look",
+        cost: 1,
+        prerequisites: ["through_and_through"],
+        leaning: "boldness",
+        // Escalates the notable on its own chain: reach 4, line 4. The beam
+        // now covers every tile it can be cast at.
+        delta: { rangeBonus: 1, areaBonus: 1 },
+      },
+      // --- Lane G: ground. It does not move and it does not look away.
+      feet_planted: {
+        id: "feet_planted",
+        name: "Feet Planted",
+        cost: 1,
+        prerequisites: ["line_of_sight"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      will_not_look_away: {
+        id: "will_not_look_away",
+        name: "Will Not Look Away",
+        cost: 1,
+        prerequisites: ["feet_planted"],
+        leaning: "boldness",
+        // The whole lane in one node, cost and benefit together: two ticks
+        // it cannot act, bought with 12 power.
+        delta: { power: 12, lockTicks: 2 },
+      },
+      unbroken_stare: {
+        id: "unbroken_stare",
+        name: "Unbroken Stare",
+        cost: 1,
+        prerequisitesAnyOf: [["will_not_look_away"], ["never_stops"]],
+        leaning: "boldness",
+        // LANE G NOTABLE. Nothing drags it off the line (`immovable` blocks
+        // every drag, knockback and lunge in `applyForcedMovement`) and the
+        // first thing to reach it simply does not connect (`unshaken`).
+        // A genuinely different KIND of answer than lane R's: that lane
+        // makes the weapon longer, this one makes the wielder a fixture.
+        grantsPassives: [
+          { kind: "unshaken", value: 1 },
+          { kind: "immovable", value: 1 },
+        ],
+        delta: { power: 8 },
+      },
+      weight_of_it: {
+        id: "weight_of_it",
+        name: "Weight of It",
+        cost: 1,
+        prerequisites: ["unbroken_stare"],
+        leaning: "boldness",
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      never_lost_it: {
+        id: "never_lost_it",
+        name: "Never Lost It",
+        cost: 1,
+        prerequisitesAnyOf: [["long_look"], ["weight_of_it"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. The condition IS the flavour, not a tax: a stare
+        // wants the high ground and a clear sightline, which is exactly what
+        // both lanes have been buying. `elevation` compares the two agents'
+        // real tile elevations at the moment of the hit.
+        delta: {
+          situationalBonuses: [{ condition: "elevation", multiplier: 1.4 }],
+          jamCooldownTicks: 8,
+        },
+      },
+      higher_still: {
+        id: "higher_still",
+        name: "Higher Still",
+        cost: 1,
+        prerequisites: ["never_lost_it"],
+        leaning: "boldness",
+        delta: { situationalBonuses: [{ condition: "elevation", multiplier: 1.6 }], accuracy: 5 },
+      },
+      minds_not_bodies: {
+        id: "minds_not_bodies",
+        name: "Minds, Not Bodies",
+        cost: 1,
+        prerequisites: ["higher_still"],
+        leaning: "boldness",
+        // CAPSTONE. The end of "it does not matter what you do." A thing
+        // that resists Psychic resists it with its body, and the beam was
+        // never touching the body: a resisted hit claws most of the way back
+        // to neutral. Immunity is untouched — `calculateDamage` returns at
+        // effectiveness 0 before this is ever read, so a Dark-type still
+        // takes nothing, which is the honest version of this fantasy.
+        delta: { resistanceBreaker: { multiplier: 1.8 }, power: 10 },
+      },
+
+      // ================= SOCIABILITY: the shared head =================
+      same_thought: {
+        id: "same_thought",
+        name: "Same Thought",
+        cost: 1,
+        leaning: "sociability",
+        delta: { rallyCallTicks: 60 },
+      },
+      // --- Lane L: lift. Telekinesis — this lane acts on BODIES.
+      lift: {
+        id: "lift",
+        name: "Lift",
+        cost: 1,
+        prerequisites: ["same_thought"],
+        leaning: "sociability",
+        delta: { forcedMovement: { mover: "defender", direction: "closer", tiles: 1, timing: "onHit" } },
+      },
+      set_it_down_hard: {
+        id: "set_it_down_hard",
+        name: "Set It Down Hard",
+        cost: 1,
+        prerequisites: ["lift"],
+        leaning: "sociability",
+        // Same lever, escalated on its own chain rather than by a second
+        // setter racing it — `forcedMovement` is an overwrite field.
+        delta: {
+          forcedMovement: { mover: "defender", direction: "closer", tiles: 2, timing: "onHit" },
+          power: 6,
+        },
+      },
+      change_places: {
+        id: "change_places",
+        name: "Change Places",
+        cost: 1,
+        prerequisitesAnyOf: [["set_it_down_hard"], ["it_stops_arguing"]],
+        leaning: "sociability",
+        // LANE L NOTABLE. Not a drag any more — the two of them trade tiles
+        // outright, and it keeps going one tile past the swap. The most
+        // legible thing in the branch: an observer watches two bodies
+        // exchange places for no reason either of them chose.
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      hand_off: {
+        id: "hand_off",
+        name: "Hand Off",
+        cost: 1,
+        prerequisites: ["change_places"],
+        leaning: "sociability",
+        delta: { positionSwapPull: 1 },
+      },
+      // --- Lane C: the chorus. This lane acts on HEADS, and never touches
+      // --- the enemy at all.
+      shared_sight: {
+        id: "shared_sight",
+        name: "Shared Sight",
+        cost: 1,
+        prerequisites: ["same_thought"],
+        leaning: "sociability",
+        // A real support use on the herd-mate's own idle tick, on top of
+        // staying an ordinary attack (`targetsAlly` does not remove it from
+        // `pickBestMove`). What it lends is the caster's own faculty.
+        delta: {
+          targetsAlly: true,
+          allyEffects: [{ buff: { stat: "spAttack", stage: 1, ticks: 120 } }],
+        },
+      },
+      steady_them: {
+        id: "steady_them",
+        name: "Steady Them",
+        cost: 1,
+        prerequisites: ["shared_sight"],
+        leaning: "sociability",
+        delta: { allyEffects: [{ healFraction: 0.1 }] },
+      },
+      one_head: {
+        id: "one_head",
+        name: "One Head",
+        cost: 1,
+        prerequisitesAnyOf: [["steady_them"], ["it_cannot_watch_both"]],
+        leaning: "sociability",
+        // LANE C NOTABLE. `resolveAllyEffect` keeps the largest heal and the
+        // strongest buff PER STAT, so this composes with Shared Sight rather
+        // than replacing it: 18% healed, Sp. Attack up from that node and
+        // Sp. Defense up from this one. And nothing nearby wants to start a
+        // fight while it is doing it.
+        // 0.2, not 1: `calmingMultiplier` (herdConflict.ts) floors its own
+        // effect at 0.5, so any value above 0.5 is skill points that provably
+        // do nothing, and the shipped roster's own top value is 0.5.
+        grantsPassive: { kind: "calmingPresence", value: 0.2 },
+        delta: {
+          allyEffects: [{ healFraction: 0.18, buff: { stat: "spDefense", stage: 1, ticks: 150 } }],
+        },
+      },
+      long_quiet: {
+        id: "long_quiet",
+        name: "Long Quiet",
+        cost: 1,
+        prerequisites: ["one_head"],
+        leaning: "sociability",
+        grantsPassive: { kind: "regenFlat", value: 1 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      both_hands: {
+        id: "both_hands",
+        name: "Both Hands",
+        cost: 1,
+        prerequisitesAnyOf: [["hand_off"], ["long_quiet"]],
+        leaning: "sociability",
+        // DEEP NOTABLE, and it is exactly the two lanes at once: the same
+        // push that throws the enemy around also reaches the nearest hurt
+        // herd-mate and does the whole ally payload to them, free, on the
+        // attack itself (`allyEffectOnAttack`, resolved in `resolveHit`).
+        // One mind, two hands, two targets.
+        delta: { allyEffectOnAttack: true, jamCooldownTicks: 6 },
+      },
+      agreed: {
+        id: "agreed",
+        name: "Agreed",
+        cost: 1,
+        prerequisites: ["both_hands"],
+        leaning: "sociability",
+        delta: { rallyCallTicks: 90 },
+      },
+      we_all_saw_it: {
+        id: "we_all_saw_it",
+        name: "We All Saw It",
+        cost: 1,
+        prerequisites: ["agreed"],
+        leaning: "sociability",
+        // CAPSTONE. The mark runs 390 ticks, and the beam hits 1.6x harder
+        // on anything already carrying one. That is the branch's whole
+        // argument as a single mechanic: the herd deciding together is not a
+        // route to damage, it IS the damage. Every psybeam in the herd reads
+        // the same `rallyMarkTicksRemaining`, so a second user's mark makes
+        // this one's beam hit harder too — the payoff is other agents'
+        // independently-run choices lining up, which is a thing no amount of
+        // power on this node could buy.
+        delta: {
+          rallyCallTicks: 240,
+          situationalBonuses: [{ condition: "rallyMarked", multiplier: 1.6 }],
+        },
+      },
+
+      // ================= Bridges =================
+      no_wind_up: {
+        id: "no_wind_up",
+        name: "No Wind-Up",
+        cost: 1,
+        prerequisites: ["pressure", "line_of_sight"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Its lever is TEMPO. A user that
+        // never has to re-aim never has to re-start: the whole cooldown
+        // budget this move is allowed (-3 of a base 4, floor 1) lives on
+        // this one bridge.
+        delta: { cooldownTicks: -1 },
+      },
+      no_gap: {
+        id: "no_gap",
+        name: "No Gap",
+        cost: 1,
+        prerequisites: ["no_wind_up"],
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      never_stops: {
+        id: "never_stops",
+        name: "Never Stops",
+        cost: 1,
+        prerequisites: ["no_gap"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. The last tick of cooldown the cap allows, plus the
+        // only other way to buy tempo that is not cooldown: the user's own
+        // Speed stage, which `simulation.ts` reads straight into its action
+        // speed. Deliberately NOT `critCooldownReset` — that is the shipped
+        // roster's stock answer here and it would be reused content.
+        // Lands on Through the Skull (Aggression) and Unbroken Stare
+        // (Boldness): both COMMITTED, slow lanes, complementing this bridge
+        // rather than matching it.
+        delta: {
+          cooldownTicks: -1,
+          statChangesOnHit: [{ target: "self", stat: "speed", stage: 1, ticks: 200 }],
+        },
+      },
+
+      two_sets_of_eyes: {
+        id: "two_sets_of_eyes",
+        name: "Two Sets of Eyes",
+        cost: 1,
+        prerequisites: ["line_of_sight", "same_thought"],
+        leaning: "boldness",
+        // CROSSLINK Boldness<->Sociability. Its lever is `flanking`, which
+        // in this engine means the defender's own `fightTarget`/`huntTarget`
+        // is not you — someone else has its attention. That is a herd fact
+        // and a sightline fact at the same time, which is why it lives here.
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.25 }] },
+      },
+      the_blind_side: {
+        id: "the_blind_side",
+        name: "The Blind Side",
+        cost: 1,
+        prerequisites: ["two_sets_of_eyes"],
+        leaning: "boldness",
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.4 }] },
+      },
+      it_cannot_watch_both: {
+        id: "it_cannot_watch_both",
+        name: "It Can't Watch Both",
+        cost: 1,
+        prerequisites: ["the_blind_side"],
+        leaning: "sociability",
+        // BRIDGE NOTABLE. Its own crosslink's lever escalated to its end
+        // (1.75x, resolved as the strongest single `flanking` entry, not a
+        // 3x stack), and the thing it was about to do about the OTHER
+        // attacker takes six ticks longer. Lands on Through and Through
+        // (Boldness) and One Head (Sociability).
+        delta: {
+          situationalBonuses: [{ condition: "flanking", multiplier: 1.75 }],
+          jamCooldownTicks: 6,
+        },
+      },
+
+      everyone_presses: {
+        id: "everyone_presses",
+        name: "Everyone Presses",
+        cost: 1,
+        prerequisites: ["same_thought", "pressure"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. Its lever is the target's
+        // Sp. Defense. One mind leaning on another is a fair fight; several
+        // is not, and this is the node where the herd's version of the
+        // headache starts.
+        delta: { statChangesOnHit: [{ target: "defender", stat: "spDefense", stage: -1, ticks: 120 }] },
+      },
+      giving_way: {
+        id: "giving_way",
+        name: "Giving Way",
+        cost: 1,
+        prerequisites: ["everyone_presses"],
+        leaning: "sociability",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "spDefense", stage: -2, ticks: 150 }] },
+      },
+      it_stops_arguing: {
+        id: "it_stops_arguing",
+        name: "It Stops Arguing",
+        cost: 1,
+        prerequisites: ["giving_way"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. The same lever at its end — three stages of
+        // Sp. Defense for over three minutes — plus the mark, so the rest of
+        // the herd comes to the head that has already stopped defending
+        // itself. Lands on Nothing but Static (Aggression) and Change Places
+        // (Sociability).
+        delta: {
+          statChangesOnHit: [{ target: "defender", stat: "spDefense", stage: -3, ticks: 200 }],
+          rallyCallTicks: 60,
+        },
+      },
+    },
   },
   wing_attack: {
     id: "wing_attack",

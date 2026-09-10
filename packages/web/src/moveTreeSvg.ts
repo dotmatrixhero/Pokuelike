@@ -285,6 +285,10 @@ function conditionLabel(c: string): string {
     rain: "it's raining",
     targetBurning: "burning",
     targetStatused: "already statused",
+    // Was missing, so a `rallyMarked` node printed the raw key: "when the
+    // target is rallyMarked". The mark is `Agent.rallyMarkTicksRemaining`,
+    // set by any herd-mate's own rally call.
+    rallyMarked: "already marked by the herd",
   };
   return labels[c] ?? c;
 }
@@ -362,10 +366,16 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
-    const mover = fm.mover === "attacker" ? "The user" : "The target";
-    const dir = fm.direction === "closer" ? "toward the other side" : "away from the other side";
+    // Phrased from the two real parties, not "the other side" — a reader
+    // could not tell who "the other side" was, which is MOVES_DESIGN.md's own
+    // complaint about this vocabulary ("It should be phrased around
+    // repositioning based on a specific target").
+    const attackerSide = fm.mover === "attacker";
+    const who = attackerSide ? "The user" : "The target";
+    const verb = fm.direction === "closer" ? (attackerSide ? "lunges" : "is dragged") : attackerSide ? "retreats" : "is shoved";
+    const dir = fm.direction === "closer" ? (attackerSide ? "toward the target" : "toward the user") : attackerSide ? "away from the target" : "away from the user";
     const timing = fm.timing === "beforeHit" ? "before the hit resolves" : "on a landed, non-killing hit";
-    lines.push(`${mover} moves ${fm.tiles} tile${fm.tiles === 1 ? "" : "s"} ${dir}, ${timing}.`);
+    lines.push(`${who} ${verb} ${fm.tiles} tile${fm.tiles === 1 ? "" : "s"} ${dir}, ${timing}.`);
   }
   if (has("chargeAttack")) {
     const ca = delta.chargeAttack;
@@ -387,7 +397,61 @@ function capitalize(s: string): string {
 const ADDITIVE_FIELDS = [
   "power", "accuracy", "cooldownTicks", "statusChance", "defensePenetration", "lockTicks",
   "critRateStage", "lifestealFraction", "recoilFraction", "jamCooldownTicks", "positionSwapPull", "gatherBurst",
+  // The additive FORMS were missing here while `applyMoveTree` summed them,
+  // so a build with three `rangeBonus: 1` nodes summarised as "+1 tile of max
+  // reach" while its real spec showed +3. Measured on a rolled psybeam build
+  // (seed 42, build 2): summary "+1 tile of max reach", real spec range 2->5.
+  "rangeBonus", "hitsBonus", "areaBonus", "rallyCallTicks",
 ] as const;
+/** Fields `applyMoveTree` APPENDS to a list rather than overwriting — see `MoveSpec.situationalBonuses`. Concatenated here for the same reason. */
+const APPEND_FIELDS = ["situationalBonuses", "statChangesOnHit", "allyEffects"] as const;
+
+/**
+ * Collapses one appended list the way the engine's own resolver does at the
+ * moment of the hit, so the summary reports what a build actually GETS rather
+ * than everything it bought. Every one of these lists is authored as a ladder
+ * (concealed 1.25 -> 1.4 -> 1.7 on one chain), and printing the whole ladder
+ * reads as three separate stacking bonuses when the engine keeps one.
+ *
+ * Mirrors `resolveSituationalBonuses` (strongest per condition),
+ * `resolveStatChangesOnHit` (strongest |stage| per target+stat) and
+ * `resolveAllyEffect` (largest heal, strongest buff per stat) — all in
+ * engine/moves.ts.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveAppended(field: string, entries: any[]): any[] {
+  if (field === "situationalBonuses") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const best = new Map<string, any>();
+    for (const e of entries) {
+      const cur = best.get(e.condition);
+      if (!cur || e.multiplier > cur.multiplier) best.set(e.condition, e);
+    }
+    return [...best.values()];
+  }
+  if (field === "statChangesOnHit") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const best = new Map<string, any>();
+    for (const e of entries) {
+      const key = `${e.target}:${e.stat}`;
+      const cur = best.get(key);
+      if (!cur || Math.abs(e.stage) > Math.abs(cur.stage)) best.set(key, e);
+    }
+    return [...best.values()];
+  }
+  // allyEffects: one heal (the largest) plus one buff per stat (the strongest).
+  let heal: number | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const buffs = new Map<string, any>();
+  for (const e of entries) {
+    if (e.healFraction !== undefined && (heal === undefined || e.healFraction > heal)) heal = e.healFraction;
+    if (e.buff) {
+      const cur = buffs.get(e.buff.stat);
+      if (!cur || Math.abs(e.buff.stage) > Math.abs(cur.buff.stage)) buffs.set(e.buff.stat, { buff: e.buff });
+    }
+  }
+  return [...(heal !== undefined ? [{ healFraction: heal }] : []), ...buffs.values()];
+}
 /** OR-merge boolean fields — once any chosen node turns one on, it stays on for the whole build. */
 const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset", "spawnsRain"] as const;
 
@@ -412,6 +476,8 @@ function combineDeltas(tree: Record<string, MoveTreeNode>, chosenIds: readonly s
       if (v === undefined) continue;
       if ((ADDITIVE_FIELDS as readonly string[]).includes(k)) {
         result[k] = (result[k] ?? 0) + v;
+      } else if ((APPEND_FIELDS as readonly string[]).includes(k)) {
+        result[k] = resolveAppended(k, [...(result[k] ?? []), ...v]);
       } else if ((OR_MERGE_FIELDS as readonly string[]).includes(k)) {
         result[k] = result[k] || v;
       } else {
