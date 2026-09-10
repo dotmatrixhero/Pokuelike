@@ -10839,13 +10839,16 @@ export const MOVES: Record<string, MoveSpec> = {
   psybeam: {
     id: "psybeam",
     name: "Psybeam",
-    // Mainline's own confusion chance isn't representable (no such
-    // StatusKind exists in this sim — see MOVES_DESIGN.md), so this is a
-    // clean, real-reach special hit with no status roll.
     shape: { kind: "line", length: 2 },
     ...moveCanon("PSYBEAM"),
     cooldownTicks: 4,
     range: { min: 0, max: 2 },
+    // Mainline's own confusion chance, now that `confusion` is a real
+    // StatusKind (status.ts): a landed hit has a 10% chance to leave the
+    // target stumbling in a random direction on half its actions. Base rate
+    // deliberately low — the tree's Static lane is where a build buys it up.
+    statusChance: 0.1,
+    statusKind: "confusion",
     // --- Template v4 (45 nodes). THE FANTASY, written before any node:
     //
     // Psybeam is held, not thrown. Nothing leaves the user's body: it fixes
@@ -10856,12 +10859,20 @@ export const MOVES: Record<string, MoveSpec> = {
     // headache it cannot put down, six eggs arguing with each other, a
     // hypnotist, a ghost that eats the thing you were about to do.
     //
-    // Mainline confuses with this. This sim has no confusion StatusKind, so
-    // confusion is spent as three separate, VISIBLE things instead of one
-    // hidden meter: stat stages that drop (it gets slower and stupider),
-    // `jamCooldownTicks` (whatever it was winding up takes longer), and
-    // telekinesis that moves it somewhere it did not choose. Every one of
-    // those is something an observer can watch happen on the map.
+    // Mainline confuses with this, and now so does this sim — `confusion`
+    // is a real StatusKind (status.ts), added on direct instruction:
+    // "Confusion should make you move in a random direction with a 50%
+    // chance while you have the status." It is a STUMBLE, not a skipped
+    // turn: paralysis already owns losing the action, and a confused thing
+    // walking somewhere it did not choose is visible on the map, which is
+    // the bar this project sets.
+    //
+    // The tree still spends confusion as three separate VISIBLE things
+    // rather than leaning on the status roll alone — stat stages that drop
+    // (it gets slower and stupider), `jamCooldownTicks` (whatever it was
+    // winding up takes longer), and telekinesis that moves it somewhere it
+    // did not choose. The status is now the fourth, and the Static lane is
+    // where a build buys its 10% base rate up.
     //
     // AGGRESSION — the headache. Lane B is the BORE (one skull, all the
     // pressure, straight through Sp. Defense — this lane's product is
@@ -10986,11 +10997,18 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisitesAnyOf: [["slurred"], ["it_stops_arguing"]],
         leaning: "aggression",
-        // LANE S NOTABLE. Ten ticks onto every cooldown it had running, and
-        // its own special attacks come out two stages weaker. The target is
-        // still standing and can barely do anything with it.
+        // LANE S NOTABLE. Ten ticks onto every cooldown it had running, its
+        // own special attacks two stages weaker, and the confusion roll goes
+        // from a 10% flicker to a 35% real threat. The target is still
+        // standing and can barely do anything with it — and half the time it
+        // walks the wrong way while failing to.
+        //
+        // This is the lane's whole thesis paying off: lane B breaks the
+        // body, lane S breaks the plan, and `confusion` is the purest form
+        // of breaking the plan the engine has.
         delta: {
           jamCooldownTicks: 10,
+          statusChance: 0.35,
           statChangesOnHit: [{ target: "defender", stat: "spAttack", stage: -2, ticks: 150 }],
         },
       },

@@ -15,7 +15,7 @@ export interface Vec2 {
  * `maybeInflictStatus` in status.ts). See DESIGN.md's "Status effects"
  * section.
  */
-export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze" | "confusion";
 
 /**
  * Agent-modifying passives — a tree node's effect that permanently changes

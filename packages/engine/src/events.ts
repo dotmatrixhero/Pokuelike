@@ -548,8 +548,8 @@ export type SimEvent =
       agentId: string;
       species: string;
       statusKind: StatusKind;
-      /** Sleep's duration running out, or freeze's per-tick/fire-hit thaw. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
-      reason: "woke" | "thawed";
+      /** Sleep's duration running out, freeze's per-tick/fire-hit thaw, or confusion's duration running out. A faint (burn/poison DOT or any other cause) clears status silently — the "fainted" event itself narrates that, no separate reason needed here. */
+      reason: "woke" | "thawed" | "cleared";
     }
   | {
       kind: "bonded";
