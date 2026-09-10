@@ -490,6 +490,15 @@ mid-flight, not its absence.
    gradually and its *history* vanishes in one step. Deliberate so far, but
    worth ruling on.
 
+## SUPERSEDED → see ROADMAP.md
+
+The Track A / Track B split below was right about dependencies and wrong
+about priority: tells and crafting data *can* be built without a player, but
+they cannot be *felt* without one, and the risk in this project is never
+"won't compile" — it is "won't play." `ROADMAP.md` puts the player agent
+first and folds the remaining Track A items in where they become playable
+(tells → M4, crafting data → M5). Kept below for the record.
+
 ## IMPLEMENTATION ORDER — the move from design into code
 
 Asked directly: *"Do you think you're potentially ready to really start
