@@ -1520,8 +1520,14 @@ function resolveAreaHit(
  * hunger on a "kill" (see the hunt call site below) must gate on this
  * return value, not on the old hp<=0 check, so eating only ever happens
  * against a truly dead target (design point 7).
+ *
+ * Exported for `player.ts`'s `attack` case (MOVES_AND_TOOLS.md): the
+ * player's held-item-granted moveset is a real `Agent.moves`, so a player
+ * swing goes through the exact same `pickBestMove`/`useMove`/hit-resolution
+ * path any wild agent's own attack does — the sim does not know a human
+ * swung a knife rather than a Sandshrew's claw.
  */
-function resolveHit(
+export function resolveHit(
   world: World,
   attacker: Agent,
   defender: Agent,

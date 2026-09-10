@@ -125,6 +125,33 @@ describe("eat and drink (ROADMAP M3)", () => {
     expect(me.lastActionOutcome).toMatchObject({ action: { kind: "eat" }, ok: false });
   });
 
+  it("eating on bare floor falls back to a carried berry — direct ask, 'make offer and eat only available from inventory after you gather'", () => {
+    const world = createWorld(8, 8, 1);
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.2 }), inventory: [{ itemKey: "food", weight: 1, count: 3 }] });
+    world.agents.push(me);
+    const hungerBefore = me.needs.hunger;
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(true);
+    expect(me.needs.hunger).toBeGreaterThan(hungerBefore);
+    expect(me.inventory?.find((i) => i.itemKey === "food")?.count).toBe(2);
+  });
+
+  it("a live food tile underfoot is eaten first — a carried berry is untouched while there's food on the ground", () => {
+    const world = createWorld(8, 8, 1);
+    setTile(world, "surface", 3, 3, "food");
+    tileAt(world, "surface", 3, 3)!.stock = 1;
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.2 }), inventory: [{ itemKey: "food", weight: 1, count: 3 }] });
+    world.agents.push(me);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(true);
+    expect(me.inventory?.find((i) => i.itemKey === "food")?.count).toBe(3);
+  });
+
+  it("no ground food and nothing carried: eat fails outright", () => {
+    const world = createWorld(8, 8, 1);
+    const me = human("me", 3, 3, { needs: createNeeds({ hunger: 0.2 }) });
+    world.agents.push(me);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(false);
+  });
+
   it("an eaten-out patch (stock 0) is not food", () => {
     const world = createWorld(8, 8, 1);
     setTile(world, "surface", 3, 3, "food");

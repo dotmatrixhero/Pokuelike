@@ -339,7 +339,29 @@ planning and arrival, so gather now works on flora and seedling tiles.
 
 Deferred from here, deliberately: items on tiles (dropping, caches — needed
 for the dispersal offer's "one armful", not for the torch), the wider item
-catalogue, tool-granted moves (`MOVES_AND_TOOLS.md`).
+catalogue.
+
+**Tool-granted moves, built** (`MOVES_AND_TOOLS.md`) — direct ask: "I want
+tool granted moves. That will truly unlock gameplay as we know it." A held
+item now grants real combat moves onto `Agent.moves`, so a player `attack`
+goes through the exact same `pickBestMove`/`resolveHit` pipeline any wild
+agent's own attack does — the sim does not know a human swung a knife
+rather than a Sandshrew's claw. Bare hands (a real, weakened Tackle — mid-
+ask correction, "Tackle\*", not the first-drafted Scratch), flint knife
+(Scratch), and club (Body Slam) all follow the doc's numeric rule: ~65%
+power, ~1.75x cooldown of the creature version, so a human can never
+out-tool a partner into irrelevance. Two new items, axe and machete,
+exercise the doc's other ask — MOVES_AND_TOOLS.md's generalised terrain
+effect (`MoveSpec.terrainEffect`): an axe fells a tree (yields deadwood),
+a machete clears brush (plus a weakened Slash) — the slice rule at its
+clearest, gated by `terrainEffect.from` so neither tool does the other's
+job. Verified two ways: 21 unit tests (engine + data), and a live runner
+script against REAL scenario data — `validatePlayerCombat.ts` — 5/5 seeds
+felled a real tree for real deadwood, 3/5 landed a real hit on a real
+wild Pokémon (the other 2 lost the chase within budget, same
+moving-target difficulty `validateBond.ts` already documents, not a
+regression). Full build, the numeric-rule table, and the live numbers are
+in TODO.md's "Tool-granted moves" section.
 
 ### M6 — Bond
 
@@ -510,7 +532,7 @@ Build:
   24,000 agent-ticks), `healAura` (0), `fire` (0), `sharedWater` (15). These
   are sim-health defects and none of them blocks the player path. They stay
   in `TODO.md` for a dedicated pass.
-- **The wider crafting tree, tiers 3–4, tool-granted moves.** M5 ships the
+- **The wider crafting tree, tiers 3–4.** M5 ships the
   minimum: the torch chain and a few things that make the opening work.
 - **Chebyshev range** (`PROMPT_chebyshev.md`), the elevation effect size, the
   battle-panel cadence — all still parked balance calls.

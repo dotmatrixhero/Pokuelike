@@ -182,6 +182,15 @@ let playerScene: "surface" | "cave" = "surface";
 let playerSeed = 0;
 let playerDead = false;
 let lastLoggedEventCount = 0;
+/**
+ * MOVES_AND_TOOLS.md's `attack` needs a direction, and there's no on-screen
+ * cursor to aim one with — reused the last direction the player MOVED
+ * (attempted or not; bumping into a wall still points you at it) as "which
+ * way you're facing," same shorthand any roguelike with 8-directional
+ * movement and no separate aim step uses. UI-only state: the engine has no
+ * concept of player facing at all.
+ */
+let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -488,7 +497,7 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
     case "wait":
       return "You wait.";
     case "eat":
-      return ok ? "You eat." : "Nothing to eat here. Stand on a berry patch.";
+      return ok ? "You eat." : "Nothing to eat. Stand on a berry patch, or gather some first.";
     case "drink":
       return ok ? "You drink." : "No water within reach.";
     case "gather":
@@ -517,6 +526,17 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
     case "offer":
       if (ok) return "You set a berry down beside you.";
       return countOf(player, "food") > 0 ? "No free ground beside you." : "You have no berries. Gather some from a patch.";
+    case "attack": {
+      if (!ok) return "Nothing there to hit.";
+      if (outcome.attackedId) {
+        const target = world.agents.find((a) => a.id === outcome.attackedId);
+        return `You strike ${target ? (SPECIES[target.species]?.name ?? target.species) : "it"}!`;
+      }
+      if (outcome.felled) {
+        return outcome.felled.yields ? `You fell it, and gather ${itemName(outcome.felled.yields).toLowerCase()}.` : "You clear it away.";
+      }
+      return "";
+    }
   }
 }
 
@@ -583,6 +603,25 @@ function openPackMenu(): void {
     if (onTap) el.addEventListener("click", () => { closePackMenu(); onTap(); });
     return el;
   };
+  // Direct ask: "We're getting too many buttons... let's make offer and eat
+  // only available from inventory after you gather" — a row with its own
+  // small action buttons, rather than a single whole-row tap, for the one
+  // item (food) that has more than one thing you'd do with it.
+  const actionsRowEl = (text: string, actions: { label: string; onTap: () => void }[]) => {
+    const el = document.createElement("div");
+    el.className = "pack-row pack-row-actions";
+    const labelEl = document.createElement("span");
+    labelEl.textContent = text;
+    el.appendChild(labelEl);
+    for (const a of actions) {
+      const btn = document.createElement("button");
+      btn.className = "pack-action-btn";
+      btn.textContent = a.label;
+      btn.addEventListener("click", () => { closePackMenu(); a.onTap(); });
+      el.appendChild(btn);
+    }
+    return el;
+  };
   packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(me)}`));
   if (!me.inventory?.length) packMenuBodyEl.appendChild(rowEl("Nothing yet. Stand on lichen or deadwood and gather."));
   for (const item of me.inventory ?? []) {
@@ -590,7 +629,14 @@ function openPackMenu(): void {
     const held = me.equipment?.held === item.itemKey;
     const worn = me.equipment?.worn === item.itemKey;
     const label = `${itemName(item.itemKey)}${item.count > 1 ? ` ×${item.count}` : ""}`;
-    if (def?.slot === "held") packMenuBodyEl.appendChild(rowEl(label, held ? "in hand · tap to put away" : "tap to hold", () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey })));
+    if (item.itemKey === "food") {
+      packMenuBodyEl.appendChild(
+        actionsRowEl(label, [
+          { label: "Eat", onTap: () => playerAct({ kind: "eat" }) },
+          { label: "Offer", onTap: () => playerAct({ kind: "offer" }) },
+        ])
+      );
+    } else if (def?.slot === "held") packMenuBodyEl.appendChild(rowEl(label, held ? "in hand · tap to put away" : "tap to hold", () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey })));
     else if (def?.slot === "worn") packMenuBodyEl.appendChild(rowEl(label, worn ? "worn" : "tap to wear", worn ? undefined : () => playerAct({ kind: "equip", itemKey: item.itemKey })));
     else packMenuBodyEl.appendChild(rowEl(label));
   }
@@ -645,6 +691,7 @@ function viewLayer(): Layer {
 function playerAct(action: PlayerAction): void {
   const player = findPlayer(world);
   if (!player) return;
+  if (action.kind === "move") lastFacing = { dx: action.dx, dy: action.dy };
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
   focusCameraOn(player.pos);
@@ -670,7 +717,6 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
   e: { kind: "eat" },
   q: { kind: "drink" },
   z: { kind: "crouch" },
-  o: { kind: "offer" },
 };
 
 window.addEventListener("keydown", (e) => {
@@ -698,6 +744,11 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     playerAct({ kind: "gather" });
     runActivity();
+    return;
+  }
+  if (e.key === "f") {
+    e.preventDefault();
+    playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1020,7 +1071,8 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button").forEach((btn) =>
       playerAct({ kind: "gather" });
       runActivity();
     } else if (act === "pack") openPackMenu();
-    else if (act === "wait" || act === "eat" || act === "drink" || act === "crouch" || act === "offer") playerAct({ kind: act });
+    else if (act === "attack") playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });
 
