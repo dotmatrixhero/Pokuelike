@@ -5523,3 +5523,153 @@ mechanic is proven, and the ignition rates above bound how often a fire exists
 to stand in, but no long run was done to count how often a specced agent
 actually ends a turn on one. That is the same class of gap the Rock Slide and
 Peck conversions recorded for their own lone learners.
+
+### Rock Throw converted to v4 (Shipped) — "one rock, found, aimed and gone"
+
+Eighth structural conversion, and the one that had to be designed *against*
+Rock Slide, converted immediately before it, on the same species. Rock Slide
+is "Onix rears against a slope and the slope lets go"; the brief here was
+that Rock Throw must be a different thing entirely.
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 38 | **45** | 45 |
+| checker problems | **8** | **0** | — |
+| distinct levers | 17 | **23** | 24 |
+| colour-pie flavours | 10 | 10 | 10 |
+| tempo | **1.00x** (roster floor) | 1.67x (cap 2.50x) | 1.80–2.00x |
+| power | 2.62x | 2.92x | 2.20x |
+| max defensePenetration | 0.60 | 0.80 | (solar_beam 1.10, earthquake 0.95) |
+| cheapest capstone | 8 pts | 10 pts | 10 pts |
+| new passives | — | **zero** | — |
+
+**The fantasy, written before a node moved:**
+
+> Rock Throw is the only move in the roster that spends something it did not
+> make. The boulder under Onix's tail is real terrain — measured at 64–189
+> tiles of a 5,400-tile surface across three seeds, 1.2–3.5%, laid down at
+> worldgen and never replaced by anything in the sim — and the throw EATS it:
+> the tile drops to bare floor, the sight-block it gave is gone, and
+> something up to three tiles away takes a rock at triple damage. Rock Slide
+> is a hillside letting go and Earthquake is the ground itself; this is ONE
+> rock, found on the ground, aimed, and gone. Everything dangerous about it
+> is a supply question — is there a rock under you right now, is this target
+> worth the last one, and what does the ground look like once you have
+> thrown them all.
+
+Lanes differ in kind, per branch:
+
+- **Aggression — "make it count."** Lane A is THE AIM (accuracy to the exact
+  90→100 the roll can actually spend, *Skyfall*'s angle, and +1 Range — the
+  v3 "reach a lumbering body wouldn't have" finally spent on). Lane B is THE
+  CATCH (the Speed pin, deepened in DURATION rather than magnitude because
+  stat stages stack). Precision versus attrition. Deep notable *Already
+  Reaching* is `critCooldownReset` — the rock that lands on the joint means
+  the next one is out of the ground already.
+- **Boldness — "the ground you are standing on IS the ammunition."** Lane A
+  is THE STANCE (`immovable`: nothing drags you off your own quarry). Lane B
+  is THE TAKE, and its notable *Stone Underfoot* is the tree's identity node
+  and its ONE `consumesOwnTerrain` setter — 3x becomes 4.5x. Boulders are
+  zero percent of the underground layer, so for an underground native this
+  notable is a real reason to be up top.
+- **Sociability — "somebody else has seen the rock."** A thrown rock is a
+  pointer. Lane A is THE CALL (*Carrying Rumble* takes the mark from 20 to 34
+  ticks — the node that makes `rallyCall` actually converge anybody, since a
+  20-tick mark on a target three tiles away expires before a herd-mate can
+  walk to it). Lane B is THE CARRY. Deep notable *Colony Watch* adds
+  `allyEffectOnAttack`, so every rock thrown at something else is also a hand
+  on a herd-mate's shoulder.
+
+**A real bug found and fixed: the fork tip that did nothing.** `crippling_snare`
+set `shape: { kind: "cone", length: 3, width: 2 }` and nothing else — and
+`shape` is only ever read inside `resolveAreaHit`, which `resolveHit` only
+calls when `hitsArea` is true. Rock Throw is single-target, so the node spent
+a skill point on a footprint the engine never looked at. Proved by running
+the real `resolveHit` with a bystander standing inside where the cone would
+reach, **with a control** (the same cone plus `hitsArea`) so a "nobody was
+hit" reading could not be a broken harness:
+
+| spec | target hp | bystander hp |
+|---|---|---|
+| base (line 3, no `hitsArea`) | 175 | 200 |
+| v3 cone delta, no `hitsArea` | 175 | **200** |
+| CONTROL: same cone + `hitsArea` | 175 | **177** |
+
+It could not simply be fixed by adding `hitsArea`, and that is the more
+useful finding: `resolveAreaHit` builds its target set from `resolveShape`
+tiles, so any footprint narrower than the move's own range envelope can whiff
+outright on a legal target — a cone of length 3 does not cover a target three
+tiles away on a diagonal. Rock Slide gets away with `burst` radius 1 because
+its range is also 1. At range 3 the only safe footprint is a radius-3 burst,
+which is Rock Slide's move. The fork is preserved, with the same decision
+(hit it harder / keep it off you) in a live lever: *Driven Back* is the
+tree's first physical lever, one tile of `forcedMovement` shove.
+
+**Levers rejected, each checked at the call site:** `excludesAllies` (only
+read by `resolveAreaHit`'s target filter — inert on a single-target move);
+`statusChance`/`statusSpreads`/`statusSeverity` (`statusKind` is not
+tree-settable and the base spec sets none); `gatherBurst` (canopy-harvest
+only, forest crops, wrong biomes — the same finding Rock Slide recorded);
+`weightScaling` and `chargeAttack` (Tackle's and Body Slam's signature, and
+every Rock Throw learner also knows Tackle); `selfCostPerUse` on the
+Aggression↔Boldness bridge (Rock Slide's *Mountainfall* is the same lever in
+the same structural slot); and — the interesting one — `terrainFill:
+{ terrain: "boulder" }`, which is buildable, would have dropped a fresh
+boulder where the rock landed, and would have been the only self-restocking
+ammunition loop in the roster. Rejected because it **erases the identity**:
+this move's whole point is spending a resource it did not create, and
+Earthquake already owns the fill-and-consume mud loop.
+
+**The overwrite audit is where most of the eight problems were.** Six
+co-takeable `statChangeOnHit` setters and three `situationalBonus` setters
+were silently racing each other. Both are now single ancestral chains:
+`pinning_impact → rolling_thunder → marked_advantage → hobbling_throw` for
+the pin (monotonic in duration, deepest last), and exactly one
+`situationalBonus` in the whole tree. The one that was cut is worth recording
+as a design call rather than a checker concession: `flanking` reads "the
+defender is not currently fighting or hunting ME", which for something
+throwing rocks from three tiles away is true most of the time. A condition
+that is nearly always on is not a condition. The tree's one situational
+payoff went to `rallyMarked`, which the Sociability branch has to earn.
+
+**Two things to flag for tuning, not decided here.**
+
+- **Tempo was raised, deliberately.** Rock Throw had no cooldown node at all
+  — a flat 1.00x, the roster floor against a 1.80–2.00x median. Two −1 nodes
+  in different branches take it to 1.67x, still below median and well under
+  its own 2.50x cap. Reverting to −1 (1.25x) or 0 is a one-line change.
+- **`critCooldownReset` is a tempo lever the cooldown cap cannot see**,
+  because it spends no `cooldownTicks`. It is on *Already Reaching* with a
+  crit stage in the same node.
+
+**Units, since this file has been burned by them before:** `cooldownTicks`
+counts the agent's own ACTIONS (`tickCooldowns` runs inside
+`tickAgentAction`), while `lockTicks` counts WORLD ticks (`tickActionLock`
+runs from `tickAgentNeeds`, every tick). Two different denominators —
+Quarry Break's 2 lock ticks is a smaller cost than it looks beside a
+cooldown of 4.
+
+**Accuracy surplus is conditional here, not dead.** Rock Throw's canon
+accuracy is 90, unlike the 100-accuracy move where six "+5 Accuracy" fillers
+were found to be pure filler. `rollAccuracy` computes
+`accuracy * stageMultiplier * extraMultiplier`, and both
+`stormAccuracyMultiplier` and `elevationAccuracyMultiplier` compose onto that
+same `extraMultiplier` — so past 100 the points buy weather-and-uphill
+insurance rather than nothing. Still capped at one accuracy node per lane;
+the "+8 Accuracy" tail filler behind Skyfall was cut.
+
+**Passive discipline: zero new passives, and `passive-exposure.ts` output is
+byte-identical before and after.** Onix/Geodude already carry
+`damageReductionFlat 12.50` / `immovable 4` / 27% thorns / 11.0%/tick healing
+summed across their movepool, and passives stack uncapped across every tree a
+species knows. Where a branch wanted more, it got a `delta`.
+
+**Verified by running it, not reading it.** Driving the engine's own
+`maybeAutoRespec` on a real Geodude with points to spend, once per
+disposition: **42 of 45 nodes bought in every case**, all three capstones
+reached, and the three unbought are exactly one side of each of the three
+`excludes` forks — 45 − 3 = 42 is the correct "everything" number. Same
+result Rock Slide's conversion produced. Note the same caveat: in a plain
+demo run the tree is inert, because three seeds × 2,000 ticks produced **zero
+living Rock Throw learners**. That is the population problem already logged
+against Rock Slide, not a tree problem.

@@ -105,7 +105,7 @@ describe("every move tree in the curated roster is internally consistent", () =>
   }
 });
 
-describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () => {
+describe("Rock Throw tree: v4 — one rock, found, aimed and gone", () => {
   const rockThrow = MOVES.rock_throw;
 
   it("Pinning Impact applies a real but partial Speed debuff, not a stun", () => {
@@ -113,25 +113,56 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 16 });
   });
 
-  it("Crippling Snare widens the throw into a real cone, catching a spread of fleeing targets", () => {
-    const respec = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "dead_aim", "hobbling_throw", "broken_stride", "crippling_snare"]);
-    expect(respec.shape).toEqual({ kind: "cone", length: 3, width: 2 });
+  // v4 replaced `crippling_snare` (which set `shape: cone` and nothing else)
+  // with `driven_back`. The old node was INERT, and this pair of tests is the
+  // regression guard for the reason why: `shape` is only ever read inside
+  // `resolveAreaHit` (predation.ts), which `resolveHit` only calls when
+  // `hitsArea` is true. Rock Throw is a single-target move, so a tree node
+  // that only widened the footprint spent a skill point on nothing.
+  it("no node in the tree sets `shape` — it would be inert on a non-area move", () => {
+    const shapeSetters = Object.values(rockThrow.tree!).filter((n) => n.delta.shape !== undefined);
+    expect(shapeSetters).toEqual([]);
+    expect(rockThrow.hitsArea).toBeFalsy();
+    expect(Object.values(rockThrow.tree!).some((n) => n.delta.hitsArea)).toBe(false);
+  });
+
+  it("Driven Back replaces the inert cone with a real knockback, and keeps the fork", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact", "loose_scree", "hobbling_throw", "driven_back"]);
+    expect(respec.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+    // One tile of shove leaves the target inside the move's own range, so the
+    // fork buys distance without ending the engagement.
+    expect(respec.range!.max).toBeGreaterThan(1);
+    expect(rockThrow.tree!.driven_back.excludes).toEqual(["relentless_barrage"]);
+  });
+
+  it("Stone Underfoot is the tree's only consumesOwnTerrain setter, and escalates the base 3x", () => {
+    // The engine OVERWRITES `consumesOwnTerrain` (`applyMoveTree`), so a
+    // second setter anywhere in the tree would silently win or lose on
+    // allocation order. This move's whole identity is the boulder it spends,
+    // so exactly one node is allowed to touch it.
+    const setters = Object.values(rockThrow.tree!).filter((n) => n.delta.consumesOwnTerrain !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["stone_underfoot"]);
+    expect(rockThrow.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 3 });
+    const respec = applyMoveTree(rockThrow, ["bedrock_stance", "edge_on", "stone_underfoot"]);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 4.5 });
   });
 
   it("Quarry Break capstone trades lockTicks for a real power/penetration spike", () => {
+    // v4 walk: the aim lane (Dead Aim -> Cracked Joint -> Skyfall -> Longer
+    // Arm) into the deep notable, then the filler and the capstone. The
+    // assertions are unchanged from v3.
     const respec = applyMoveTree(rockThrow, [
       "pinning_impact",
-      "cracked_joint",
       "dead_aim",
-      "hobbling_throw",
-      "broken_stride",
-      "relentless_barrage",
+      "cracked_joint",
       "skyfall",
-      "dead_weight_finisher",
+      "longer_arm",
+      "broken_stride",
+      "quarry_footing",
       "quarry_break",
     ]);
     expect(respec.lockTicks).toBe(2);
-    expect(respec.defensePenetration).toBeCloseTo(0.3);
+    expect(respec.defensePenetration).toBeCloseTo(0.5); // Quarry Footing's 0.2 + the capstone's 0.3
     expect(respec.bonusVsType).toEqual({ type: "flying", multiplier: 1.5 });
   });
 
@@ -142,7 +173,6 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
       "granite_grip",
       "unshakeable",
       "bedrock_footing",
-      "granite_ward",
       "fracturing_blow",
       "bedrock_resolve",
       "bedrock_breaker",
@@ -150,23 +180,53 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
   });
 
+  it("Fracturing Blow and Bedrock Breaker are one resistanceBreaker ladder, not two racing setters", () => {
+    const midway = applyMoveTree(rockThrow, [
+      "bedrock_stance",
+      "weathered_slab",
+      "granite_grip",
+      "unshakeable",
+      "bedrock_footing",
+      "fracturing_blow",
+    ]);
+    expect(midway.resistanceBreaker).toEqual({ multiplier: 1.4 });
+  });
+
   it("Tremor Call marks the target via the real rallyCall primitive, not a flat ally buff", () => {
     const respec = applyMoveTree(rockThrow, ["tremor_call"]);
     expect(respec.rallyCall).toEqual({ ticks: 20 });
   });
 
+  it("Carrying Rumble is the one node allowed to touch the mark after the opener", () => {
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "herd_grip", "carrying_rumble"]);
+    expect(respec.rallyCall).toEqual({ ticks: 34 });
+    const markSetters = Object.values(rockThrow.tree!).filter((n) => n.delta.rallyCall !== undefined);
+    expect(markSetters.map((n) => n.id).sort()).toEqual(["carrying_rumble", "tremor_call"]);
+  });
+
   it("Tremor Bond is a real, distinct Sociability lever (a herd heal), not another way to extend the mark", () => {
-    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "herd_grip", "tremor_bond"]);
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "called_shot", "tremor_bond"]);
     expect(respec.rallyCall).toEqual({ ticks: 20 }); // untouched — Tremor Bond doesn't touch the mark at all
     expect(respec.targetsAlly).toBe(true);
     expect(respec.allyEffect).toEqual({ healFraction: 0.15 });
   });
 
+  it("Colony Watch makes the herd effect fire on every throw, escalating Tremor Bond's own allyEffect", () => {
+    const respec = applyMoveTree(rockThrow, [
+      "tremor_call",
+      "called_shot",
+      "tremor_bond",
+      "vanguard_call",
+      "colony_watch",
+    ]);
+    expect(respec.allyEffectOnAttack).toBe(true);
+    expect(respec.allyEffect).toEqual({ healFraction: 0.18, buff: { stat: "attack", stage: 1, ticks: 14 } });
+  });
+
   it("Herd Ascendant capstone pays off with jam + lifesteal, not a third round of mark-extension", () => {
     const respec = applyMoveTree(rockThrow, [
       "tremor_call",
-      "sure_footing",
-      "herd_grip",
+      "called_shot",
       "tremor_bond",
       "vanguard_call",
       "colony_watch",
@@ -186,63 +246,73 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.lockTicks).toBeUndefined();
   });
 
-  it("Marked Advantage deepens Rolling Thunder further via the shared rallyMarked primitive", () => {
+  it("Marked Advantage deepens Rolling Thunder's own pin (principle 13), and every statChangeOnHit setter is on one chain", () => {
+    // v4 change of meaning, stated plainly: Marked Advantage used to grant a
+    // `situationalBonus` on `rallyMarked`, which (a) shared no lever with its
+    // own crosslink — the checker flagged it under principle 13 — and (b) was
+    // one of three independent `situationalBonus` setters racing each other
+    // through an overwrite field. It now escalates the exact thing Rolling
+    // Thunder does. The `rallyMarked` payoff did not disappear: it moved down
+    // one node, onto Converged Quarry, which is the bridge's notable and the
+    // tree's only `situationalBonus`.
     const respec = applyMoveTree(rockThrow, ["pinning_impact", "tremor_call", "rolling_thunder", "marked_advantage"]);
-    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 32 });
+
+    const situational = Object.values(rockThrow.tree!).filter((n) => n.delta.situationalBonus !== undefined);
+    expect(situational.map((n) => n.id)).toEqual(["converged_quarry"]);
   });
 
-  it("Hobbling Throw only needs one prior node, not both Cracked Joint and Dead Aim together", () => {
-    const viaCrackedJointOnly = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "hobbling_throw"]);
-    const viaDeadAimOnly = applyMoveTree(rockThrow, ["pinning_impact", "dead_aim", "hobbling_throw"]);
-    expect(viaCrackedJointOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
-    expect(viaDeadAimOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
-  });
-
-  it("Grinding Advance's bridge (Aggression<->Boldness) reaches both Broken Stride and Bedrock Footing", () => {
-    const viaAggr = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "bedrock_stance",
-      "grinding_advance",
-      "grinding_footing",
-      "bedrock_momentum",
-      "broken_stride",
-    ]);
-    expect(viaAggr.power).toBe(rockThrow.power + 8);
-
-    const viaBold = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "bedrock_stance",
-      "grinding_advance",
-      "grinding_footing",
-      "bedrock_momentum",
-      "bedrock_footing",
-    ]);
-    expect(viaBold.power).toBe(rockThrow.power + 5);
-  });
-
-  it("Rolling Thunder's bridge (Sociability<->Aggression) reaches both Tremor Bond and Broken Stride", () => {
-    const viaSoc = applyMoveTree(rockThrow, [
+  it("Hobbling Throw only needs one prior node, not a whole AND-set", () => {
+    // An inner `prerequisitesAnyOf` array is an AND-set in this schema, so a
+    // convergence node written as [[a, b]] would silently require both. Every
+    // alternative here is a single node, reachable on its own.
+    const viaOwnLane = applyMoveTree(rockThrow, ["pinning_impact", "loose_scree", "hobbling_throw"]);
+    const viaBridge = applyMoveTree(rockThrow, [
       "pinning_impact",
       "tremor_call",
       "rolling_thunder",
       "marked_advantage",
       "converged_quarry",
-      "tremor_bond",
+      "hobbling_throw",
     ]);
-    expect(viaSoc.targetsAlly).toBe(true);
+    expect(viaOwnLane.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+    expect(viaBridge.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+  });
 
-    const viaAggr = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "tremor_call",
-      "rolling_thunder",
-      "marked_advantage",
-      "converged_quarry",
-      "broken_stride",
-    ]);
-    expect(viaAggr.power).toBe(rockThrow.power + 8); // Broken Stride's own +8
-    // Converged Quarry deepens Marked Advantage's own rallyMarked payoff
-    // (overwrite) rather than bolting on a generic power bump.
+  it("Grinding Advance's bridge (Aggression<->Boldness) reaches a lane notable in BOTH branches", () => {
+    // v4 relocated where every bridge lands: on one LANE NOTABLE per branch
+    // it connects, one step short of that branch's fork (principles 11/12),
+    // rather than on a pre-fork filler. The assertion's meaning is unchanged
+    // — the bridge is a real alternate route into both branches.
+    const bridge = ["pinning_impact", "bedrock_stance", "grinding_advance", "grinding_footing", "bedrock_momentum"];
+
+    const viaAggr = applyMoveTree(rockThrow, [...bridge, "skyfall"]);
+    expect(viaAggr.bonusVsType).toEqual({ type: "flying", multiplier: 1.5 });
+
+    const viaBold = applyMoveTree(rockThrow, [...bridge, "unshakeable"]);
+    expect(viaBold.tree!.unshakeable.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+  });
+
+  it("Rolling Thunder's bridge (Sociability<->Aggression) reaches a lane notable in BOTH branches", () => {
+    const bridge = ["pinning_impact", "tremor_call", "rolling_thunder", "marked_advantage", "converged_quarry"];
+
+    const viaSoc = applyMoveTree(rockThrow, [...bridge, "carrying_rumble"]);
+    expect(viaSoc.rallyCall).toEqual({ ticks: 34 });
+
+    const viaAggr = applyMoveTree(rockThrow, [...bridge, "hobbling_throw"]);
+    expect(viaAggr.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+    // Converged Quarry keeps the rallyMarked payoff it has always had.
     expect(viaAggr.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.6 });
+  });
+
+  it("Warning Tremor's bridge (Boldness<->Sociability) reaches a lane notable in BOTH branches", () => {
+    const bridge = ["bedrock_stance", "tremor_call", "warning_tremor", "warded_footing", "herds_bulwark"];
+
+    const viaBold = applyMoveTree(rockThrow, [...bridge, "stone_underfoot"]);
+    expect(viaBold.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 4.5 });
+
+    const viaSoc = applyMoveTree(rockThrow, [...bridge, "tremor_bond"]);
+    expect(viaSoc.targetsAlly).toBe(true);
   });
 });
 

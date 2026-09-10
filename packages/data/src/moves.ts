@@ -4047,6 +4047,11 @@ export const MOVES: Record<string, MoveSpec> = {
   rock_throw: {
     id: "rock_throw",
     name: "Rock Throw",
+    // Inert for this move, and worth knowing before anyone "improves" it:
+    // `shape` is only ever read inside `resolveAreaHit` (predation.ts), which
+    // `resolveHit` only calls when `hitsArea` is true. Rock Throw is not an
+    // area move, so this line is display data, not mechanics. See the
+    // Aggression fork's own comment for the dead cone this fact uncovered.
     shape: { kind: "line", length: 3 },
     ...moveCanon("ROCK_THROW"),
     cooldownTicks: 4,
@@ -4058,123 +4063,275 @@ export const MOVES: Record<string, MoveSpec> = {
     // effect like terrainBurn. The boulder tile reverts to floor either way
     // once thrown; a clean miss doesn't waste it (accuracy is rolled first).
     consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 3 },
-    // v3 redesign (MOVES_DESIGN.md's "Rock Throw v3" writeup): the fantasy is
-    // the reach a lumbering, heavy, slow body wouldn't otherwise have.
-    // Aggression ("Denial") isn't bigger-numbers escalation — it's partial
-    // crowd control: a throw that catches a leg or wing joint and makes
-    // fleeing harder, not impossible. Boldness ("Bedrock") is a tank/counter
-    // fantasy — plant, shrug off retaliation, punish whatever hasn't turned
-    // to face it yet. Sociability ("Tremor Rally") finally uses the real
-    // `rallyCall` primitive instead of another flat ally stat buff: the
-    // impact's tremor marks exactly where the fight is, so herd-mates'
-    // own independent hunt/threat picks converge on it, same as a "focus
-    // fire" call. Note: Onix/Spearow/the wild Squirtle pair carry no herdId
-    // in scenario.ts today, so this branch is real, shipped content that's
-    // currently inert for those specific individuals — see MOVES_DESIGN.md.
+    //
+    // --- THE FANTASY (v4 rewrite, MOVES_DESIGN.md's "start from the
+    // fantasy") ---
+    //
+    // Rock Throw is the only move in the roster that spends something it did
+    // not make. The boulder under Onix's tail is real terrain — measured at
+    // 64-189 tiles of a 5,400-tile surface across three seeds, 1.2-3.5%, laid
+    // down at worldgen and never replaced by anything in the sim — and the
+    // throw EATS it: the tile drops to bare floor, the sight-block it gave is
+    // gone, the little rise it stood on is gone, and something up to three
+    // tiles away takes a rock at triple damage. Rock Slide is a hillside
+    // letting go and Earthquake is the ground itself; this is ONE rock, found
+    // on the ground, aimed, and gone. Everything dangerous about it is a
+    // supply question — is there a rock under you right now, is this target
+    // worth the last one, and what does the ground look like once you have
+    // thrown them all. It is also the reach a lumbering body would not
+    // otherwise have (the v3 identity, kept): three tiles of it, with no
+    // accuracy falloff and a 90% roll that a lane of investment can close.
+    //
+    // Each branch answers that supply question differently, and the two lanes
+    // inside each branch differ in KIND, not degree:
+    //
+    // Aggression — "make it count." One rock, so it goes where you sent it,
+    //   into the part that matters. Lane A is THE AIM (accuracy, reach, and
+    //   the angle nothing on legs can answer); lane B is THE CATCH (a joint,
+    //   and how long the thing stays caught). Precision versus attrition.
+    //   Flavours: piercing, raw damage, planted/duration, aggressive movement
+    //   (the knockback fork), reposition others.
+    // Boldness — "the ground you are standing on IS the ammunition." A body
+    //   this heavy does not go and fetch a rock. It picks a tile that has one
+    //   and refuses to be taken off it. Lane A is THE STANCE (armour, and
+    //   `immovable` — nothing drags you off your own quarry); lane B is THE
+    //   TAKE (what the stone under you is actually worth — the tree's one
+    //   `consumesOwnTerrain` escalation). Holding a tile versus spending it.
+    //   Flavours: defence, environment, piercing, raw damage.
+    // Sociability — "somebody else has seen the rock." A thrown rock is a
+    //   pointer: it says exactly where the fight is, out loud, three tiles
+    //   away from where you are standing. Lane A is THE CALL (the mark, and
+    //   how long it stays readable); lane B is THE CARRY (what the herd gets
+    //   out of every throw). Directing attention versus supporting the herd.
+    //   Flavours: rallying, ally buffing, healing, raw damage, piercing.
+    //
+    // Template v4: 45 nodes — three 12-node branches (opener, two parallel
+    // lanes each with their own notable, a deep notable both lanes converge
+    // on, a filler, a capstone) plus three 3-node crosslink bridges. Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six fork
+    // nodes, every v3 fork preserved.
+    //
+    // Levers deliberately NOT used, each checked at the call site rather than
+    // assumed — all five would have been dead content or a sibling re-skin:
+    //   - `hitsArea` + a wider `shape`. `resolveAreaHit` builds its target set
+    //     from `resolveShape` tiles, so any footprint narrower than the move's
+    //     own range envelope can WHIFF outright on a legal target: a cone of
+    //     length 3 does not cover a target three tiles away on a diagonal.
+    //     Rock Slide gets away with `burst` radius 1 because its range is also
+    //     1. At range 3 the only safe footprint is a radius-3 burst, which is
+    //     Rock Slide's move, not this one.
+    //   - `excludesAllies`. Its only call site is the `resolveAreaHit` target
+    //     filter. On a single-target move it can never fire.
+    //   - `statusChance` / `statusSpreads` / `statusSeverity`. `statusKind` is
+    //     not a tree-settable field and this move's base spec sets none, so
+    //     every status lever here is inert.
+    //   - `gatherBurst`. Same finding Rock Slide recorded: the only path a
+    //     non-`burrow` damage move can feed is the canopy harvest, whose only
+    //     crop is Apple (`eligibleBiomes: ["forest"]`). These learners live in
+    //     badlands/highland/tundra/savanna.
+    //   - `weightScaling` and `chargeAttack`. Reserved, in this file's own
+    //     Scratch comment, as Tackle's and Body Slam's answers — and every
+    //     species that learns Rock Throw also learns Tackle.
+    //   - `terrainFill: { terrain: "boulder" }`. Buildable and tempting: it
+    //     would drop a fresh boulder on the tile the rock landed on, and this
+    //     is the one move that could then pick it back up. Rejected on
+    //     purpose. The whole identity above is that this move consumes a
+    //     resource it did NOT create; a move that restocks itself is
+    //     Earthquake, which already owns the fill-and-consume mud loop.
     tree: {
-      // --- Aggression: Denial (pin, don't just out-damage) ---
+      // ============================================================
+      // AGGRESSION — "make it count"
+      // Lane A: THE AIM. Lane B: THE CATCH.
+      // ============================================================
       pinning_impact: {
         id: "pinning_impact",
         name: "Pinning Impact",
         cost: 1,
         leaning: "aggression",
         // Not a stun — a real but partial slow, so a cornered target can
-        // still struggle away eventually. Denial, not a lockdown.
+        // still struggle away eventually. Denial, not a lockdown. Also the
+        // root of this tree's ONE `statChangeOnHit` chain: every other node
+        // that touches the field is a descendant of this one, because the
+        // engine OVERWRITES it (`applyMoveTree`) and two independent setters
+        // would silently race.
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 16 } },
+      },
+      // --- Lane A: the aim ---
+      dead_aim: {
+        id: "dead_aim",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["pinning_impact"],
+        leaning: "aggression",
+        // Was +8. Rock Throw's canon accuracy is 90 and `rollAccuracy`
+        // computes `accuracy * stageMultiplier * extraMultiplier`, so the
+        // first 10 points here are worth exactly what they say and land the
+        // move on 100. Past 100 the surplus is not dead — unlike the
+        // 100-accuracy moves elsewhere in this roster — it is CONDITIONAL:
+        // `stormAccuracyMultiplier` (weather.ts) and
+        // `elevationAccuracyMultiplier` (elevation.ts) both compose onto that
+        // same `extraMultiplier`, so headroom is what keeps a throw honest
+        // uphill or in a storm. Still capped hard at one accuracy node per
+        // lane — the old "+8 Accuracy" tail filler that sat behind Skyfall is
+        // gone, because a fourth accuracy node in one branch would have been
+        // buying nothing but weather insurance.
+        delta: { accuracy: 10 },
       },
       cracked_joint: {
         id: "cracked_joint",
         name: "+8 Power",
         cost: 1,
-        prerequisites: ["pinning_impact"],
+        prerequisites: ["dead_aim"],
         leaning: "aggression",
         delta: { power: 8 },
-      },
-      dead_aim: {
-        id: "dead_aim",
-        name: "+8 Accuracy",
-        cost: 1,
-        prerequisites: ["pinning_impact"],
-        leaning: "aggression",
-        delta: { accuracy: 8 },
-      },
-      hobbling_throw: {
-        id: "hobbling_throw",
-        name: "Hobbling Throw",
-        cost: 1,
-        prerequisitesAnyOf: [["cracked_joint"], ["dead_aim"], ["grinding_advance"]],
-        leaning: "aggression",
-        // A second, harder catch — the slow stacks worse the more of these land.
-        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -1, ticks: 20 } },
-      },
-      broken_stride: {
-        id: "broken_stride",
-        name: "+8 Power",
-        cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Aggression (Grinding Advance's and Rolling
-        // Thunder's own chains).
-        prerequisitesAnyOf: [["hobbling_throw"], ["bedrock_momentum"], ["converged_quarry"]],
-        leaning: "aggression",
-        delta: { power: 8 },
-      },
-      relentless_barrage: {
-        id: "relentless_barrage",
-        name: "Relentless Barrage",
-        cost: 2,
-        prerequisites: ["broken_stride"],
-        excludes: ["crippling_snare"],
-        leaning: "aggression",
-        // Keeps throwing, one after another — no window for the target to
-        // recover its footing between hits.
-        delta: { power: 15 },
-      },
-      crippling_snare: {
-        id: "crippling_snare",
-        name: "Crippling Snare",
-        cost: 2,
-        prerequisites: ["broken_stride"],
-        excludes: ["relentless_barrage"],
-        leaning: "aggression",
-        // Widens the throw into a real spread — a whole line of fleeing
-        // targets gets caught by the same denial, not just the one in front.
-        delta: { shape: { kind: "cone", length: 3, width: 2 } },
       },
       skyfall: {
         id: "skyfall",
         name: "Skyfall",
         cost: 2,
-        prerequisitesAnyOf: [["relentless_barrage"], ["crippling_snare"], ["rolling_thunder"]],
+        // LANE NOTABLE (the aim lane). Reachable the normal way, or via the
+        // Aggression <-> Boldness bridge's own notable (Bedrock Momentum).
+        prerequisitesAnyOf: [["cracked_joint"], ["bedrock_momentum"]],
         leaning: "aggression",
-        // Arcs it down out of the sky — a real problem for anything flying.
+        // The angle a thrown rock has and a landed one does not: arced down
+        // out of the sky, onto something whose whole defence is not being on
+        // the ground. This lane's point is that aim beats reach of limb.
         delta: { bonusVsType: { type: "flying", multiplier: 1.5 } },
       },
-      dead_weight_finisher: {
-        id: "dead_weight_finisher",
-        name: "+8 Accuracy",
+      longer_arm: {
+        id: "longer_arm",
+        name: "+1 Range",
         cost: 1,
         prerequisites: ["skyfall"],
         leaning: "aggression",
-        delta: { accuracy: 8 },
+        // The v3 identity, finally spent on: "the reach a lumbering body
+        // wouldn't have." Three tiles becomes four. The tree's ONLY `range`
+        // setter — it is an overwrite field — and it is live because this is
+        // a single-target move: `range` alone decides whether the engine will
+        // fire (`canAttackFromHere`), with no shape footprint to fall short
+        // of it.
+        delta: { range: { min: 0, max: 4 } },
+      },
+      // --- Lane B: the catch ---
+      loose_scree: {
+        id: "loose_scree",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["pinning_impact"],
+        leaning: "aggression",
+        // The only cooldown node in the tree, and the only one it should get
+        // without a balance decision: Rock Throw was the roster's tempo floor
+        // at a flat 1.00x (no cooldown nodes at all, against a roster median
+        // of 1.80-2.00x). -1 on a base of 4 is 1.25x, well under this move's
+        // own 2.50x cap. Flagged in the writeup as a real tuning change.
+        delta: { cooldownTicks: -1 },
+      },
+      hobbling_throw: {
+        id: "hobbling_throw",
+        name: "Hobbling Throw",
+        cost: 2,
+        // LANE NOTABLE (the catch lane). Reachable the normal way, or via the
+        // Sociability <-> Aggression bridge's own notable (Converged Quarry).
+        prerequisitesAnyOf: [["loose_scree"], ["converged_quarry"]],
+        leaning: "aggression",
+        // The deepest rung of the pin ladder, and deliberately deeper in
+        // DURATION rather than magnitude: stat stages stack (`applyStatStage`
+        // pushes onto a list), so a bigger negative stage compounds into a
+        // lockdown across repeated hits, which this branch is explicitly not.
+        // A leg that stays caught is the fantasy; a target that cannot move
+        // at all is a different move.
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 40 } },
+      },
+      relentless_barrage: {
+        id: "relentless_barrage",
+        name: "Relentless Barrage",
+        cost: 2,
+        prerequisites: ["hobbling_throw"],
+        excludes: ["driven_back"],
+        leaning: "aggression",
+        // Keeps throwing, one after another — no window for the target to
+        // recover its footing between hits.
+        delta: { power: 15 },
+      },
+      driven_back: {
+        id: "driven_back",
+        name: "Driven Back",
+        cost: 2,
+        prerequisites: ["hobbling_throw"],
+        excludes: ["relentless_barrage"],
+        leaning: "aggression",
+        // This node was `crippling_snare`, which set `shape: cone` and
+        // nothing else — and `shape` is only ever read by `resolveAreaHit`,
+        // which only runs when `hitsArea` is true. It was inert: a skill
+        // point for a footprint the engine never looked at. Unreachable
+        // content is a bug in this project, so it is replaced rather than
+        // patched, and the fork it belongs to is preserved.
+        //
+        // The replacement is the same DECISION in a live lever: barrage is
+        // "hit it harder", this is "keep it off you". The rock knocks the
+        // target a tile back down the throwing lane — the tree's first
+        // physical lever, and exactly what a slow, ranged, heavy body wants
+        // from a fork. `forcedMovement` fires on a landed non-killing hit
+        // against the primary target (predation.ts), and one tile of shove
+        // leaves the target inside this move's range, so it buys distance
+        // without ending the fight.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" }, power: 5 },
+      },
+      broken_stride: {
+        id: "broken_stride",
+        name: "Already Reaching",
+        cost: 2,
+        // DEEP NOTABLE — both lanes converge here: the aim lane's tail and
+        // both tips of the catch lane's fork.
+        prerequisitesAnyOf: [["longer_arm"], ["relentless_barrage"], ["driven_back"]],
+        leaning: "aggression",
+        // What "make it count" converges on. A rock that lands exactly on the
+        // joint means the next one is already out of the ground before the
+        // target has finished falling: `critCooldownReset` zeroes this move's
+        // own cooldown on a crit (`applySingleDamageInstance`), and the crit
+        // stage in the same node is what makes that reachable rather than
+        // theoretical. Note for whoever tunes tempo next: this is a real
+        // tempo lever that the cooldown cap in DESIGN_VALIDATION.md does not
+        // see, because it spends no `cooldownTicks`.
+        delta: { critRateStage: 1, critCooldownReset: true },
+      },
+      quarry_footing: {
+        id: "quarry_footing",
+        name: "+0.2 Defense Penetration",
+        cost: 1,
+        prerequisites: ["broken_stride"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.2 },
       },
       quarry_break: {
         id: "quarry_break",
         name: "Quarry Break",
         cost: 2,
-        prerequisites: ["dead_weight_finisher"],
+        prerequisites: ["quarry_footing"],
         leaning: "aggression",
-        // Wrenches a whole slab straight out of the ground before it
-        // throws — the real "boulder charge-up" fantasy, approximated with
-        // the primitives this pass has: a costly beat of committed downtime
-        // (lockTicks) buys a genuinely bigger, armor-punching hit. The
-        // richer version — only pay the lockTicks cost when there's no
+        // Wrenches a whole slab straight out of the ground before it throws —
+        // a costly beat of committed downtime (`lockTicks`) buys a genuinely
+        // bigger, armor-punching hit. Kept on `lockTicks` rather than
+        // converted to `chargeAttack` on this pass: `chargeAttack` is Tackle's
+        // and Body Slam's signature (see this file's Scratch comment) and
+        // every Rock Throw learner also knows Tackle, so it would have been a
+        // sibling re-skin. Worth recording for whoever tunes it: `lockTicks`
+        // counts WORLD ticks (`tickActionLock` runs from `tickAgentNeeds`,
+        // every tick) while `cooldownTicks` counts the agent's own ACTIONS —
+        // two different denominators, so 2 lock ticks is a smaller cost than
+        // it looks next to a cooldown of 4.
+        //
+        // The richer version — only pay the cost when there's no
         // `consumesOwnTerrain` boulder already underfoot to just throw for
-        // free — needs a new "conditional on terrain presence" branch in
-        // that same check (predation.ts's `applySingleDamageInstance`);
-        // flagged in MOVES_DESIGN.md, not built this pass.
+        // free — still needs a "conditional on terrain presence" branch in
+        // predation.ts's `applySingleDamageInstance`; flagged in
+        // MOVES_DESIGN.md, still not built.
         delta: { lockTicks: 2, power: 25, defensePenetration: 0.3 },
       },
-      // --- Boldness: Bedrock (plant, shrug off, punish) ---
+      // ============================================================
+      // BOLDNESS — "the ground you are standing on is the ammunition"
+      // Lane A: THE STANCE. Lane B: THE TAKE.
+      // ============================================================
       bedrock_stance: {
         id: "bedrock_stance",
         name: "Bedrock Stance",
@@ -4183,6 +4340,7 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
         delta: {},
       },
+      // --- Lane A: the stance (nothing takes you off the tile you chose) ---
       weathered_slab: {
         id: "weathered_slab",
         name: "+5 Power",
@@ -4195,7 +4353,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "granite_grip",
         name: "+8 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["weathered_slab"], ["grinding_advance"], ["warning_tremor"]],
+        prerequisites: ["weathered_slab"],
         leaning: "boldness",
         delta: { accuracy: 8 },
       },
@@ -4203,10 +4361,14 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "unshakeable",
         name: "Unshakeable",
         cost: 1,
-        prerequisites: ["granite_grip"],
+        // LANE NOTABLE (the stance lane). Reachable the normal way, or via
+        // the Aggression <-> Boldness bridge's own notable (Bedrock Momentum).
+        prerequisitesAnyOf: [["granite_grip"], ["bedrock_momentum"]],
         leaning: "boldness",
         // Plants and refuses to be moved — no drag, knockback, or lunge so
-        // much as budges it.
+        // much as budges it. In this tree that is not generic tankiness: the
+        // tile you are standing on is the ammunition, so being taken off it
+        // is the real loss.
         grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
       },
@@ -4214,29 +4376,71 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bedrock_footing",
         name: "+5 Power",
         cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Boldness (Grinding Advance's and Warning Tremor's
-        // own chains).
-        prerequisitesAnyOf: [["unshakeable"], ["bedrock_momentum"], ["herds_bulwark"]],
+        prerequisites: ["unshakeable"],
         leaning: "boldness",
         delta: { power: 5 },
+      },
+      // --- Lane B: the take (what the stone under you is actually worth) ---
+      edge_on: {
+        id: "edge_on",
+        name: "+4 Power, +0.04 Lifesteal",
+        cost: 1,
+        prerequisites: ["bedrock_stance"],
+        leaning: "boldness",
+        // A slab has an edge. Thrown flat it is a weight; thrown edge-on it
+        // is a wedge, and a wedge opens something you can feed on.
+        delta: { power: 4, lifestealFraction: 0.04 },
+      },
+      stone_underfoot: {
+        id: "stone_underfoot",
+        name: "Stone Underfoot",
+        cost: 2,
+        // LANE NOTABLE (the take lane). Reachable the normal way, or via the
+        // Boldness <-> Sociability bridge's own notable (Herd's Bulwark).
+        prerequisitesAnyOf: [["edge_on"], ["herds_bulwark"]],
+        leaning: "boldness",
+        // THE identity node of the whole tree, and the tree's ONLY
+        // `consumesOwnTerrain` setter — the engine overwrites that field
+        // (`applyMoveTree`), so a second setter anywhere here would silently
+        // win or lose depending on allocation order.
+        //
+        // You are not throwing a rock you found ON the boulder any more; you
+        // are throwing the boulder. 3x becomes 4.5x on the one condition this
+        // move's fantasy actually cares about — a real boulder tile under
+        // your own feet, checked in `applySingleDamageInstance` before the
+        // damage formula, and spent for good (the tile reverts to floor).
+        // Measured: boulders are 1.2-3.5% of surface tiles and ZERO of the
+        // underground layer, so for Onix — an underground native — this
+        // notable is a reason to be up top, which is exactly the kind of
+        // decision this branch is supposed to be about.
+        delta: { consumesOwnTerrain: { terrain: "boulder", damageMultiplier: 4.5 } },
       },
       aftershock_counter: {
         id: "aftershock_counter",
         name: "Aftershock Counter",
         cost: 1,
-        prerequisites: ["bedrock_footing"],
+        prerequisites: ["stone_underfoot"],
         excludes: ["granite_ward"],
         leaning: "boldness",
-        // Hits hardest at whatever hasn't turned to face the threat yet —
-        // the payoff for standing your ground instead of chasing.
-        delta: { situationalBonus: { condition: "flanking", multiplier: 1.4 } },
+        // Was `situationalBonus: { condition: "flanking" }`. Removed on
+        // purpose, and not only because the tree can afford exactly one
+        // `situationalBonus` setter before the engine starts overwriting:
+        // `flanking` reads "the defender is not currently fighting or hunting
+        // ME" (predation.ts's `situationalMultiplier`), which for something
+        // throwing rocks from three tiles away is true most of the time. A
+        // condition that is nearly always on is not a condition. The tree's
+        // one situational payoff went to Converged Quarry's `rallyMarked`,
+        // which has to be earned.
+        //
+        // Same fork, same idea in a lever that always pays: whatever came at
+        // you and got a rock instead leaves you something.
+        delta: { lifestealFraction: 0.08 },
       },
       granite_ward: {
         id: "granite_ward",
         name: "Granite Ward",
         cost: 1,
-        prerequisites: ["bedrock_footing"],
+        prerequisites: ["stone_underfoot"],
         excludes: ["aftershock_counter"],
         leaning: "boldness",
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
@@ -4246,11 +4450,17 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "fracturing_blow",
         name: "Fracturing Blow",
         cost: 2,
-        prerequisitesAnyOf: [["aftershock_counter"], ["granite_ward"]],
+        // DEEP NOTABLE — the stance lane's tail and both tips of the take
+        // lane's fork converge here.
+        prerequisitesAnyOf: [["bedrock_footing"], ["aftershock_counter"], ["granite_ward"]],
         leaning: "boldness",
-        // A hit that leaves real cracks — the target's own guard doesn't
-        // hold up as well for a while after.
-        delta: { statChangeOnHit: { target: "defender", stat: "defense", stage: -1, ticks: 20 } },
+        // Was a defender Defense debuff, which is the same `statChangeOnHit`
+        // field the Aggression pin ladder owns — two independent setters, one
+        // silently winning. Rebuilt as the first rung of this branch's own
+        // ladder into its capstone instead: a rock thrown by something that
+        // refuses to move starts going through hide that is built to shrug
+        // rock off.
+        delta: { resistanceBreaker: { multiplier: 1.4 } },
       },
       bedrock_resolve: {
         id: "bedrock_resolve",
@@ -4266,19 +4476,22 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["bedrock_resolve"],
         leaning: "boldness",
-        // Thrown hard enough that even a real resistance barely slows it.
+        // Thrown hard enough that even a real resistance barely slows it —
+        // the top of the ladder Fracturing Blow starts, and an escalation of
+        // the same field on the same chain rather than a second independent
+        // setter racing it.
+        //
         // The other capstone this branch was pitched as — the throw's own
         // power scaling with damage the user just absorbed, a real "stored
-        // retaliation loop" instead of another flat passive — needs a new
-        // primitive: `SituationalCondition` doesn't yet have a
-        // "recentlyDamaged" (self took a hit within the last N ticks) entry.
-        // That's a one-line addition to the same enum/check `"targetLowHp"`
-        // already uses (moves.ts / predation.ts's `situationalMultiplier`),
-        // flagged in MOVES_DESIGN.md as the concrete next step, not built
-        // this pass.
+        // retaliation loop" — still needs a `SituationalCondition` of
+        // "recentlyDamaged", a one-line addition to the same enum/check
+        // `"targetLowHp"` already uses. Flagged in MOVES_DESIGN.md, not built.
         delta: { resistanceBreaker: { multiplier: 2 } },
       },
-      // --- Sociability: Tremor Rally (real shared awareness, not a flat buff) ---
+      // ============================================================
+      // SOCIABILITY — "somebody else has seen the rock"
+      // Lane A: THE CALL. Lane B: THE CARRY.
+      // ============================================================
       tremor_call: {
         id: "tremor_call",
         name: "Tremor Call",
@@ -4286,13 +4499,13 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         // The impact's tremor doesn't just warn the herd it happened — it
         // marks exactly where. Every herd-mate's own, independently-run
-        // hunt/threat pick converges on the same target, same as if they'd
-        // seen it themselves (see `Agent.rallyMarkTicksRemaining`'s own doc
-        // comment). This is the real answer to "does it make allies aware
-        // and bring them in" — yes, via the shipped `rallyCall` primitive,
-        // not a new one.
+        // hunt/threat pick converges on the same target (see
+        // `Agent.rallyMarkTicksRemaining`'s own doc comment). A thrown rock
+        // is the only thing in this species' kit that can point at something
+        // three tiles away without anyone having to walk there.
         delta: { rallyCall: { ticks: 20 } },
       },
+      // --- Lane A: the call (how far, and how long, the pointer holds) ---
       sure_footing: {
         id: "sure_footing",
         name: "+8 Accuracy",
@@ -4303,28 +4516,68 @@ export const MOVES: Record<string, MoveSpec> = {
       },
       herd_grip: {
         id: "herd_grip",
-        name: "Herd Grip",
+        name: "+0.15 Defense Penetration",
         cost: 1,
-        prerequisitesAnyOf: [["sure_footing"], ["warning_tremor"], ["rolling_thunder"]],
+        prerequisites: ["sure_footing"],
         leaning: "sociability",
-        // Filler variety, not another flat power/accuracy bump — the herd
-        // closing in behind the target leaves it little room to brace.
+        // The herd closing in behind the target leaves it little room to
+        // brace.
         delta: { defensePenetration: 0.15 },
+      },
+      carrying_rumble: {
+        id: "carrying_rumble",
+        name: "Carrying Rumble",
+        cost: 2,
+        // LANE NOTABLE (the call lane). Reachable the normal way, or via the
+        // Sociability <-> Aggression bridge's own notable (Converged Quarry).
+        prerequisitesAnyOf: [["herd_grip"], ["converged_quarry"]],
+        leaning: "sociability",
+        // The one node in this tree allowed to touch the mark after the
+        // opener, and it is a duration change rather than a fourth mechanic
+        // because duration is the whole problem: a 20-tick mark on a target
+        // three tiles away expires before a herd-mate on the far side of the
+        // fight can walk to it. This is the node that makes `rallyCall`
+        // actually converge anybody. `rallyCall` is an overwrite field and
+        // Tremor Call is this node's ancestor on every route, so it is an
+        // escalation, not a race.
+        delta: { rallyCall: { ticks: 34 } },
+      },
+      passed_to_you: {
+        id: "passed_to_you",
+        name: "+6 Power",
+        cost: 1,
+        prerequisites: ["carrying_rumble"],
+        leaning: "sociability",
+        // Nobody in a herd this size throws the light one twice.
+        delta: { power: 6 },
+      },
+      // --- Lane B: the carry (what the herd gets out of every throw) ---
+      called_shot: {
+        id: "called_shot",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["tremor_call"],
+        leaning: "sociability",
+        // The second of the tree's two cooldown nodes, and the reason the
+        // carry lane exists: you are not the one who has to find the next
+        // rock. Total reduction is -2 against a base of 4 — a 1.67x tempo
+        // gain, still under the roster median of 1.80-2.00x and well under
+        // this move's own 2.50x cap.
+        delta: { cooldownTicks: -1 },
       },
       tremor_bond: {
         id: "tremor_bond",
         name: "Tremor Bond",
-        cost: 1,
-        // Reachable the normal way, or via either crosslink bridge that
-        // reaches into Sociability (Warning Tremor's and Rolling
-        // Thunder's own chains).
-        prerequisitesAnyOf: [["herd_grip"], ["herds_bulwark"], ["converged_quarry"]],
+        cost: 2,
+        // LANE NOTABLE (the carry lane). Reachable the normal way, or via the
+        // Boldness <-> Sociability bridge's own notable (Herd's Bulwark).
+        prerequisitesAnyOf: [["called_shot"], ["herds_bulwark"]],
         leaning: "sociability",
         // A real, distinct Sociability lever from marking: the same tremor
         // that calls the herd in doubles as a dedicated check-in — an
         // idle-tick heal for whichever herd-mate needs it most (see
         // `targetsAlly`'s own doc comment). Not another way to extend or
-        // repeat the rallyCall mark.
+        // repeat the mark.
         delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 } },
       },
       vanguard_call: {
@@ -4350,10 +4603,26 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "colony_watch",
         name: "Colony Watch",
         cost: 2,
-        prerequisitesAnyOf: [["vanguard_call"], ["bulwark_call"]],
+        // DEEP NOTABLE — the call lane's tail and both tips of the carry
+        // lane's fork converge here.
+        prerequisitesAnyOf: [["passed_to_you"], ["vanguard_call"], ["bulwark_call"]],
         leaning: "sociability",
+        // Where the two lanes meet: the call stops being something you decide
+        // to make. `allyEffectOnAttack` fires the ally effect on the NEAREST
+        // eligible herd-mate every single time this move is used, whether or
+        // not the throw itself lands (predation.ts's `resolveHit`) — so every
+        // rock thrown at something else is simultaneously a hand on a
+        // herd-mate's shoulder. The `allyEffect` here escalates Tremor Bond's
+        // own (an ancestor on every route, so this is a ladder rather than a
+        // race) and adds the half a bare heal could never carry: the herd-mate
+        // it reaches hits harder for a while, because it now knows where to
+        // hit. The regen passive is unchanged from v3 — no new passives
+        // anywhere in this conversion.
         grantsPassive: { kind: "regen", value: 0.03 },
-        delta: {},
+        delta: {
+          allyEffectOnAttack: true,
+          allyEffect: { healFraction: 0.18, buff: { stat: "attack", stage: 1, ticks: 14 } },
+        },
       },
       tremor_focus: {
         id: "tremor_focus",
@@ -4361,6 +4630,12 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 1,
         prerequisites: ["colony_watch"],
         leaning: "sociability",
+        // Unchanged from v3. Worth knowing what it is actually worth: with
+        // Sure Footing this branch reaches 90 + 13 = 103, so 2 of these 5
+        // points always pay and the other 3 only pay under a storm or an
+        // uphill shot (`stormAccuracyMultiplier` / `elevationAccuracyMultiplier`
+        // both compose onto `rollAccuracy`'s `extraMultiplier`). Real, but
+        // conditional — which is why no further accuracy filler was added.
         delta: { accuracy: 5 },
       },
       herd_ascendant: {
@@ -4369,32 +4644,45 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["tremor_focus"],
         leaning: "sociability",
-        // Deliberately not "extend the mark even further" a third time —
-        // a different payoff: whatever's already marked recovers steadily
-        // worse (jamCooldownTicks, a real control effect on the enemy), and
-        // a sustained group fight lets the user feed off it a little too.
+        // Deliberately not "extend the mark even further" a third time — a
+        // different payoff: whatever's already marked recovers steadily worse
+        // (`jamCooldownTicks`, a real control effect on the enemy), and a
+        // sustained group fight lets the user feed off it a little too.
         delta: { jamCooldownTicks: 3, lifestealFraction: 0.05 },
       },
-      // Crosslink: Aggression <-> Boldness — a heavier hit off an already
-      // grounded, braced throw.
+      // ============================================================
+      // BRIDGE 1 — Aggression <-> Boldness: the braced heave.
+      // Aim wants the rock somewhere specific; the stance wants to not move.
+      // Their crossing is commitment: plant, put the whole body behind it,
+      // and accept that you are not going anywhere for a beat.
+      // Lands on Skyfall (Aggression's aim lane) and Unshakeable (Boldness's
+      // stance lane) — one lane notable per branch, one step short of either
+      // branch's fork.
+      // ============================================================
       grinding_advance: {
         id: "grinding_advance",
         name: "Grinding Advance",
         cost: 1,
         prerequisites: ["pinning_impact", "bedrock_stance"],
         leaning: "aggression",
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 1, ticks: 12 } },
+        // Was a self Attack buff via `statChangeOnHit`, which is the field
+        // the Aggression pin ladder owns — an independent setter racing it.
+        // Rebuilt on the lever this bridge is actually about, and one that is
+        // additive so it can ladder cleanly: a real beat of committed
+        // downtime, bought in the same node (principle 4) with the sharper
+        // hit a planted, grinding heave actually produces.
+        delta: { critRateStage: 1, lockTicks: 1 },
       },
-      // Bridge tail (see MOVES_DESIGN.md's "Crosslinks as bridges"):
-      // extends Grinding Advance into Aggression's and Boldness's own
-      // pre-fork nodes (Broken Stride / Bedrock Footing).
       grinding_footing: {
         id: "grinding_footing",
-        name: "+0.15 Defense Penetration",
+        name: "+0.15 Defense Penetration, +1 Lock",
         cost: 1,
         prerequisites: ["grinding_advance"],
         leaning: "aggression",
-        delta: { defensePenetration: 0.15 },
+        // Bridge filler: deepens the lever its own crosslink introduced
+        // (principle 13) — one more beat spent committing to the heave, and
+        // the weight behind it starts telling on whatever it lands on.
+        delta: { defensePenetration: 0.15, lockTicks: 1 },
       },
       bedrock_momentum: {
         id: "bedrock_momentum",
@@ -4402,13 +4690,21 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["grinding_footing"],
         leaning: "boldness",
-        // Deepens Grinding Advance's own lever instead of bolting on a
-        // generic stat — the braced hit doesn't just land once, it builds:
-        // a bigger, longer self-Attack surge than the crosslink alone gave.
-        delta: { statChangeOnHit: { target: "self", stat: "attack", stage: 2, ticks: 16 } },
+        // BRIDGE NOTABLE. The top of the commitment ladder: a throw with the
+        // user's whole braced mass behind it, which starts going through hide
+        // built to shrug rock off. First rung of the same `resistanceBreaker`
+        // ladder Boldness's own Fracturing Blow (1.4x) and Bedrock Breaker
+        // (2x) finish — this node is an ancestor of both on every route, so
+        // it escalates rather than races them. Deliberately no third lock
+        // tick: two across the bridge plus Quarry Break's two is already the
+        // heaviest self-commitment build here.
+        delta: { resistanceBreaker: { multiplier: 1.25 }, power: 8 },
       },
-      // Crosslink: Boldness <-> Sociability — the tremor's warning reaches
-      // far enough to brace the thrower too.
+      // ============================================================
+      // BRIDGE 2 — Boldness <-> Sociability: the tremor's warning reaches far
+      // enough to brace the thrower too. Lands on Stone Underfoot (Boldness's
+      // take lane) and Tremor Bond (Sociability's carry lane).
+      // ============================================================
       warning_tremor: {
         id: "warning_tremor",
         name: "Warning Tremor",
@@ -4418,8 +4714,6 @@ export const MOVES: Record<string, MoveSpec> = {
         grantsPassive: { kind: "damageReductionFlat", value: 1 },
         delta: {},
       },
-      // Bridge tail: extends Warning Tremor into Boldness's and
-      // Sociability's own pre-fork nodes (Bedrock Footing / Tremor Bond).
       warded_footing: {
         id: "warded_footing",
         name: "+0.5 Armor",
@@ -4435,20 +4729,24 @@ export const MOVES: Record<string, MoveSpec> = {
         cost: 2,
         prerequisites: ["warded_footing"],
         leaning: "sociability",
-        // Deepens the bracing lever Warning Tremor already granted, instead
-        // of a generic lifesteal bolt-on — the herd's own care extends into
-        // real, ongoing recovery.
+        // Deepens the bracing the crosslink already granted instead of a
+        // generic bolt-on — the herd's own care extends into real, ongoing
+        // recovery.
         grantsPassive: { kind: "regen", value: 0.025 },
         delta: {},
       },
-      // Crosslink: Sociability <-> Aggression — a marked target that's
-      // already stumbling gets bogged down hard, not just slowed further.
-      // (Fixed a real mistake here: `lockTicks` locks the *user* out of
-      // acting, not the defender — it can't express a "stun the target"
-      // payoff at all. There's no tree-settable way to inflict an actual
-      // status/stun yet (`statusKind` isn't a tree delta field today), so
-      // this crosslink deepens the real primitive it already had — the
-      // Aggression branch's own defender Speed debuff — instead.)
+      // ============================================================
+      // BRIDGE 3 — Sociability <-> Aggression: a marked target that is
+      // already stumbling gets bogged down for good, and the herd's
+      // convergence is what makes the last rung worth anything. Lands on
+      // Hobbling Throw (Aggression's catch lane) and Carrying Rumble
+      // (Sociability's call lane).
+      //
+      // (Fixed a real mistake here in v3: `lockTicks` locks the *user* out of
+      // acting, not the defender — it cannot express "stun the target" at
+      // all. There is still no tree-settable way to inflict a status, so this
+      // bridge deepens the primitive the branch actually has.)
+      // ============================================================
       rolling_thunder: {
         id: "rolling_thunder",
         name: "Rolling Thunder",
@@ -4457,31 +4755,30 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "sociability",
         delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 24 } },
       },
-      // Deeper crosslink, building on Rolling Thunder: a pinned, marked
-      // target is exactly what the herd's own convergence should punish
-      // hardest, using the same `"rallyMarked"` primitive Earthquake and
-      // Hydro Pump's own deeper crosslinks now share.
       marked_advantage: {
         id: "marked_advantage",
         name: "Marked Advantage",
         cost: 1,
         prerequisites: ["rolling_thunder"],
         leaning: "aggression",
-        delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.3 } },
+        // Was a `situationalBonus` on `rallyMarked`, which shared no lever
+        // with its own crosslink (principle 13 — the checker flagged it) and
+        // raced the Boldness branch's independent `situationalBonus` setter.
+        // Rebuilt to deepen the exact thing Rolling Thunder does: a target
+        // the herd has already converged on stays caught longer, because
+        // nobody is giving it room to shake the leg out.
+        delta: { statChangeOnHit: { target: "defender", stat: "speed", stage: -2, ticks: 32 } },
       },
-      // Bridge tail: extends the Rolling Thunder/Marked Advantage chain
-      // into Aggression's and Sociability's own pre-fork nodes (Broken
-      // Stride / Tremor Bond).
       converged_quarry: {
         id: "converged_quarry",
         name: "Converged Quarry",
         cost: 2,
         prerequisites: ["marked_advantage"],
         leaning: "aggression",
-        // Deepens Marked Advantage's own rallyMarked payoff further
-        // (overwrite, like every other situationalBonus) instead of a
-        // flat power bolt-on — a target this pinned and this marked barely
-        // stands a chance.
+        // BRIDGE NOTABLE, and the tree's ONE `situationalBonus` — spent on
+        // the condition this move's own fantasy has to earn rather than one
+        // that is nearly always true. A target this pinned and this marked
+        // barely stands a chance.
         delta: { situationalBonus: { condition: "rallyMarked", multiplier: 1.6 } },
       },
     },
