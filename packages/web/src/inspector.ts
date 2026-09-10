@@ -465,18 +465,30 @@ function renderOverview(container: HTMLElement, world: World, hooks: InspectorHo
  * Edges routinely point at EGGS and at agents that have since died — an edge
  * outlives its subject until decay prunes it. Both are labelled rather than
  * silently dropped: "a lost friend" is a real thing to know about a unit.
+ *
+ * **Always rendered, even when empty.** See the empty-state branch below —
+ * a group that deletes itself is a feature nobody can find.
  */
-function renderRapportGroup(agent: Agent, world: World): HTMLElement | undefined {
+function renderRapportGroup(agent: Agent, world: World): HTMLElement {
   const edges = Object.keys(agent.rapport ?? {});
-  if (edges.length === 0) return undefined;
-
   const scored = edges
     .map((id) => ({ id, score: rapportScore(agent, id, world.tick) }))
     .filter((e) => e.score !== 0)
     .sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
-  if (scored.length === 0) return undefined;
 
   const g = group("Rapport");
+
+  // Always render the group, even empty. It used to return `undefined` and
+  // vanish entirely, which made the whole feature invisible: an agent only
+  // has rapport after real interaction, so early in a run NOBODY does, and
+  // you can click a dozen creatures in a row without ever learning the
+  // section exists. Direct report: "I still don't see in the inspector
+  // rapport. Is it underneath moves?" — it was above Moves the whole time,
+  // just deleting itself. An empty state makes absence legible.
+  if (scored.length === 0) {
+    g.appendChild(row("", "Knows no one yet.", true));
+    return g;
+  }
   const shown = scored.slice(0, RAPPORT_ROWS_SHOWN);
   const strongest = Math.max(...shown.map((e) => Math.abs(e.score)));
 
@@ -616,8 +628,7 @@ export function renderInspector(container: HTMLElement, agent: Agent | undefined
   if (agent.fightTarget) social.appendChild(row("Fighting", agent.fightTarget, true));
   container.appendChild(social);
 
-  const rapport = renderRapportGroup(agent, world);
-  if (rapport) container.appendChild(rapport);
+  container.appendChild(renderRapportGroup(agent, world));
 
   // --- Stats / exp ----------------------------------------------------------
   if (agent.stats || agent.exp !== undefined) {
