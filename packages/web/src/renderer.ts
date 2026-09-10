@@ -644,10 +644,11 @@ function tileVisible(world: World, vision: Vision | undefined, x: number, y: num
 }
 
 /**
- * Fog of war, drawn after the ground, agents and weather so it covers all
- * three: a tile never seen is solid dark; a tile seen before but not now is
- * drawn dimmed — the memory of the map, with nothing alive on it (agents on
- * unseen tiles are never drawn at all, see the agent pass). Underground,
+ * Fog of war, drawn over the ground and under everything alive (agents,
+ * crop emoji), exactly where `drawDayNightTint` sits: a tile never seen is
+ * solid dark; a tile seen before but not now is drawn dimmed — the memory
+ * of the map, with nothing alive on it (agents and crop identity on unseen
+ * tiles are never drawn at all, see those passes). Underground,
  * tiles the player can see but that no sunbeam lights get a lighter wash
  * too, so the chamber reads as *lit* and the corridor as merely *seen*.
  */
@@ -925,15 +926,24 @@ function drawWorldTiles(
   // on top of it — Pokémon should always read at full brightness regardless
   // of time of day, not get dimmed along with the terrain underneath them.
   drawDayNightTint(ctx, world);
+  // Fog is ground, same as the night tint: it goes under everything alive.
+  // It used to run after agents and crops, and its "seen but unlit" wash
+  // sat on top of every emoji and sprite in the cave — direct report: "Why
+  // are all our emoji sorta faded out opacity? Want em on top."
+  const vision = playerVision(world);
+  drawFog(ctx, world, vision);
 
   // Crops get that same "always legible" treatment as agents (see
   // `cropIdentityTiles`'s own doc comment above for the root cause this
   // fixes) — drawn now, on top of the night tint, instead of back in the
-  // tile loop where the tint would wash over them.
-  for (const { x, y, tile } of cropIdentityTiles) drawCropIdentity(ctx, tile, x, y);
+  // tile loop where the tint would wash over them. Only on tiles the
+  // player can see right now: a remembered tile is a memory of ground, not
+  // a live view of what grows there.
+  for (const { x, y, tile } of cropIdentityTiles) {
+    if (tileVisible(world, vision, x, y)) drawCropIdentity(ctx, tile, x, y);
+  }
 
   pruneStaleFacings(world);
-  const vision = playerVision(world);
   for (const agent of world.agents) {
     if (agent.layer !== activeViewLayer) continue;
     // Out of sight is out of the frame entirely — not dimmed, absent. A
@@ -944,7 +954,6 @@ function drawWorldTiles(
 
   drawWarmLights(ctx, world);
   drawWeather(ctx, world);
-  drawFog(ctx, world, vision);
 
   if (autoCamHighlightIds && autoCamHighlightIds.size > 0) drawAutoCamHighlight(ctx, world, autoCamHighlightIds);
   if (passiveHighlights) {
@@ -1069,6 +1078,8 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
   // (before this tint existed as a separate final pass); pulled into their
   // own pass here so the draw order is tiles -> tint -> agents.
   drawDayNightTint(ctx, world);
+  // Under the glyphs, same as in tile mode — see drawWorldTiles.
+  drawFog(ctx, world, vision);
 
   ctx.save();
   ctx.font = `${TILE_SIZE * 0.68}px ui-monospace, "SF Mono", Consolas, monospace`;
@@ -1082,7 +1093,6 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
   ctx.restore();
 
   drawWeather(ctx, world);
-  drawFog(ctx, world, vision);
 }
 
 /**
