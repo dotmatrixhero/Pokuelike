@@ -7103,3 +7103,94 @@ was reaching for, and it is still not buildable.
   concern written into its own node comment, as the draft did.
 - The needs-recovery hook for *Sickened*, above.
 - `thorns`/`damageReduction` still have no engine-side cap.
+
+---
+
+# Design pass: what accuracy and evasion should actually be
+
+Accuracy just became a stat worth having. This is the argument for what to do
+with it, written before any node is touched.
+
+## The plain version
+
+Until today, nothing in the game could miss for an interesting reason. Now
+three things make you miss — distance, weather, high ground — and one thing
+can fix it: accuracy. That is the good half.
+
+The bad half is the obvious next step, and I want to argue against it before
+we build it: **giving moves a raw "+2 evasion" node.** It is the standard
+Pokémon answer and it is wrong for this game specifically.
+
+Two reasons, both from our own pillars.
+
+**It is a hidden meter.** *"Mechanics should be visible on the map, not
+hidden in a meter."* We already chose the drought that dries up ponds over
+the drought that multiplies a thirst number. A defender with +4 evasion looks
+exactly like a defender with 0 evasion. Nothing on the map explains why the
+attack missed, so the chronicle can only say "it missed" — which is the same
+"sad and vague" failure as "it just died out".
+
+**It is the classic dominant answer.** *"We want equilibrium and variety, not
+a dominant answer."* Evasion stacking is the most reliably degenerate
+strategy in the genre. And our numbers make it worse than usual: four move
+slots, each able to hold its own evasion stage, and the cap is +6 net —
+which is a **1/3 multiplier on every incoming attack, permanently**, for a
+build that just re-casts.
+
+## What to do instead
+
+Every accuracy modifier should come from something already drawn on the map.
+We have the vocabulary for this — `oneSituationalMultiplier` already resolves
+twelve conditions, and most of them are visible: `concealed`, `elevation`,
+`night`, `storm`, `rain`, `drought`, `coldSnap`, `flanking`.
+
+So: **you get harder to hit by doing something, somewhere, that a player can
+see.** Not by holding a number.
+
+### The gap this exposes, and it is a good one
+
+`isConcealed` (predation.ts) is already real: it covers a burrowed agent and
+any tile with `concealment` — bushes. It already shrinks the radius at which
+you get NOTICED (`BUSH_CONCEALMENT_DETECTION_REDUCTION`).
+
+**It does nothing once a fight starts.** Standing in a bush makes you harder
+to find and no harder to hit. That is the single most intuitive "hard to hit"
+condition in the game, it is already on the map in a colour the player can
+see, and it is currently worth nothing defensively.
+
+That is where evasion should live.
+
+## The three axes, and who owns them
+
+| axis | already real? | visible? | whose flavour |
+|---|---|---|---|
+| distance | yes, new — first tile free then −5/tile | yes, it's the map | ranged trees pay it, accuracy nodes buy it back |
+| weather / elevation | yes | yes | Boldness ("the air is not neutral", "fly the weather") |
+| **cover / concealment** | **detection only — combat gap** | **yes** | **Aggression's stealth-ambush flavour** |
+| raw evasion stage | wired, unused | **no** | — argue: don't |
+
+## What this buys us
+
+- **Accuracy stops being universal filler.** It is worthless on a range-1
+  move with no weather plan and real on Solar Beam at reach 11 (50% today).
+  A conditional lever is better than a flat one, and it is legible from the
+  move itself.
+- **Cover becomes a real tactical decision** rather than a detection detail —
+  and it is a decision the player makes by MOVING, which is the most visible
+  action there is.
+- **It rewards noticing a pattern** rather than punishing one uninformed
+  choice: "things are hard to hit in the scrub" is learnable across many
+  fights.
+
+## Open questions
+
+Recorded rather than answered, because they change game feel.
+
+1. Should concealment reduce incoming accuracy, and by how much? A flat −20
+   is roughly "one and a half tiles of distance".
+2. Should a defender who has just moved be harder to hit? Diegetic and
+   visible, but it makes every chase slower to resolve.
+3. Do we ever allow a raw evasion node, as a deliberate exception on one
+   move whose whole fantasy is dodging?
+4. Night: currently only an attacker-side damage bonus. Should it also cost
+   accuracy for everyone without some night-vision trait?
