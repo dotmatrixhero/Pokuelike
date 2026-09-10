@@ -2,7 +2,17 @@ import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, V
 import { otherLayers, setTile, tileAt } from "./world.js";
 import { stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
-import { agentsWithin, applyEggEating, applyPredationInstincts, hasAwakeHerdmateNearby, hasNearbyThreat, manhattan, resolveChargedAttack } from "./predation.js";
+import {
+  agentsWithin,
+  applyEggEating,
+  applyPredationInstincts,
+  applyTerrainEffectAt,
+  hasAwakeHerdmateNearby,
+  hasNearbyThreat,
+  manhattan,
+  resolveChargedAttack,
+  resolveHit,
+} from "./predation.js";
 import {
   RAPPORT_SLEPT_NEAR_DELTA,
   RAPPORT_OFFERED_FOOD_DELTA,
@@ -14,7 +24,7 @@ import {
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil } from "./flora.js";
-import { tickCooldowns, useMove } from "./combat.js";
+import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -1448,6 +1458,60 @@ export function applyFollowing(world: World, agent: Agent, log?: EventLog): bool
   return true;
 }
 
+/**
+ * Direct ask: "under the attack option a sub menu show up to select your
+ * bonded pokemon if its within the same zone as you, and you can select a
+ * move and target a space with it - it then uses its own pathfinding to get
+ * to the right position and use it." `player.ts`'s `command` case sets
+ * `Agent.commandedAction` on the bonded follower; this is what actually
+ * spends the follower's OWN action ticks carrying the order out, same as
+ * `applyFollowing`/`applyTreatSeeking` spend a follower's ticks on their own
+ * behaviors — the player only ever paid for the single turn it took to
+ * issue the order.
+ *
+ * Steps toward `target` (reusing `movement.ts`'s `stepToward`, the same
+ * per-tick pathing primitive dispersal/following/predation all already use)
+ * until in the move's own range, then resolves it once — against a living
+ * defender at that exact tile via `resolveHit`'s new `explicitMove` param
+ * (the full existing damage/status/ally-effect pipeline, just with a
+ * specific move instead of an auto-pick), or against terrain via
+ * `applyTerrainEffectAt` when there's no one standing there. Yields to an
+ * urgent need first — same as `applyFollowing` already does — the order
+ * simply waits rather than marching a thirsty partner past water. A move no
+ * longer in `Agent.moves` (e.g. evolved out of it since the order was
+ * queued) clears the order without acting rather than throwing.
+ */
+export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const cmd = agent.commandedAction;
+  if (!cmd) return false;
+  if (hasUrgentNeed(agent.needs)) return false;
+  const move = agent.moves?.find((m) => m.id === cmd.moveId);
+  if (!move) {
+    agent.commandedAction = undefined;
+    return false;
+  }
+  const distance = manhattan(agent.pos, cmd.target);
+  if (!withinMoveRange(move, distance)) {
+    if (agent.behavior !== "fight") {
+      logBehaviorChange(log, world, agent, "fight");
+      agent.behavior = "fight";
+    }
+    agent.pos = stepToward(world, agent.layer, agent.pos, cmd.target, agent, agent);
+    return true;
+  }
+  if (agent.moveCooldowns?.[move.id]) return true; // in range, waiting out the move's own cooldown — the order stands
+  const defender = world.agents.find(
+    (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
+  );
+  if (defender) {
+    resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, move);
+  } else {
+    applyTerrainEffectAt(world, agent, agent.layer, cmd.target, move);
+  }
+  agent.commandedAction = undefined;
+  return true;
+}
+
 export function tickAgentAction(
   world: World,
   agent: Agent,
@@ -1489,6 +1553,10 @@ export function tickAgentAction(
   // without a single drink and died of thirst mid-search.
   const thirstIsUrgent = 1 - agent.needs.thirst > 0.3;
   if (rules && applyPredationInstincts(world, agent, rules, log, ctx, rng, thirstIsUrgent)) return;
+  // A standing player order outranks passive following/treat-seeking (the
+  // player deliberately spent a turn issuing it) but never self-
+  // preservation above — see `applyCommandedAction`'s own doc comment.
+  if (applyCommandedAction(world, agent, log, ctx, rng)) return;
   // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
   // and fighting have had their say, before the needs tree, and only while
   // no need is urgent (a follower that starves is a bug).

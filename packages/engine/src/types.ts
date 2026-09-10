@@ -581,7 +581,21 @@ export type PlayerAction =
    * (still costs the turn) against a wall, water, or a tile nothing in the
    * current loadout can affect.
    */
-  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
+  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  /**
+   * Direct ask: "even before m7... under the attack option a sub menu
+   * show up to select your bonded pokemon if its within the same zone as
+   * you, and you can select a move and target a space with it - it then
+   * uses its own pathfinding to get to the right position and use it."
+   * Orders `agentId` (must currently be following the player —
+   * `Agent.followingId === this player's id` — the bonded partner) to use
+   * `moveId` (one of its own real `Agent.moves`) at `target`. Costs the
+   * PLAYER's turn to issue; the partner then spends its own, separate
+   * action ticks closing distance and acting — see `needs.ts`'s
+   * `applyCommandedAction`. Fails if there is no such follower, or it
+   * doesn't know that move.
+   */
+  | { kind: "command"; agentId: string; moveId: string; target: Vec2 };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -742,6 +756,22 @@ export interface Agent {
   followingId?: string;
   /** ROADMAP.md M6: the dispersal offer's refusal is permanent per individual (CAMPAIGN_DESIGN.md). Not yet used; reserved. */
   refusedFollow?: boolean;
+  /**
+   * Direct ask: "select your bonded pokemon... select a move and target a
+   * space with it - it then uses its own pathfinding to get to the right
+   * position and use it." Set by `player.ts`'s `command` case on the
+   * player's bonded follower; read every action tick by `needs.ts`'s
+   * `applyCommandedAction`, which steps the agent toward `target` until it
+   * is within `moveId`'s own range, then resolves the move there — against
+   * a living defender via `predation.ts`'s `resolveHit` (its own
+   * `explicitMove` param), or against terrain via `predation.ts`'s
+   * `applyTerrainEffectAt` — and clears this. An urgent need
+   * (hunger/thirst) still wins — the order simply waits, same as
+   * `applyFollowing` already yields to needs. Cleared without acting if
+   * the named move is no longer in `Agent.moves` (e.g. the order was
+   * queued, then something changed what this agent knows).
+   */
+  commandedAction?: { moveId: string; target: Vec2 };
   /**
    * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
    * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's

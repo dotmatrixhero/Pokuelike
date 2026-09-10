@@ -17,6 +17,9 @@ import { effectiveDisposition } from "./herdLeadership.js";
 import { isPathClear } from "./fov.js";
 import { stepTowardMovingTarget } from "./pathfinding.js";
 import { tileAt, setTile } from "./world.js";
+import { addItem } from "./inventory.js";
+import { MATERIALS, type MaterialId } from "./harvest.js";
+import { invalidateResourceIndex } from "./resourceIndex.js";
 import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
 import { recordPredatorPressure } from "./herdMigration.js";
@@ -1543,7 +1546,16 @@ export function resolveHit(
    * every pre-existing caller of `resolveHit` (mob-fighting's defensive
    * fights, the guardian branch), so none of them need updating.
    */
-  accuracyBonusMultiplier = 1
+  accuracyBonusMultiplier = 1,
+  /**
+   * A specific move to use instead of auto-picking one — needs.ts's
+   * `applyCommandedAction`, resolving a player's order to a bonded partner
+   * ("select a move and target a space with it"), already knows exactly
+   * which of the partner's own moves the player chose and must not let
+   * `pickBestMove` substitute a different one. Undefined for every
+   * pre-existing caller, which keeps auto-picking exactly as before.
+   */
+  explicitMove?: MoveSpec
 ): boolean {
   if (defender.alive === false) return false; // already a corpse — nothing left to finish off here (looting/scavenging is a separate path, see support.ts)
 
@@ -1554,7 +1566,7 @@ export function resolveHit(
   // right above it, so this picks consistently with what was just validated
   // as reachable, rather than re-deriving its own (possibly different, now
   // that scoring is tempo-weighted too) answer independently.
-  const move = pickBestMove(attacker, defender.types ?? [], distance, world.tick);
+  const move = explicitMove ?? pickBestMove(attacker, defender.types ?? [], distance, world.tick);
   if (!move) return false; // every move on cooldown, or none reach from here, this tick
 
   useMove(attacker, move, world.tick);
@@ -1607,6 +1619,36 @@ export function resolveHit(
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
   return resolveHitAgainstTarget(world, attacker, defender, move, log, faintKind, ctx, true, rng, accuracyBonusMultiplier);
+}
+
+/**
+ * MOVES_AND_TOOLS.md's generalised `terrainEffect` (axe against a tree,
+ * machete against a bush), applied directly at a tile with no living
+ * defender involved — the same logic player.ts's own `attack` case used to
+ * inline, now shared with needs.ts's `applyCommandedAction` so a commanded
+ * partner's swing against terrain goes through the identical path a
+ * player's own swing does. Returns what changed, or undefined if `move` has
+ * no `terrainEffect` or the tile doesn't qualify (no tile there, or the
+ * tile's terrain isn't in `terrainEffect.from` when that's set).
+ */
+export function applyTerrainEffectAt(
+  world: World,
+  attacker: Agent,
+  layer: Layer,
+  pos: Vec2,
+  move: MoveSpec
+): { from: TerrainKind; to: TerrainKind; yields?: MaterialId } | undefined {
+  if (!move.terrainEffect) return undefined;
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile) return undefined;
+  if (move.terrainEffect.from && !move.terrainEffect.from.includes(tile.terrain)) return undefined;
+  useMove(attacker, move, world.tick);
+  const { to, yields } = move.terrainEffect;
+  const from = tile.terrain;
+  setTile(world, layer, pos.x, pos.y, to);
+  if (yields && attacker.controlledBy === "player") addItem(attacker, yields, 1, MATERIALS[yields].weight);
+  invalidateResourceIndex(world);
+  return { from, to, yields };
 }
 
 /**

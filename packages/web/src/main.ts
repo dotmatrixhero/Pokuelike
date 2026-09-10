@@ -139,6 +139,9 @@ const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
 const packMenuEl = document.getElementById("pack-menu") as HTMLElement;
 const packMenuBodyEl = document.getElementById("pack-menu-body") as HTMLElement;
 const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButtonElement;
+const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
+const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
+const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -191,6 +194,14 @@ let lastLoggedEventCount = 0;
  * concept of player facing at all.
  */
 let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
+/**
+ * Direct ask: "select your bonded pokemon... select a move and target a
+ * space with it." Set once a move is picked from the command menu; the next
+ * canvas click (any tile — living target or bare terrain) becomes that
+ * order's `target` instead of the ordinary select/travel-to click. Cleared
+ * on firing, on Escape, or on pressing Attack again.
+ */
+let targeting: { agentId: string; moveId: string } | undefined;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -560,6 +571,11 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       }
       return "";
     }
+    case "command": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      return ok ? `You signal ${name}.` : `${name} won't take that order.`;
+    }
   }
 }
 
@@ -680,6 +696,81 @@ function closePackMenu(): void {
 }
 packMenuCloseBtn.addEventListener("click", closePackMenu);
 
+/** Bonded followers (ROADMAP M6's follower door) standing in the player's own zone right now — the pool the command menu offers. */
+function bondedPartnersInZone(me: Agent): Agent[] {
+  return world.agents.filter((a) => a.followingId === me.id && a.alive !== false && a.layer === me.layer);
+}
+
+/**
+ * Direct ask: "under the attack option a sub menu show up to select your
+ * bonded pokemon if its within the same zone as you, and you can select a
+ * move and target a space with it - it then uses its own pathfinding to get
+ * to the right position and use it." Only ever opened when at least one
+ * bonded follower is in zone (see the attack key/button handlers below) —
+ * with none, Attack stays the plain instant self-swing it always was.
+ */
+function openCommandMenu(): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  cancelTravel();
+  targeting = undefined;
+  commandMenuBodyEl.replaceChildren();
+  const row = (text: string, sub: string | undefined, onTap: () => void) => {
+    const el = document.createElement("button");
+    el.className = "pack-row tappable";
+    el.textContent = text;
+    if (sub) {
+      const s = document.createElement("span");
+      s.className = "pack-sub";
+      s.textContent = sub;
+      el.appendChild(s);
+    }
+    el.addEventListener("click", onTap);
+    return el;
+  };
+  const heading = (text: string) => {
+    const el = document.createElement("div");
+    el.className = "pack-heading";
+    el.textContent = text;
+    return el;
+  };
+  commandMenuBodyEl.appendChild(
+    row("You", "swing at whatever's in the direction you last moved", () => {
+      closeCommandMenu();
+      playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    })
+  );
+  for (const partner of bondedPartnersInZone(me)) {
+    const name = SPECIES[partner.species]?.name ?? partner.species;
+    commandMenuBodyEl.appendChild(heading(name));
+    const moves = partner.moves ?? [];
+    if (moves.length === 0) commandMenuBodyEl.appendChild(row("Knows no moves.", undefined, () => {}));
+    for (const move of moves) {
+      const onCooldown = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
+      commandMenuBodyEl.appendChild(
+        row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
+          if (onCooldown) return;
+          closeCommandMenu();
+          targeting = { agentId: partner.id, moveId: move.id };
+          hudMessageEl.textContent = `Targeting for ${name}'s ${move.name} — tap a tile. Esc to cancel.`;
+        })
+      );
+    }
+  }
+  commandMenuEl.hidden = false;
+}
+
+function closeCommandMenu(): void {
+  commandMenuEl.hidden = true;
+}
+commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
+
+function cancelTargeting(): void {
+  if (!targeting) return;
+  targeting = undefined;
+  hudMessageEl.textContent = "";
+}
+
 /**
  * The death screen. The cause is the last logged event that names the
  * player — `starved`, `killed`, whichever — in the log's own words, so the
@@ -742,11 +833,33 @@ const PLAYER_KEYS: Record<string, PlayerAction> = {
   z: { kind: "crouch" },
 };
 
+/**
+ * Direct ask: "under the attack option a sub menu show up to select your
+ * bonded pokemon." With no bonded follower in zone, Attack is unchanged —
+ * the plain instant swing 'f'/the HUD button always did. With one or more
+ * present, it opens the chooser instead (which itself still offers "You" for
+ * the plain swing). Pressing Attack again while already targeting cancels
+ * the order rather than reopening the menu — the one mobile-friendly way to
+ * back out besides Escape.
+ */
+function attemptAttack(): void {
+  if (targeting) {
+    cancelTargeting();
+    return;
+  }
+  const me = findPlayer(world);
+  if (!me) return;
+  if (bondedPartnersInZone(me).length > 0) {
+    openCommandMenu();
+    return;
+  }
+  playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+}
+
 window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
-  cancelTravel();
   if (playerDead) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
@@ -754,6 +867,15 @@ window.addEventListener("keydown", (e) => {
     }
     return;
   }
+  if (!commandMenuEl.hidden) {
+    if (e.key === "Escape") closeCommandMenu();
+    return;
+  }
+  if (targeting) {
+    if (e.key === "Escape") cancelTargeting();
+    return;
+  }
+  cancelTravel();
   if (!packMenuEl.hidden) {
     if (e.key === "Escape" || e.key === "i") closePackMenu();
     return;
@@ -771,7 +893,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "f") {
     e.preventDefault();
-    playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    attemptAttack();
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1090,14 +1212,15 @@ function travelTo(target: Vec2): void {
 document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (!playerMode || playerDead) return;
-    cancelTravel();
     const act = btn.dataset.act;
+    if (targeting && act !== "attack") return; // a target tile is the only thing that should land next
+    cancelTravel();
     if (act === "look") examineNext();
     else if (act === "gather") {
       playerAct({ kind: "gather" });
       runActivity();
     } else if (act === "pack") openPackMenu();
-    else if (act === "attack") playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy });
+    else if (act === "attack") attemptAttack();
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });
@@ -1265,6 +1388,20 @@ canvas.addEventListener("click", (event) => {
   const rect = canvas.getBoundingClientRect();
   const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
   const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  // Direct ask: "select a move and target a space with it." Any tile —
+  // whether or not something's standing on it — becomes the order's target,
+  // ahead of the ordinary agent-select/tap-to-walk handling right below, the
+  // same way a real target-a-tile UI would consume the next click outright.
+  if (targeting) {
+    const target = { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+    const { agentId, moveId } = targeting;
+    targeting = undefined;
+    // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
+    // the player's own turn to spend, same as every other verb; the HUD
+    // message comes from `outcomeText`'s own "command" case.
+    playerAct({ kind: "command", agentId, moveId, target });
+    return;
+  }
   // Direct follow-up ask: "I should be able to click specific units in the
   // box to inspect them, right now click focuses the fight." A real agent
   // hit now wins outright — checked BEFORE the engagement-box hit test

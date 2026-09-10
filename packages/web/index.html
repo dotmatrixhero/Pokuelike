@@ -402,8 +402,8 @@
       #hud-pad button { flex: 1 1 28%; }
 
       /* ROADMAP.md M5 — the pack menu. */
-      #pack-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
-      #pack-menu[hidden] { display: none; }
+      #pack-menu, #command-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
+      #pack-menu[hidden], #command-menu[hidden] { display: none; }
       .pack-card { background: rgba(23, 28, 36, 0.98); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px 14px; width: min(420px, calc(100% - 28px)); max-height: 80%; overflow-y: auto; font-size: 12.5px; }
       .pack-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
       .pack-title button { background: none; border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px; min-width: 32px; min-height: 32px; }
@@ -1031,6 +1031,19 @@
             <div class="pack-card">
               <div class="pack-title"><span>Pack</span><button id="pack-menu-close" title="Close">✕</button></div>
               <div id="pack-menu-body"></div>
+            </div>
+          </div>
+
+          <!-- Direct ask: "under the attack option a sub menu show up to
+               select your bonded pokemon if its within the same zone as
+               you, and you can select a move and target a space with it -
+               it then uses its own pathfinding to get to the right
+               position and use it." Reuses the pack menu's own visual
+               pattern (.pack-card/.pack-row). -->
+          <div id="command-menu" hidden>
+            <div class="pack-card">
+              <div class="pack-title"><span>Attack</span><button id="command-menu-close" title="Close">✕</button></div>
+              <div id="command-menu-body"></div>
             </div>
           </div>
 

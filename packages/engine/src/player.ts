@@ -1,7 +1,7 @@
 import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js";
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
-import { setTile, tileAt } from "./world.js";
+import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
@@ -10,8 +10,8 @@ import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory
 import { carryCapacityOf } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
-import { resolveHit } from "./predation.js";
-import { pickBestMove, useMove } from "./combat.js";
+import { applyTerrainEffectAt, resolveHit } from "./predation.js";
+import { pickBestMove } from "./combat.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -200,12 +200,25 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         (m) => m.terrainEffect && !agent.moveCooldowns?.[m.id] && (!m.terrainEffect.from || m.terrainEffect.from.includes(tile.terrain))
       );
       if (!move?.terrainEffect) return false;
-      useMove(agent, move, world.tick);
-      const { to, yields } = move.terrainEffect;
-      out.felled = { from: tile.terrain, to, yields };
-      setTile(world, agent.layer, targetPos.x, targetPos.y, to);
-      if (yields) addItem(agent, yields, 1, MATERIALS[yields].weight);
-      invalidateResourceIndex(world);
+      const felled = applyTerrainEffectAt(world, agent, agent.layer, targetPos, move);
+      if (!felled) return false;
+      out.felled = felled;
+      return true;
+    }
+    case "command": {
+      // Direct ask: "under the attack option a sub menu show up to select
+      // your bonded pokemon if its within the same zone as you, and you can
+      // select a move and target a space with it - it then uses its own
+      // pathfinding to get to the right position and use it." Costs the
+      // PLAYER's turn to issue; `needs.ts`'s `applyCommandedAction` spends
+      // the partner's own, separate action ticks closing distance and
+      // acting. "Bonded" here is the existing follower relationship
+      // (`Agent.followingId`), not a separate command-specific gate.
+      const partner = world.agents.find((a) => a.id === action.agentId && a.followingId === agent.id && a.alive !== false);
+      if (!partner) return false;
+      const move = partner.moves?.find((m) => m.id === action.moveId);
+      if (!move) return false;
+      partner.commandedAction = { moveId: action.moveId, target: action.target };
       return true;
     }
     case "crouch": {

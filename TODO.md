@@ -8717,3 +8717,128 @@ finding (order-dependent tests mean some shared state is leaking
 somewhere — possibly `Math.random` used unseeded in a test that doesn't
 pass its own `rng`), just not one worth chasing mid-task; flagging for
 whoever next has reason to look at `simulation.test.ts`.
+
+## Measured: the dispersal offer's "the sim already correlates the two" claim — false in practice
+
+CAMPAIGN_DESIGN.md's dispersal-offer section (the two doors: "the
+disperser" and "the follower," both gated at Bonded/0.5, explicitly
+"Status: not decided") names its own required gate before building
+anything: *"How many dispersal events actually fire in a layer-1-sized
+region over a layer-1-length run (~400 turns), across several seeds? If
+the answer is near zero, this path never fires in a real run."*
+`runner/validateDispersalOffer.ts` is that measurement.
+
+**Part A — baseline dispersal frequency, no player, 8 seeds, 6000
+ticks each, tracking a 4-member herd:** 23 dispersal events total, so
+`maybeTriggerDispersal` fires plenty on its own — not the near-zero
+case the doc worried about.
+
+**Part B — the actual question: does a herd member ever disperse WHILE
+holding real trust toward the player, using `validateBond.ts`'s own
+real courting bot** (gather berries, approach, crouch, offer, repeat;
+tracks every herd member's `rapportScore`/`trustStage` every tick, not
+just the current courting target): 6 of 8 seeds reached Bonded (0.5)
+trust — the same threshold both doors fire at — via ordinary courting
+play. But in every seed where a dispersal event was also observed, the
+disperser was a **different, low-trust individual** (0.00–0.31 trust)
+from whichever herd member the player had actually bonded with. The
+doc's own reasoning — "the sim already correlates the two" — does not
+hold: dispersal and bonding are independent processes over the same
+herd, not the same event.
+
+Three options were on the table (ship the follower door only and defer
+the disperser door; redesign the disperser trigger so it doesn't require
+the bonded individual specifically; build both, firing on whichever
+individual disperses regardless of trust). Not explicitly ruled on — the
+conversation moved to the "command your bonded partner" feature (below)
+instead of picking one, so this is genuinely still open, not a decision
+made by default. See the next section for what actually shipped instead.
+
+## Built: command your bonded partner — a real move, aimed at a real tile
+
+Direct ask, after seeing "no_eligible_mates" in the dispersal-offer
+report above and worrying a player-mating mechanic had been built (it
+hadn't — that vocabulary is the wild herd's own natal-dispersal system,
+unrelated to the player): *"ok you shouldnt be uh mating/laying eggs
+with the pokemon btw. just like, when they bonded to you the follow you
+around and you can tell them what to do."* Followed immediately by the
+concrete ask, ahead of M7: *"under the attack option a sub menu show up
+to select your bonded pokemon if its within the same zone as you, and
+you can select a move and target a space with it - it then uses its own
+pathfinding to get to the right position and use it."*
+
+**Engine** (`packages/engine/src`):
+- `types.ts`: `PlayerAction`'s `"command"` case (`agentId`, `moveId`,
+  `target`); `Agent.commandedAction?: { moveId, target }`.
+- `predation.ts`: `resolveHit` gained an optional `explicitMove` param —
+  a commanded partner's chosen move goes through the exact same
+  damage/status/ally-effect/charge-attack pipeline any auto-picked
+  attack does, just without `pickBestMove` substituting a different
+  move. New exported `applyTerrainEffectAt`, consolidating the
+  terrain-effect logic (axe fells a tree, etc.) that used to live
+  inlined only in `player.ts`'s own `attack` case — now shared by both.
+- `needs.ts`: new `applyCommandedAction`, hooked into `tickAgentAction`
+  right after `applyPredationInstincts` (self-preservation still wins)
+  and ahead of `applyTreatSeeking`/`applyFollowing` (a direct order
+  outranks passive following). Steps toward the target with the same
+  `stepToward` primitive dispersal/following/hunting already use;
+  resolves the move once in range (`resolveHit` against a living
+  defender, or `applyTerrainEffectAt` against bare terrain) and clears
+  the order. An urgent need (hunger/thirst) pauses the order rather than
+  discarding it — same as `applyFollowing` already yields to needs. A
+  move no longer known (e.g. evolved out of it) clears the order without
+  acting.
+- `player.ts`: new `"command"` case (only succeeds against a real
+  follower — `Agent.followingId === this player's id` — that knows the
+  named move); the existing `"attack"` case's terrain branch now calls
+  `applyTerrainEffectAt` instead of its own inlined copy.
+- 10 new unit tests (`test/commandedAction.test.ts`): issuing sets the
+  order; out-of-range paths toward the target and switches to `"fight"`
+  behavior; in-range-and-off-cooldown resolves against a living target
+  and clears; terrain-effect resolves and grants no item (the follower
+  isn't the player — `applyTerrainEffectAt`'s `yields` gate is
+  `controlledBy === "player"`); an urgent need pauses without discarding;
+  an unknown move clears without acting; on-cooldown-but-in-range stands
+  without double-resolving. Full engine suite: 1453/1453.
+
+**Web** (`packages/web/src`, `index.html`): a new `#command-menu` modal
+(reusing the Pack menu's own `.pack-card`/`.pack-row` visual pattern) —
+Attack now opens it instead of swinging instantly whenever a bonded
+follower is in the player's own zone (`bondedPartnersInZone`), listing
+"You" (the old instant swing) plus each partner's real known moves.
+Picking a move arms a `targeting` state; the next canvas click (tile or
+agent, intercepted ahead of the ordinary select/tap-to-walk handling)
+becomes the order's target and fires `playerAct({kind: "command", ...})`
+— the same turn-costing path every other verb goes through. Escape, or
+pressing Attack again, cancels targeting. `outcomeText`'s exhaustive
+switch over `PlayerAction` (CLAUDE.md's documented risk class — the
+same shape as the `SimEvent`-switch lesson) needed its own new
+`"command"` case; caught immediately by `tsc` during the web build, not
+missed.
+
+**Live-verified**, two ways:
+1. Playwright against the real dev server (`?player=1&seed=42`,
+   `window.__pokuelike.world` — the existing dev-only debug hook,
+   `main.ts`'s own doc comment: "lets a Playwright check read the real
+   world... not shipped in the production build"): tapping Attack with
+   a bonded partner in zone opens the menu showing the real partner
+   (Bulbasaur) and its real moves (Tackle, Vine Whip); picking Tackle
+   arms targeting and updates the HUD message; clicking a map tile fires
+   the order, sets `commandedAction` correctly, and shows "You signal
+   Bulbasaur."
+2. Direct engine calls (`tsx`) against the same real curated scenario
+   (`createPlayerDemoWorld(42)`), to watch the partner's own action
+   ticks run past what the browser round-trip conveniently covered: a
+   commanded Bulbasaur closed real distance over several ticks (greedy
+   `stepToward`, not full pathfinding — same primitive every other
+   AI behavior in this game already uses, so it can get stuck same as
+   any of them if the straight line is blocked, e.g. water — confirmed
+   directly: the first target picked landed in open water and the
+   partner correctly refused to enter it, not a bug), landed a real
+   Tackle on a real wild agent (19 → 15 HP), cleared the order, and
+   resumed following the player afterward.
+
+Not yet built: the disperser-door decision above is still open, and
+Rescue/Fight-alongside against real M7-layer predators are unexercised
+by this feature (layer 1 has none) — this only proves the mechanism
+against layer-1 wildlife.
