@@ -15477,3 +15477,51 @@ tests already document) — so individual seed numbers (e.g. seed 1008's
 "the same encounters resolving differently." The intervention-rate jump is
 real; the exact death-count delta is suggestive, not proven, on 8 seeds.
 Piece 3 (avenge) remains its own, not-yet-built slice.
+
+## Fixed: a Pokémon fighting and killing itself
+
+Direct report, with a mobile screenshot: a Battle Screen showing
+"Weepinbell (1400-3, the Weepinbells of Saltfen) vs Weepinbell (1400-3, the
+Weepinbells of Saltfen) fighting!" — the SAME id on both sides — followed
+by "Weepinbell used Poison Jab! Weepinbell takes 89 damage! Weepinbell
+fainted!" and only one combatant chip ever rendered on the Battle Screen
+(the tell that this was really one agent, not two different Weepinbells
+sharing a display name).
+
+**Empirically confirmed real, not a display bug.** New
+`packages/runner/src/validateSelfAttack.ts` watches every real `"fought"`
+event across a `tickWorld` run for `attackerId === defenderId`. 8 seeds,
+10,000 ticks each: **24 real self-fought events**, all the literal same
+agent (`weepinbell-immigrant-3275-0` in one seed) attacking and eventually
+killing itself with its own move, repeatedly, across a span of thousands
+of ticks — not a one-off.
+
+**Root cause.** `applyPredationInstincts`'s guardian branch
+(`predation.ts`) scans for threats near the herd-mate it's about to
+defend: `agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter(other =>
+isGenuineThreat(rules, herdmate, other))`. `agentsWithin` only ever
+excludes the agent it's CENTERED on — here, `herdmate`, not the guardian
+itself. Every OTHER candidate-gathering call site in this file centers the
+scan on the acting agent, which makes self-exclusion automatic; this was
+the one place that assumption silently broke, because the scan is
+deliberately centered on the protectee, not the protector, for a good
+reason (to find threats where the herd-mate actually is, not where the
+guardian happens to be standing).
+
+Weepinbell is `isPredator: true` (`species.ts`). A Weepinbell that's
+currently NOT prey of anything (satisfies the guardian gate) and shares a
+herd with a weaker, different-species herd-mate that's in danger is,
+trivially, well within its own `FLEE_DETECT_RADIUS` of that herd-mate — it
+IS the one approaching. `isGenuineThreat` has no "is this candidate the
+asker itself" guard, so a guardian whose own species/power reads as a
+genuine threat to the herd-mate it's protecting could get selected as
+THE threat, and `resolveHit(world, agent, agent, ...)` starts a fight
+against itself — one that nothing ever clears, so it recurs tick after
+tick until the agent kills itself.
+
+**Fix.** One added filter clause: `other.id !== agent.id`. Confirmed via
+`git stash` that the new regression test genuinely fails without the fix
+(`protector.fightTarget` literally equals `protector.id`) and passes with
+it — not a vacuous test. Real before/after on the same 8 seeds, same
+tool: **24 self-fought events -> 0**. Full engine suite green (1311
+tests, 1 new).

@@ -1680,8 +1680,25 @@ export function applyPredationInstincts(
     if (herdmate) {
       // Deliberately includes a fainted predator: a guardian keeps pressing the
       // fight to finish it off, same reasoning as the general threats filter below.
-      const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter((other) =>
-        isGenuineThreat(rules, herdmate, other)
+      //
+      // `other.id !== agent.id` — real bug fix, confirmed live (a Weepinbell
+      // repeatedly fighting and killing itself with its own Acid, same
+      // agent id on both sides of the "fought" event): this scan is
+      // centered on `herdmate`, not `agent`, so `agentsWithin` only ever
+      // excludes `herdmate` itself — every OTHER candidate-gathering call
+      // in this file centers on `agent`, which makes self-exclusion
+      // automatic there, and is exactly why this was the one spot it
+      // silently broke. A same-herd, `isPredator` guardian (e.g. Weepinbell)
+      // protecting a weaker, different-species herd-mate is well within
+      // `FLEE_DETECT_RADIUS` of the very agent it's about to defend — it
+      // IS that agent, mid-approach — and `isGenuineThreat` has no
+      // "candidate === the asker" guard of its own, so a guardian strong
+      // enough to qualify as a genuine threat to its own protectee (by
+      // species + power) could get selected as the threat and immediately
+      // resolveHit against itself, over and over, tick after tick, since
+      // nothing ever clears a `fightTarget` pointed at its own owner.
+      const herdmateThreats = agentsWithin(world, herdmate, FLEE_DETECT_RADIUS).filter(
+        (other) => other.id !== agent.id && isGenuineThreat(rules, herdmate, other)
       );
       const threat = preferMarked(herdmate, herdmateThreats);
       if (threat) {

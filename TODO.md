@@ -7837,3 +7837,24 @@ not simply re-buy the branch it came from.
   agent largely settles on its first four moves and rarely changes shape
   after early life. Whether a movepool should be that static is a design
   call.
+
+## Fixed: a Pokémon fighting and killing itself — see DESIGN.md
+
+- [x] Direct report with screenshot: a Weepinbell shown fighting/killing
+      itself — same agent id as both attacker and defender, only one
+      Battle Screen chip ever rendered. Confirmed real via a new
+      `packages/runner/src/validateSelfAttack.ts` (24 self-fought events,
+      8 seeds x 10,000 ticks, all the literal same agent id repeatedly).
+      Root cause: the guardian branch's threat scan in
+      `applyPredationInstincts` (predation.ts) is centered on the
+      herd-mate being protected, not the guardian — `agentsWithin` only
+      ever excludes whatever it's centered on, so the guardian itself was
+      never excluded from its own scan. Weepinbell is `isPredator: true`;
+      a Weepinbell guardian defending a weaker, different-species
+      herd-mate could pass its own `isGenuineThreat` check against that
+      herd-mate and get picked as THE threat — fighting itself, tick
+      after tick, since nothing ever clears a `fightTarget` pointed at
+      its own owner. Fix: one added `other.id !== agent.id` filter
+      clause. Confirmed via `git stash` that the new regression test
+      genuinely fails without the fix. Real before/after, same 8 seeds:
+      24 self-fought events -> 0. Full engine suite (1311, 1 new) green.
