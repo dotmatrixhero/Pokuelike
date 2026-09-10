@@ -6344,6 +6344,603 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 6,
     range: { min: 0, max: 2 },
     hitsArea: true,
+    // Template v4 (two-lane standard, 45 nodes: 12 per branch + three
+    // three-node bridges). THE FANTASY, written before a single node:
+    //
+    // Surf is not a jet and not a blast — it is the water itself getting up
+    // and moving. Water Gun is a hairline stream fired through a pinched
+    // mouth; Hydro Pump is a four-tile cone of pressure aimed at one thing.
+    // Surf is neither aimed nor narrow: a ring of moving water that leaves
+    // the surfer in every direction at once, sixteen tiles of it, and it
+    // does not check who is standing on them. Its five learners
+    // (Wartortle, Blastoise, Golduck, Lapras, Seaking) are big bodies that
+    // drag a swell along behind them.
+    //
+    // So where Hydro Pump is the LONG move, Surf is the WIDE one, and this
+    // tree spends its three branches on the three things "wide" actually
+    // means in this engine: MASS (a whole body of water arriving at once),
+    // GROUND (the wave leaves standing water behind and then fights on the
+    // ground it made), and EVERYONE (a ring centred on you hits your own
+    // herd first, because herd-mates are who stand nearest).
+    //
+    // AGGRESSION — "The Break". The wave used as mass. Lane A is WEIGHT
+    // (the surfer's own bulk driving it, `weightScaling`); lane B is
+    // FOOTING (nothing stays on the tile it chose, `forcedMovement`).
+    // Different in kind: one is how hard the water lands, the other is
+    // where the bodies end up. Converges on the wave that does both, and
+    // the capstone finally fills in the calm at the middle of the ring.
+    // BOLDNESS — "Deep Water". The surfer makes its own ground and then
+    // stands in it. Lane C is the GROUND (a real `terrainFill` puddle, then
+    // spending the pool underfoot for damage); lane D is REACH (the swell
+    // arriving from further out, paid for in the surfer's own energy).
+    // SOCIABILITY — "The Pod's Wave". The move's own flaw is the branch:
+    // this thing washes over the herd too. Lane E is the WAVE ITSELF —
+    // whether it spares the herd or gets wider and wets everyone — and
+    // lane F is WATER AS A RESOURCE, the pod that stops fighting over the
+    // pond because a Lapras just refilled it.
+    //
+    // Every delta below was checked at its real call site, not in the
+    // design doc (principle 3). What that ruled OUT, and why:
+    //   - `spawnsRain`, `selfHeal`, `fertilityBoost`, `statusImmunityAura`:
+    //     all four are read ONLY by `maybeUseUtilityMove`
+    //     (utilityMoves.ts), whose candidate list is
+    //     `moves.filter(m => m.utilityMove)`. Surf is not a utility move,
+    //     so "the pod calls the rain down" would have been a capstone that
+    //     provably never fires. Unreachable content is a bug.
+    //   - `terrainFill` (Wading In): fires in `resolveHitAgainstTarget`
+    //     (predation.ts) on the PRIMARY target's tile only, and only on
+    //     `TERRAIN_FILLABLE` = floor/sand/mud. It also calls `waterSoil`,
+    //     so every puddle is a real fertility boost as well — the wave
+    //     rebuilds the ground it fights on.
+    //   - `consumesOwnTerrain` (Cut the Channel, Own the Shallows): reads
+    //     the ATTACKER's own tile and `setTile(..., "floor")`s it on use.
+    //     On water that is the exact inverse of the opener: one node makes
+    //     puddles, the other spends them. That loop is the branch.
+    //   - `p:aquaticHaste` was deliberately NOT taken: Hydro Pump's own
+    //     Sociability capstone already owns it, and a capstone that can be
+    //     described as "like that other move's" is the signal to keep
+    //     looking.
+    //   - The additive forms are used throughout (`areaBonus`,
+    //     `rangeBonus`, `hitsBonus`, `rallyCallTicks`, `allyEffects`,
+    //     `situationalBonuses`, `statChangesOnHit`), so two co-takeable
+    //     nodes never race each other. A roster census says four of those
+    //     had ZERO uses anywhere before this tree.
+    //
+    // MEASURED, not assumed: `resolveAreaHit` (predation.ts) resolves the
+    // shape around the ATTACKER's position, not the target's, and a `ring`
+    // is hollow (Chebyshev distance exactly N). Base Surf therefore covers
+    // 16 tiles at distance 2 and hits NOTHING at distance 1 — the
+    // Aggression capstone's `burst` is the only thing in this tree that
+    // fills that hole in, which is why it is the capstone.
+    tree: {
+      // ================= AGGRESSION: the break =================
+      full_weight: {
+        id: "full_weight",
+        name: "Full Weight",
+        cost: 1,
+        leaning: "aggression",
+        // A Lapras is the heaviest thing on this move's learner list and
+        // the wave is however much of it goes into the water.
+        // `weightScaling` adds a fraction of the user's own maxHp as power
+        // (predation.ts's `effectiveMove`).
+        delta: { weightScaling: { factor: 0.12 } },
+      },
+      // --- Lane A: weight. How hard the water lands.
+      braced_swell: {
+        id: "braced_swell",
+        name: "Braced Swell",
+        cost: 1,
+        prerequisites: ["full_weight"],
+        excludes: ["full_draw"],
+        leaning: "aggression",
+        // FORK, and a systemic one rather than a stat one: a positive
+        // Defense stage adds `BRACED_WEIGHT_PER_STAGE` to the weight term
+        // (predation.ts), so setting your feet on the way in genuinely
+        // makes the wave heavier. Nothing here knows what Braced Swell is
+        // — it just raises Defense, and the weight system does the rest.
+        delta: { statChangesOnHit: [{ target: "self", stat: "defense", stage: 1, ticks: 80 }] },
+      },
+      full_draw: {
+        id: "full_draw",
+        name: "Full Draw",
+        cost: 1,
+        prerequisites: ["full_weight"],
+        excludes: ["braced_swell"],
+        leaning: "aggression",
+        // The other half of the fork: don't brace, just pull more water up
+        // before you let it go. The cost is in the same node (principle 4)
+        // — `lockTicks` commits the USER for an extra action tick after
+        // use (combat.ts's `useMove` -> `Agent.actionLockTicks`), it does
+        // nothing to the target.
+        delta: { power: 18, lockTicks: 1 },
+      },
+      broken_water: {
+        id: "broken_water",
+        name: "Broken Water",
+        cost: 1,
+        prerequisitesAnyOf: [["braced_swell"], ["full_draw"], ["sodden"]],
+        leaning: "aggression",
+        // LANE A NOTABLE. The whole body behind it — the weight term more
+        // than doubles, on the opener's own chain rather than as a second
+        // setter racing it. Also where the Aggression<->Boldness bridge
+        // lands, one step short of the fork, never on it (principle 12).
+        delta: { weightScaling: { factor: 0.25 }, defensePenetration: 0.15 },
+      },
+      sounding_blow: {
+        id: "sounding_blow",
+        name: "Sounding Blow",
+        cost: 1,
+        prerequisites: ["broken_water"],
+        leaning: "aggression",
+        delta: { defensePenetration: 0.2 },
+      },
+      // --- Lane B: footing. Where the bodies end up.
+      sweep_the_footing: {
+        id: "sweep_the_footing",
+        name: "Sweep the Footing",
+        cost: 1,
+        prerequisites: ["full_weight"],
+        leaning: "aggression",
+        // A wave does not pull you in, it takes you with it — the target
+        // is driven a tile further out from the surfer.
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
+      },
+      churn: {
+        id: "churn",
+        name: "Churn",
+        cost: 1,
+        prerequisites: ["sweep_the_footing"],
+        leaning: "aggression",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "speed", stage: -1, ticks: 60 }] },
+      },
+      taken_off_its_feet: {
+        id: "taken_off_its_feet",
+        name: "Taken Off Its Feet",
+        cost: 1,
+        prerequisitesAnyOf: [["churn"], ["caught_between"]],
+        leaning: "aggression",
+        // LANE B NOTABLE. Two tiles of displacement, escalating the
+        // opener's own lever on its own chain. Deliberately NOT more
+        // weight — that is lane A's answer to the same branch.
+        delta: {
+          forcedMovement: { mover: "defender", direction: "away", tiles: 2, timing: "onHit" },
+          critRateStage: 1,
+        },
+      },
+      dragged_out: {
+        id: "dragged_out",
+        name: "+10 Power",
+        cost: 1,
+        prerequisites: ["taken_off_its_feet"],
+        leaning: "aggression",
+        delta: { power: 10 },
+      },
+      // --- Convergence, filler, capstone.
+      the_break: {
+        id: "the_break",
+        name: "The Break",
+        cost: 1,
+        prerequisitesAnyOf: [["sounding_blow"], ["dragged_out"]],
+        leaning: "aggression",
+        // DEEP NOTABLE. Both lanes end here: the full weight of it, and
+        // three tiles of open ground between the target and where it was
+        // standing.
+        delta: {
+          forcedMovement: { mover: "defender", direction: "away", tiles: 3, timing: "onHit" },
+          power: 12,
+        },
+      },
+      shelf_break: {
+        id: "shelf_break",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["the_break"],
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      everything_goes_under: {
+        id: "everything_goes_under",
+        name: "Everything Goes Under",
+        cost: 1,
+        prerequisites: ["shelf_break"],
+        leaning: "aggression",
+        // CAPSTONE, and the one node in the tree that changes the move's
+        // FORM. Base Surf is a hollow `ring` of radius 2 — sixteen tiles at
+        // Chebyshev distance exactly 2, and nothing at all inside that, so
+        // anything standing next to the surfer is untouched. A `burst` is
+        // the filled Manhattan diamond: thirteen tiles, the four adjacent
+        // ones included. The calm at the middle of the wave closes up.
+        // Only shape setter in the tree, so nothing races it, and area SIZE
+        // stays additive via Sociability's `areaBonus`.
+        delta: { shape: { kind: "burst", radius: 2 }, power: 8 },
+      },
+
+      // ================= BOLDNESS: deep water =================
+      wading_in: {
+        id: "wading_in",
+        name: "Wading In",
+        cost: 1,
+        leaning: "boldness",
+        // Every landed, non-killing hit converts the ground under the
+        // primary target into standing water (predation.ts, floor/sand/mud
+        // only) and calls `waterSoil` on it. A surfer that keeps using
+        // this is building itself a pond, one tile at a time.
+        delta: { terrainFill: { terrain: "water" } },
+      },
+      // --- Lane C: the ground. Water you made, and what you do with it.
+      standing_water: {
+        id: "standing_water",
+        name: "Standing Water",
+        cost: 1,
+        prerequisites: ["wading_in"],
+        excludes: ["cut_the_channel"],
+        leaning: "boldness",
+        // FORK, half one: hoard it. A drought cell dries ponds up
+        // (weather.ts), which is exactly when being the only moving water
+        // on the map is worth something.
+        delta: { situationalBonuses: [{ condition: "drought", multiplier: 1.5 }] },
+      },
+      cut_the_channel: {
+        id: "cut_the_channel",
+        name: "Cut the Channel",
+        cost: 1,
+        prerequisites: ["wading_in"],
+        excludes: ["standing_water"],
+        leaning: "boldness",
+        // FORK, half two, and the opposite instinct: spend it. On use,
+        // `consumesOwnTerrain` reads the surfer's OWN tile and, if it is
+        // water, turns it back into floor for a damage multiplier
+        // (predation.ts). The opener makes puddles; this drains them.
+        delta: { consumesOwnTerrain: { terrain: "water", damageMultiplier: 1.4 } },
+      },
+      own_the_shallows: {
+        id: "own_the_shallows",
+        name: "Own the Shallows",
+        cost: 1,
+        prerequisitesAnyOf: [["standing_water"], ["cut_the_channel"], ["the_herd_drinks"]],
+        leaning: "boldness",
+        // LANE C NOTABLE. Whichever half of the fork got here, this is
+        // where the ground stops being scenery: a whole pool goes into one
+        // hit. Escalates Cut the Channel on its own chain rather than
+        // racing it.
+        delta: { consumesOwnTerrain: { terrain: "water", damageMultiplier: 1.7 }, power: 6 },
+      },
+      silt_and_slop: {
+        id: "silt_and_slop",
+        name: "Silt and Slop",
+        cost: 1,
+        prerequisites: ["own_the_shallows"],
+        leaning: "boldness",
+        delta: { statChangesOnHit: [{ target: "defender", stat: "accuracy", stage: -1, ticks: 60 }] },
+      },
+      // --- Lane D: reach. The swell that arrives from further out.
+      long_swell: {
+        id: "long_swell",
+        name: "+1 Range",
+        cost: 1,
+        prerequisites: ["wading_in"],
+        leaning: "boldness",
+        delta: { rangeBonus: 1 },
+      },
+      rolling_set: {
+        id: "rolling_set",
+        name: "+10 Accuracy",
+        cost: 1,
+        prerequisites: ["long_swell"],
+        leaning: "boldness",
+        delta: { accuracy: 10 },
+      },
+      out_of_your_depth: {
+        id: "out_of_your_depth",
+        name: "Out of Your Depth",
+        cost: 1,
+        prerequisitesAnyOf: [["rolling_set"], ["sodden"]],
+        leaning: "boldness",
+        // LANE D NOTABLE. Four tiles of reach, and a real price for it in
+        // the same node (principle 4): pulling that much water from that
+        // far out costs the surfer 2% of its own energy every use
+        // (`selfCostPerUse`, read in `resolveHit`). Lane C buys the
+        // ground; this lane buys distance from it.
+        delta: { rangeBonus: 1, power: 12, selfCostPerUse: { need: "energy", amount: 0.02 } },
+      },
+      shelf_water: {
+        id: "shelf_water",
+        name: "+1 Crit Rate Stage",
+        cost: 1,
+        prerequisites: ["out_of_your_depth"],
+        leaning: "boldness",
+        delta: { critRateStage: 1 },
+      },
+      // --- Convergence, filler, capstone.
+      never_dragged_off: {
+        id: "never_dragged_off",
+        name: "Never Dragged Off",
+        cost: 1,
+        prerequisitesAnyOf: [["silt_and_slop"], ["shelf_water"]],
+        leaning: "boldness",
+        // DEEP NOTABLE. Both lanes are about choosing where the fight
+        // happens — the ground you flooded, or the distance you kept — so
+        // the convergence is nobody else getting to choose it for you.
+        // `immovable` refuses every drag, knockback and lunge in the game,
+        // including the one Aggression's own lane B hands out.
+        grantsPassive: { kind: "immovable", value: 1 },
+        delta: {},
+      },
+      set_your_feet: {
+        id: "set_your_feet",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["never_dragged_off"],
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      the_wave_comes_back: {
+        id: "the_wave_comes_back",
+        name: "The Wave Comes Back",
+        cost: 1,
+        prerequisites: ["set_your_feet"],
+        leaning: "boldness",
+        // CAPSTONE. Water that goes out comes back, and everything caught
+        // in it takes the wash twice — `hitsBonus` is the additive
+        // multi-hit form, and this is the roster's first use of it. The
+        // price is in the same node: two ticks longer before the surfer
+        // can do it again, because the water has to return first.
+        delta: { hitsBonus: 1, cooldownTicks: 2 },
+      },
+
+      // ================= SOCIABILITY: the pod's wave =================
+      one_water: {
+        id: "one_water",
+        name: "One Water",
+        cost: 1,
+        leaning: "sociability",
+        // The same wave, aimed at a herd-mate instead of an enemy —
+        // `targetsAlly` gives it a real support use on an idle tick
+        // (support.ts's `applySupportMove`) without taking away its use as
+        // an attack.
+        delta: { targetsAlly: true, allyEffects: [{ healFraction: 0.1 }] },
+      },
+      // --- Lane E: the wave itself. Who it is allowed to touch.
+      wave_knows_its_own: {
+        id: "wave_knows_its_own",
+        name: "The Wave Knows Its Own",
+        cost: 1,
+        prerequisites: ["one_water"],
+        excludes: ["everyone_gets_wet"],
+        leaning: "sociability",
+        // FORK, half one, and the honest answer to this move's own flaw: a
+        // ring centred on the surfer catches the herd first, because
+        // herd-mates are who stand nearest. `excludesAllies` drops every
+        // same-herd agent out of `resolveAreaHit`'s target list.
+        delta: { excludesAllies: true },
+      },
+      everyone_gets_wet: {
+        id: "everyone_gets_wet",
+        name: "Everyone Gets Wet",
+        cost: 1,
+        prerequisites: ["one_water"],
+        excludes: ["wave_knows_its_own"],
+        leaning: "sociability",
+        // FORK, half two: don't fix it, widen it. Ring radius 3 is 24
+        // tiles instead of 16, and every herd-mate standing in them takes
+        // it too. A permanent, legible choice about the same footprint —
+        // spare your own, or cover more ground and live with it.
+        delta: { areaBonus: 1, power: 6 },
+      },
+      carried_along: {
+        id: "carried_along",
+        name: "Carried Along",
+        cost: 1,
+        prerequisitesAnyOf: [["wave_knows_its_own"], ["everyone_gets_wet"], ["caught_between"]],
+        leaning: "sociability",
+        // LANE E NOTABLE. `allyEffectOnAttack` fires the ally payload
+        // every time the move is used on an ENEMY, for free (predation.ts
+        // -> support.ts's `nearestAllyEffectTarget`). One wave, both jobs:
+        // it breaks over the enemy and picks the nearest hurt herd-mate up
+        // on the way past. That is the whole reason this branch exists on
+        // a move this wide.
+        delta: {
+          allyEffectOnAttack: true,
+          allyEffects: [{ healFraction: 0.15, buff: { stat: "speed", stage: 1, ticks: 60 } }],
+        },
+      },
+      second_swell: {
+        id: "second_swell",
+        name: "Second Swell",
+        cost: 1,
+        prerequisites: ["carried_along"],
+        leaning: "sociability",
+        delta: { allyEffects: [{ buff: { stat: "defense", stage: 1, ticks: 60 } }] },
+      },
+      // --- Lane F: water as a resource, not as a weapon.
+      shared_water: {
+        id: "shared_water",
+        name: "Shared Water",
+        cost: 1,
+        prerequisites: ["one_water"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.005 },
+        delta: {},
+      },
+      no_need_to_fight: {
+        id: "no_need_to_fight",
+        name: "No Need to Fight",
+        cost: 1,
+        prerequisites: ["shared_water"],
+        leaning: "sociability",
+        // It stops starting fights over contested resource tiles itself —
+        // the first half of a lane that is about there being enough water.
+        grantsPassive: { kind: "nonTerritorial", value: 1 },
+        delta: {},
+      },
+      enough_to_go_around: {
+        id: "enough_to_go_around",
+        name: "Enough to Go Around",
+        cost: 1,
+        prerequisitesAnyOf: [["no_need_to_fight"], ["the_herd_drinks"]],
+        leaning: "sociability",
+        // LANE F NOTABLE, and the payoff this lane was built for:
+        // `calmingPresence` makes EVERY nearby agent, herd or not, 25% less
+        // likely to start a resource fight (herdConflict.ts). A Lapras
+        // shows up at the pond and the squabbling stops. Lane E makes the
+        // wave decide who it hits; this lane makes the fight not happen.
+        grantsPassive: { kind: "calmingPresence", value: 0.25 },
+        delta: {},
+      },
+      still_water: {
+        id: "still_water",
+        name: "Still Water",
+        cost: 1,
+        prerequisites: ["enough_to_go_around"],
+        leaning: "sociability",
+        grantsPassive: { kind: "healAura", value: 0.004 },
+        delta: {},
+      },
+      // --- Convergence, filler, capstone.
+      the_pods_wave: {
+        id: "the_pods_wave",
+        name: "The Pod's Wave",
+        cost: 1,
+        prerequisitesAnyOf: [["second_swell"], ["still_water"]],
+        leaning: "sociability",
+        // DEEP NOTABLE. Both lanes converge on one wave that is bigger
+        // because more than one of them is pushing it. `areaBonus` is
+        // additive and `shape` is the only overwrite, so this widens
+        // whatever footprint the build already has instead of racing it —
+        // measured, not guessed: ring r2 (16 tiles) -> r3 (24) alone,
+        // -> r4 (32) stacked with Everyone Gets Wet, and on a build that
+        // also took Aggression's capstone, burst r2 (13) -> r3 (25) ->
+        // r4 (41). Forty-one tiles is the widest thing in the roster and
+        // it costs the better part of two whole branches to get there.
+        delta: { areaBonus: 1 },
+      },
+      long_line: {
+        id: "long_line",
+        name: "-1 Cooldown",
+        cost: 1,
+        prerequisites: ["the_pods_wave"],
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      the_pod_picks_it_out: {
+        id: "the_pod_picks_it_out",
+        name: "The Pod Picks It Out",
+        cost: 1,
+        prerequisites: ["long_line"],
+        leaning: "sociability",
+        // CAPSTONE. The wave hits everything; the pod only wants one of
+        // them. A landed hit marks the primary target for 150 ticks and
+        // `preferMarked` (predation.ts) makes every nearby ally's own,
+        // independently-run target pick land on that one — coordination as
+        // the reward, not a bigger number. The attack buff rides along on
+        // the same wave.
+        delta: {
+          rallyCallTicks: 150,
+          allyEffects: [{ buff: { stat: "attack", stage: 1, ticks: 90 } }],
+        },
+      },
+
+      // ================= Bridges =================
+      waterlogged: {
+        id: "waterlogged",
+        name: "Waterlogged",
+        cost: 1,
+        prerequisites: ["full_weight", "wading_in"],
+        leaning: "aggression",
+        // CROSSLINK Aggression<->Boldness. Weight plus wet ground: whatever
+        // it was about to do, it is doing it later. `jamCooldownTicks` adds
+        // to every cooldown the target already has running.
+        delta: { jamCooldownTicks: 4 },
+      },
+      heavy_water: {
+        id: "heavy_water",
+        name: "Heavy Water",
+        cost: 1,
+        prerequisites: ["waterlogged"],
+        leaning: "aggression",
+        delta: { jamCooldownTicks: 6 },
+      },
+      sodden: {
+        id: "sodden",
+        name: "Sodden",
+        cost: 1,
+        prerequisites: ["heavy_water"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE, deepening its own crosslink's lever rather than
+        // grabbing a new one (principle 13): ten ticks onto everything the
+        // target had winding up, and it is carrying the water now — a real
+        // Defense drop while it drips. Lands on Broken Water (Aggression's
+        // weight lane) and Out of Your Depth (Boldness's reach lane).
+        delta: {
+          jamCooldownTicks: 10,
+          statChangesOnHit: [{ target: "defender", stat: "defense", stage: -1, ticks: 80 }],
+        },
+      },
+
+      wash_them_clean: {
+        id: "wash_them_clean",
+        name: "Wash Them Clean",
+        cost: 1,
+        prerequisites: ["wading_in", "one_water"],
+        leaning: "sociability",
+        // CROSSLINK Boldness<->Sociability. The water it leaves lying
+        // around is the water the herd drinks.
+        delta: { allyEffects: [{ healFraction: 0.08 }] },
+      },
+      deeper_draught: {
+        id: "deeper_draught",
+        name: "Deeper Draught",
+        cost: 1,
+        prerequisites: ["wash_them_clean"],
+        leaning: "sociability",
+        delta: { allyEffects: [{ healFraction: 0.12 }] },
+      },
+      the_herd_drinks: {
+        id: "the_herd_drinks",
+        name: "The Herd Drinks",
+        cost: 1,
+        prerequisites: ["deeper_draught"],
+        leaning: "boldness",
+        // BRIDGE NOTABLE. Same lever, deeper: the herd-mate it reaches
+        // comes back up braced as well as watered. Lands on Own the
+        // Shallows (Boldness's ground lane) and Enough to Go Around
+        // (Sociability's resource lane).
+        delta: { allyEffects: [{ healFraction: 0.18, buff: { stat: "defense", stage: 1, ticks: 60 } }] },
+      },
+
+      broadside: {
+        id: "broadside",
+        name: "Broadside",
+        cost: 1,
+        prerequisites: ["one_water", "full_weight"],
+        leaning: "sociability",
+        // CROSSLINK Sociability<->Aggression. The pod holds its attention
+        // and the wave arrives from the side it is not watching —
+        // `flanking` is true whenever the target is not currently fighting
+        // or hunting the attacker (predation.ts).
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.25 }] },
+      },
+      off_their_guard: {
+        id: "off_their_guard",
+        name: "Off Their Guard",
+        cost: 1,
+        prerequisites: ["broadside"],
+        leaning: "sociability",
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.45 }] },
+      },
+      caught_between: {
+        id: "caught_between",
+        name: "Caught Between",
+        cost: 1,
+        prerequisites: ["off_their_guard"],
+        leaning: "aggression",
+        // BRIDGE NOTABLE. Its own crosslink's lever taken as far as it
+        // goes — something else has the target's attention and the wave
+        // gets to pick its spot. Lands on Taken Off Its Feet (Aggression's
+        // footing lane) and Carried Along (Sociability's wave lane).
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.7 }], critRateStage: 1 },
+      },
+    },
   },
   solar_beam: {
     id: "solar_beam",
