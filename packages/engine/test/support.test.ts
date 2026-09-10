@@ -183,7 +183,7 @@ describe("looting", () => {
   it("won't loot past its own carry capacity", () => {
     const world = createWorld(5, 5);
     const looter = makeAgent({ id: "looter", pos: { x: 1, y: 1 }, maxHp: 1 }); // tiny capacity
-    const capacity = carryCapacityOf(looter);
+    const capacity = carryCapacityOf(world, looter);
     const heavyTarget = makeAgent({
       id: "heavy",
       pos: { x: 1, y: 2 },
@@ -781,5 +781,30 @@ describe("scavenging", () => {
       return { hunger: hungry.needs.hunger, behavior: hungry.behavior };
     }
     expect(run()).toEqual(run());
+  });
+});
+
+describe('Direct ask: "i also want to craft a backpack... that increases your capacity"', () => {
+  it("a carried item's own ItemDef.capacity adds to carryCapacityOf — previously declared but never actually read", () => {
+    const world = createWorld(5, 5);
+    world.items = { pouch: { key: "pouch", name: "Pouch", weight: 1, capacity: 8 } };
+    const bare = makeAgent({ maxHp: 20 });
+    const withPouch = makeAgent({ id: "a2", maxHp: 20, inventory: [{ itemKey: "pouch", weight: 1, count: 1 }] });
+    expect(carryCapacityOf(world, withPouch)).toBe(carryCapacityOf(world, bare) + 8);
+  });
+
+  it("capacity applies just by being carried — no slot/equip requirement", () => {
+    const world = createWorld(5, 5);
+    world.items = { pouch: { key: "pouch", name: "Pouch", weight: 1, capacity: 8, slot: "worn" } };
+    const unwornPouch = makeAgent({ maxHp: 20, inventory: [{ itemKey: "pouch", weight: 1, count: 1 }] });
+    // Deliberately no `equipment.worn` set — still carried, not worn.
+    const bare = makeAgent({ id: "a2", maxHp: 20 });
+    expect(carryCapacityOf(world, unwornPouch)).toBe(carryCapacityOf(world, bare) + 8);
+  });
+
+  it("a plain material with no ItemDef (or no world.items at all) contributes nothing — not a crash", () => {
+    const world = createWorld(5, 5);
+    const agent = makeAgent({ maxHp: 20, inventory: [{ itemKey: "lichen", weight: 1, count: 3 }] });
+    expect(carryCapacityOf(world, agent)).toBe(carryCapacityOf(world, makeAgent({ id: "a2", maxHp: 20 })));
   });
 });

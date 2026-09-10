@@ -61,6 +61,11 @@ export function foodNutritionMultiplierOf(material: MaterialId): number {
   return material in FOOD_CROPS ? FOOD_CROPS[material as CropId].nutritionMultiplier : 1;
 }
 
+/** The carried-item counterpart to `flora.ts`'s `thirstReliefFactor` — see that function's own doc comment. */
+export function thirstReliefOf(material: MaterialId): number {
+  return material in FOOD_CROPS ? (FOOD_CROPS[material as CropId].thirstRelief ?? 0) : 0;
+}
+
 /** Takes before a tile is bare. Sim-original; CRAFTABLES_V1.md's open question 4 is spoilage, not this. */
 export const HARVEST_YIELD_PER_TILE = 3;
 /** Every this many ticks, every gathered tile recovers one take. ~75 player keys. */

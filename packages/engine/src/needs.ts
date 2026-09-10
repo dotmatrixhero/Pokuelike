@@ -23,7 +23,7 @@ import {
   strengthenRapportMutual,
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
 import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
@@ -1966,6 +1966,12 @@ export function tickAgentAction(
 
         consume(agent.needs, agent.behavior, agent.behavior === "seekFood" ? foodNutritionFactor(targetTile) : 1);
         if (agent.behavior === "seekFood") {
+          // Direct ask: "can you make berries and tomatoes and apples help
+          // thirst too" — any eater, not just the player (the player is
+          // just another agent to the sim). 0 for anything that doesn't
+          // set FoodCropDef.thirstRelief.
+          const thirstRelief = thirstReliefFactor(targetTile);
+          if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
           if (targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"

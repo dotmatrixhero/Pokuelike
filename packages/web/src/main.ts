@@ -514,7 +514,7 @@ function renderPack(player: Agent): void {
     const slot = held ? ` (held${fuel})` : player.equipment?.worn === i.itemKey ? " (worn)" : "";
     return `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}${slot}`;
   });
-  hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
+  hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(world, player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
   if (player.lastNotice) {
     if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
     player.lastNotice = undefined;
@@ -663,7 +663,7 @@ function openPackMenu(): void {
     }
     return el;
   };
-  packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(me)}`));
+  packMenuBodyEl.appendChild(h(`Carrying · ${carriedWeight(me)}/${carryCapacityOf(world, me)}`));
   if (!me.inventory?.length) packMenuBodyEl.appendChild(rowEl("Nothing yet. Stand on lichen or deadwood and gather."));
   // Direct report: "can't drop items." Every row gets a real Drop action
   // now, alongside whatever else it does — the same actions-row pattern

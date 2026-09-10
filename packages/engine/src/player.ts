@@ -2,10 +2,10 @@ import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
 import { tileAt } from "./world.js";
-import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, thirstReliefFactor } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
-import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, type MaterialId } from "./harvest.js";
+import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, thirstReliefOf, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
 import { carryCapacityOf } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
@@ -106,6 +106,11 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
       if (tile?.terrain === "food" && (tile.stock ?? 0) > 0) {
         consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+        // Direct ask: "can you make berries and tomatoes and apples help
+        // thirst too" — a juicy crop's own thirstReliefFactor, on top of
+        // the ordinary hunger relief above. 0 for anything that doesn't set it.
+        const thirstRelief = thirstReliefFactor(tile);
+        if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
         tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
         recordGrazing(tile);
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
@@ -124,6 +129,8 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       if (!carried) return false;
       removeItem(agent, carried, 1);
       consume(agent.needs, "seekFood", foodNutritionMultiplierOf(carried));
+      const carriedThirstRelief = thirstReliefOf(carried);
+      if (carriedThirstRelief > 0) consume(agent.needs, "seekWater", carriedThirstRelief);
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
       return true;
@@ -137,7 +144,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     }
     case "gather": {
       if (harvestLeft(world, agent.layer, agent.pos) <= 0 || harvestableAt(world, agent.layer, agent.pos).length === 0) return false;
-      if (carriedWeight(agent) >= carryCapacityOf(agent)) return false;
+      if (carriedWeight(agent) >= carryCapacityOf(world, agent)) return false;
       agent.activity = { kind: "gather", turnsLeft: GATHER_TURNS, turnsTotal: GATHER_TURNS };
       return true;
     }
@@ -317,7 +324,7 @@ function freeTileBeside(world: World, agent: Agent): { x: number; y: number } | 
 }
 
 function finishGather(world: World, agent: Agent, out: PlayerActionOutcome): boolean {
-  const capacity = carryCapacityOf(agent);
+  const capacity = carryCapacityOf(world, agent);
   const taken = takeHarvest(world, agent.layer, agent.pos);
   const gathered: { itemKey: string; count: number }[] = [];
   for (const m of taken) {

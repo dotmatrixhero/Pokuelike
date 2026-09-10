@@ -196,3 +196,40 @@ describe('Direct report: "We need distinct crop... add to inventory as its own t
     expect(countOf(me, "lichen")).toBe(1);
   });
 });
+
+describe('Direct ask: "can you make berries and tomatoes and apples help thirst too"', () => {
+  it("eating a carried Apple restores both hunger and thirst", () => {
+    const world = openWorld();
+    const me = human(5, 5);
+    me.needs.hunger = 0.3;
+    me.needs.thirst = 0.3;
+    addItem(me, "apple", 1, 1);
+    world.agents.push(me);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(true);
+    expect(me.needs.hunger).toBeGreaterThan(0.3);
+    expect(me.needs.thirst).toBeGreaterThan(0.3);
+  });
+
+  it("eating a carried Potato restores hunger only — Potato sets no thirstRelief", () => {
+    const world = openWorld();
+    const me = human(5, 5);
+    me.needs.hunger = 0.3;
+    me.needs.thirst = 0.3;
+    addItem(me, "potato", 1, 1);
+    world.agents.push(me);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(true);
+    expect(me.needs.hunger).toBeGreaterThan(0.3);
+    expect(me.needs.thirst).toBe(0.3);
+  });
+
+  it("eating a Tomato tile underfoot also restores thirst (the tile-eat branch, not just the pack)", () => {
+    const world = openWorld();
+    const me = human(5, 5, { needs: createNeeds({ hunger: 0.3, thirst: 0.3 }) });
+    setTile(world, "surface", 5, 5, "food", 0, "tomato");
+    tileAt(world, "surface", 5, 5)!.stock = 1;
+    world.agents.push(me);
+    expect(applyPlayerAction(world, me, { kind: "eat" })).toBe(true);
+    expect(me.needs.hunger).toBeGreaterThan(0.3);
+    expect(me.needs.thirst).toBeGreaterThan(0.3);
+  });
+});

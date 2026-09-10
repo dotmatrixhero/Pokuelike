@@ -125,7 +125,12 @@ export const RECIPES: Record<string, RecipeDef> = {
   axe: recipe("axe", "Axe", [["boundHaft", 1], ["knappedFlint", 2]], 14, false),
   machete: recipe("machete", "Machete", [["boundHaft", 1], ["knappedFlint", 1], ["cordage", 1]], 11, false),
   poultice: recipe("poultice", "Poultice", [["herbs", 1], ["lichen", 1]], 5, true),
-  foragePouch: recipe("foragePouch", "Forage pouch", [["cordage", 1], ["fiber", 1]], 6, false),
+  // Direct ask: "i also want to craft a backpack eather early on if
+  // possible, if only a small one, that increases your capacity" — its
+  // inputs (cordage, fiber) are both already `knownAtStart`, so this was
+  // already reachable from nothing; the only thing keeping it out of reach
+  // "early on" was this flag.
+  foragePouch: recipe("foragePouch", "Forage pouch", [["cordage", 1], ["fiber", 1]], 6, true),
   camouflageCloak: recipe("camouflageCloak", "Camouflage cloak", [["fiber", 1], ["lichen", 1]], 8, false),
 };
 

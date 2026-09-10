@@ -8994,3 +8994,75 @@ level 8 (exp 693), with `maxHp` growing from 19 to 25 and every other stat
 scaling with it — the actual bundled game code, not a synthetic harness.
 4 new unit tests (`test/leveling.test.ts`, data package). Full suite:
 engine 1479/1479, data 392/392.
+
+## Juicy crops relieve thirst; an early craftable capacity backpack
+
+Two direct asks, same message as the cooking-system pitch below (see that
+section): *"can you make berries and tomatoes and apples help thirst too"*
+and *"i also want to craft a backpack eather early on if possible, if only
+a small one, that increases your capacity."*
+
+**Thirst-relieving crops**: new `FoodCropDef.thirstRelief` (crops.ts), set
+on all four berries (oran/pecha/sitrus/cheri, 0.35), tomato (0.5 — the
+juiciest crop in the registry), and apple (0.3). Same units as
+`nutritionMultiplier`: a multiplier against `CONSUME_RATE`'s flat
+`seekWater` restore amount, applied via a second, smaller `consume()` call
+alongside the ordinary hunger relief. New `flora.ts` `thirstReliefFactor`
+(tile-based) and `harvest.ts` `thirstReliefOf` (carried-item-based) mirror
+the existing `foodNutritionFactor`/`foodNutritionMultiplierOf` pair
+exactly. Wired into both of `player.ts`'s `eat` branches (tile-underfoot
+and pack) and `needs.ts`'s wild-agent `seekFood` consumption — any eater,
+not just the player, per "the player is just another agent to the sim."
+
+**Early backpack**: investigated first and found real dead data —
+`ItemDef.capacity` ("extra carry capacity while carried") already existed,
+already sat on `foragePouch`, and was never read anywhere; `carryCapacityOf`
+only ever computed `maxHp * CARRY_CAPACITY_PER_MAXHP`. Wired it in: sums
+every carried item's own `capacity`, honoring the doc comment's own "while
+carried" (not "while worn/held" — no slot requirement, matches the pouch
+having no `slot` at all). Required threading `world` into
+`carryCapacityOf`'s signature (it needs `world.items` to look up each
+itemKey's `ItemDef`) — a small ripple across `support.ts`'s own two
+internal callers, `player.ts`'s two call sites, and `main.ts`'s two HUD/
+pack-menu renders. Then flipped `foragePouch`'s `knownAtStart` from
+`false` to `true` — its recipe (cordage + fiber, both already
+`knownAtStart` on their own) was already reachable from nothing; the flag
+was the only thing keeping it out of an early run.
+
+Live-verified (Playwright, real dev server): eating a Tomato moved both
+hunger (0.3 → 0.78) and thirst (0.3 → 0.50) in one action; crafting a
+Forage pouch from cordage + fiber (both already in a fresh pack) through
+the real multi-turn craft-activity UI bumped displayed capacity from
+28.5 to 36.5 — the pouch's own +8 landing exactly. 7 new unit tests
+(`test/inventoryActions.test.ts`, `test/support.test.ts`, data's
+`test/crafting.test.ts`). Full suite: engine 1485/1485, data 393/393.
+
+## Cooking: pitched, not yet built — scoping questions before starting
+
+Direct ask, same message as the above two (already built): *"you know im
+gonna have to add cooking lol. building a fire you can deploy (ex. torch +
+2x wood or something) to cook, and while near you can craft with combos of
+crops and berries. cooked food gets you more rapport when offered. heals as
+well as satisfies hunger."*
+
+Investigated before writing anything: this is genuinely the largest of the
+three asks, and touches real, expensive-to-reverse architecture decisions,
+unlike the two above (which were "wire up dead/half-built plumbing").
+Confirmed via grep: no "cooked"/"cooking" concept exists anywhere yet.
+What's already there to build on: a real `"fire"` terrain kind and burn-tick
+system (`fire.ts`'s `igniteTile`/`FIRE_BURN_TICKS`/`tickFires`) — but every
+existing ignition path is combat-only (a move's `terrainBurn` effect); there
+is no player action that deliberately lights a fire. `RecipeDef.inputs`
+(crafting's own recipe shape) is a fixed, exact list of `{itemKey, count}`
+pairs — no "any item from a category" support exists, so "combos of crops
+and berries" as an open combiner would be new recipe-input machinery, not a
+data-only addition. `craft` has no "must be near X terrain" precondition
+anywhere. Cooked-food healing would be new too — `eat` only ever calls
+`consume`, never touches `hp`.
+
+Asked (not yet answered) rather than guessed on, since getting either wrong
+means redoing real engine plumbing: (1) fixed named cooked dishes (Roasted
+Apple, Berry Stew, ...) each with their own exact ingredients, or one
+flexible recipe that accepts any two food-type items? (2) does the deployed
+fire have real fuel/burn out (reusing `FIRE_BURN_TICKS`), or is it a
+permanent placed structure once lit?

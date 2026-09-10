@@ -125,10 +125,23 @@ export function bodyWeightOf(agent: Agent): number {
   return agent.maxHp ?? FALLBACK_MAX_HP;
 }
 
-/** How much an agent can carry — items plus, if it's currently carrying a fainted ally, that ally's body weight. */
-export function carryCapacityOf(agent: Agent): number {
-  if (agent.maxHp === undefined) return FALLBACK_CARRY_CAPACITY;
-  return agent.maxHp * CARRY_CAPACITY_PER_MAXHP;
+/**
+ * How much an agent can carry — items plus, if it's currently carrying a
+ * fainted ally, that ally's body weight.
+ *
+ * Direct ask: "i also want to craft a backpack eather early on... that
+ * increases your capacity" — `ItemDef.capacity` ("extra carry capacity
+ * while carried") already existed as a documented field on `foragePouch`
+ * but was never actually read anywhere; this is that wiring. Sums every
+ * carried item's own `capacity` bonus, same as the doc comment always
+ * said: "while carried," not "while worn/held" — a pouch adds capacity
+ * just by being in the pack, no equip step required (real bags don't stop
+ * holding more just because you're not gripping the strap).
+ */
+export function carryCapacityOf(world: World, agent: Agent): number {
+  const base = agent.maxHp === undefined ? FALLBACK_CARRY_CAPACITY : agent.maxHp * CARRY_CAPACITY_PER_MAXHP;
+  const bonus = (agent.inventory ?? []).reduce((sum, item) => sum + (world.items?.[item.itemKey]?.capacity ?? 0), 0);
+  return base + bonus;
 }
 
 function inventoryWeight(agent: Agent): number {
@@ -146,7 +159,7 @@ export function usedCarryWeight(world: World, agent: Agent): number {
 }
 
 function remainingCarryCapacity(world: World, agent: Agent): number {
-  return carryCapacityOf(agent) - usedCarryWeight(world, agent);
+  return carryCapacityOf(world, agent) - usedCarryWeight(world, agent);
 }
 
 // --- Injury -> effective Speed ---
@@ -401,7 +414,7 @@ export function maybeRecoverFromFaint(agent: Agent, world: World, log?: EventLog
  * caller can treat it as this tick's action.
  */
 export function applyLooting(world: World, agent: Agent, log?: EventLog): boolean {
-  const capacity = carryCapacityOf(agent);
+  const capacity = carryCapacityOf(world, agent);
   const used = usedCarryWeight(world, agent);
 
   const lootable = world.agents.filter(

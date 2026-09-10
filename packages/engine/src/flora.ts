@@ -386,6 +386,18 @@ export function foodNutritionFactor(tile: Tile | undefined): number {
   return qualityFactor * cropMultiplier;
 }
 
+/**
+ * Direct ask: "can you make berries and tomatoes and apples help thirst
+ * too" — a juicy crop's own `FoodCropDef.thirstRelief`, read off a tile the
+ * same way `foodNutritionFactor` reads `nutritionMultiplier`. 0 (no relief
+ * at all) for a tile with no flavor or a crop that doesn't set the field —
+ * today's baseline for everything but the handful of juicy crops that do.
+ */
+export function thirstReliefFactor(tile: Tile | undefined): number {
+  if (!tile?.flavor || !(tile.flavor in FOOD_CROPS)) return 0;
+  return FOOD_CROPS[tile.flavor as CropId].thirstRelief ?? 0;
+}
+
 /** Records a real grazing event at these tile coordinates — call from every place stock is actually consumed. */
 export function recordGrazing(tile: Tile | undefined): void {
   if (!tile) return;

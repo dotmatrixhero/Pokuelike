@@ -65,6 +65,11 @@ describe("crafting tables (ROADMAP M5)", () => {
     }
   });
 
+  it('direct ask: "i also want to craft a backpack eather early on if possible" — the forage pouch is known at start', () => {
+    expect(KNOWN_AT_START).toContain("foragePouch");
+    expect(ITEMS.foragePouch!.capacity).toBeGreaterThan(0);
+  });
+
   it("in the real cave, lichen and deadwood are gatherable within 60 walked steps of spawn on every seed", () => {
     for (const seed of [20260903, 11, 202, 3003, 40404]) {
       const world = createCaveScenario(seed);

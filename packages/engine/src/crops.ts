@@ -108,6 +108,17 @@ export interface FoodCropDef {
   /** Multiplies hunger restored per feeding, on top of `foodNutritionFactor`'s existing quality-based factor — 1.0 is the old flat baseline every berry flavor gave. */
   nutritionMultiplier: number;
   /**
+   * Direct ask: "can you make berries and tomatoes and apples help thirst
+   * too" — a juicy crop's own fraction of a real drink, restored alongside
+   * the ordinary hunger relief (see `flora.ts`'s `thirstReliefOf`, called
+   * from every real eat site — the player's own included). Same units as
+   * `nutritionMultiplier`: a multiplier against `CONSUME_RATE`'s
+   * `seekWater` base amount, not a flat number. Absent/0 means "as dry as
+   * Potato/Wheat" — no thirst relief at all, today's baseline for every
+   * crop this field doesn't mention.
+   */
+  thirstRelief?: number;
+  /**
    * The layer this crop really "belongs to" — absent means Surface, same as
    * every crop before this field existed. An agent already on this layer
    * gets free access (no `digTicksAccrued` tax at all); an agent on a
@@ -175,20 +186,24 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
   oran: {
     name: "Oran Berry",
     nutritionMultiplier: 1.0,
+    thirstRelief: 0.35,
   },
   pecha: {
     name: "Pecha Berry",
     nutritionMultiplier: 1.0,
+    thirstRelief: 0.35,
   },
   sitrus: {
     name: "Sitrus Berry",
     sunLoving: true,
     nutritionMultiplier: 1.0,
+    thirstRelief: 0.35,
   },
   cheri: {
     name: "Cheri Berry",
     sunLoving: true,
     nutritionMultiplier: 1.0,
+    thirstRelief: 0.35,
   },
   wheat: {
     name: "Wheat",
@@ -201,6 +216,8 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
     sunLoving: true,
     seasonWindow: SEASON_WINDOWS.summer,
     nutritionMultiplier: 1.2,
+    // A tomato is mostly water — the juiciest crop in the registry.
+    thirstRelief: 0.5,
   },
   corn: {
     name: "Corn",
@@ -226,6 +243,7 @@ export const FOOD_CROPS: Record<CropId, FoodCropDef> = {
     seasonWindow: AUTUMN_FIRST_HALF,
     nutritionMultiplier: 1.4,
     nativeLayer: "canopy",
+    thirstRelief: 0.3,
   },
   potato: {
     name: "Potato",
