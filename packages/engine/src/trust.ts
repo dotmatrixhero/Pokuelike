@@ -48,8 +48,17 @@ export function trustFleeFactor(stage: TrustStage): number {
  * for 8-directional movement: a diagonal step should count as 1, not 2.
  */
 export const FOLLOW_ENTRY_RADIUS = 6;
-/** Per player turn, for a curious creature within range: chance it starts following. Sim-original. */
-export const FOLLOW_ENTRY_CHANCE = 0.05;
+/**
+ * Per player turn, for a curious creature within range: chance it starts
+ * following. Was 0.05; bumped to 0.08 with the rest of the lever 2-6
+ * numbers — direct ask, "we need to bump our numbers to make it easier,"
+ * targeting 4 of 5 seeds following in validateBond.ts. A creature that's
+ * genuinely curious and in range for many turns in a row was already
+ * near-certain to roll a success eventually at 0.05; this mainly shortens
+ * how long that takes, which matters once the window it has to do it in
+ * (before decay drops it back under `TRUST_CURIOUS`) is the real limiter.
+ */
+export const FOLLOW_ENTRY_CHANCE = 0.08;
 
 /**
  * The follower door, run once per player turn. A creature at `curious` or

@@ -1334,9 +1334,13 @@ export function treatBlockedReason(world: World, agent: Agent): string | undefin
  * Lever 3 (habituation): how much each PRIOR treat from the player adds
  * to the multiplier on the next one — capped, so the curve softens
  * rather than compounding forever. A 5th treat from the same individual
- * is worth `1 + 0.15*4` = 1.6x a first one.
+ * is worth `1 + 0.2*4` = 1.8x a first one.
+ *
+ * Bumped from 0.15 with the rest of the lever 2-6 numbers — direct ask,
+ * "we need to bump our numbers to make it easier," targeting 4 of 5
+ * seeds following in validateBond.ts.
  */
-export const TREAT_HABITUATION_STEP = 0.15;
+export const TREAT_HABITUATION_STEP = 0.2;
 export const TREAT_HABITUATION_CAP = 5;
 
 /**

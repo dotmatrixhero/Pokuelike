@@ -58,8 +58,15 @@ export const RAPPORT_DECAY_PER_TICK = 0.9977;
  * to be stickier. First lever pulled on this problem; TODO.md tracks the
  * before/after table and the levers still on the table if this alone
  * isn't enough.
+ *
+ * Bumped again after levers 2-6 landed: direct ask, "we need to bump our
+ * numbers to make it easier," with a stated target of 4 of 5 seeds
+ * following — 0.9995 (~1386-tick half-life) still lost a follow that had
+ * actually fired (`trust.ts`'s `tickFollowers`) to decay during
+ * `validateBond.ts`'s 25-tile walk-away test before the walk finished.
+ * ~2310-tick half-life now.
  */
-export const RAPPORT_PLAYER_EDGE_DECAY_PER_TICK = 0.9995;
+export const RAPPORT_PLAYER_EDGE_DECAY_PER_TICK = 0.9997;
 
 /**
  * Once a decayed score's absolute value drops below this, the edge is
@@ -113,8 +120,14 @@ export const RAPPORT_FOOD_DELIVERY_DELTA = 0.03;
  * Sim-original guess: at trust.ts's thresholds, ~3 eaten offerings reach
  * `curious`, ~7 reach `bonded`, decay permitting. For the user to judge
  * against validateBond.ts.
+ *
+ * Bumped from 0.08 with the rest of the lever 2-6 numbers (direct ask,
+ * targeting 4 of 5 followed) — 0.08 alone needed 2-3 real treats just to
+ * clear `TRUST_CURIOUS` (0.2) before habituation/visit multipliers had
+ * anything to work with; 0.12 gets a single ordinary treat most of the
+ * way there on its own.
  */
-export const RAPPORT_OFFERED_FOOD_DELTA = 0.08;
+export const RAPPORT_OFFERED_FOOD_DELTA = 0.12;
 
 /**
  * Deliberately socializing (`needs.ts`'s `applySocializing`, the idle-stack

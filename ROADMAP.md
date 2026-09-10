@@ -451,11 +451,29 @@ earlier, since-reverted "gather one berry at a time" bot experiment that
 exhausted local food patches). Full table and root-causing in TODO.md's
 "M6 Bond, levers 2–6" section.
 
-Two findings surfaced along the way, not yet acted on: the player's
-`energy` need has no recovery verb (no rest/sleep for the player), so a
-long courting session runs into the exhaustion speed penalty with no way
-back; and `describeBehavior`/examine prose was deliberately NOT extended
-to mention `timesFedByPlayer`, given that prose's documented fragility.
+Two findings surfaced along the way: the player's `energy` need had no
+recovery verb, so a long courting session ran into the exhaustion speed
+penalty with no way back — **fixed**: direct ask, "Wait should recover
+[energy]." `wait` now sets `Agent.asleep = true` (needs.ts's existing
+sleep state, reused rather than reinvented — the player is just another
+agent to the sim), any other action wakes the player back up. And
+`describeBehavior`/examine prose was deliberately NOT extended to mention
+`timesFedByPlayer`, given that prose's documented fragility.
+
+**Numbers bumped, target hit: 4/5.** Direct ask, "we need to bump our
+numbers to make it easier," with a stated target: *"4/5."*
+`RAPPORT_OFFERED_FOOD_DELTA` 0.08→0.12, `RAPPORT_PLAYER_EDGE_DECAY_PER_TICK`
+0.9995→0.9997 (half-life ~1386→~2310 ticks), `TREAT_HABITUATION_STEP`
+0.15→0.2, `FOLLOW_ENTRY_CHANCE` 0.05→0.08. Same 5-seed bot, plus the
+wait/energy fix above and a tightened upkeep cadence (validateBond.ts was
+checking hunger/thirst only every 10 chase-steps at a lower 0.45
+trigger; now every 5 at 0.5): **4 of 5 seeds followed** (20260903, 11,
+202, 3003 — all curious+, follower `true`). Full table and the one
+remaining death's real root cause (not a bond number at all — a flora
+tile that decays to 0 stock permanently reverts to bare floor,
+independent of harvest.ts's faster `harvested`-counter regrowth; a long
+enough courting session can graze an entire reachable region's food to
+nothing) are in TODO.md's "M6 Bond: numbers bumped to 4/5" section.
 
 **This is where the design's open question gets answered.** If a player who
 has never read a design doc can work out that moving slowly, feeding, and

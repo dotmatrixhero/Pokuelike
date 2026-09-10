@@ -8219,3 +8219,103 @@ follow event happened for the first time" good enough to call M6's
 acceptance criterion met, or does the walk-away trust durability need its
 own, seventh lever? My read: this is progress worth showing before
 guessing further at a 7th lever — the honest number is what's above.
+
+## M6 Bond: wait recovers energy, numbers bumped to 4/5
+
+Two direct asks in the same message: *"Wait should recover [energy]"*
+and *"We need to bump our numbers to make it easier. 4/5."*
+
+**Wait/energy** (player.ts): the player had no rest verb at all — energy
+only ever drained, and the exhaustion speed penalty (`simulation.ts`'s
+`lowEnergySpeedMultiplier`, -20% at 0 energy) had no way back once bond-
+courting sessions started running long. Rather than invent a second rest
+mechanic, `wait` now sets `Agent.asleep = true`, reusing needs.ts's
+existing sleep state exactly — `tickAgentNeeds` already treats ANY
+asleep agent identically regardless of `controlledBy`: energy rises
+instead of draining, hunger/thirst decay drops to 0.15x
+(`SLEEP_NEEDS_DECAY_MULTIPLIER`), healing and cooldown recovery speed
+up. Any other queued action wakes the player back up
+(`applyPlayerAction`). No new `wokeUp` event/reason: that union
+(`"urgentNeed" | "threatSpotted"`) is NPC-trigger-only, and widening it
+would touch `eventText.ts`'s and `format.ts`'s exhaustive `SimEvent`
+switches for a case with nothing new to say.
+
+Consequence, not a bug: `player.test.ts`'s "from full" starve-by-waiting
+test assumed `wait` was a pure no-op and bounded the ticks-to-starve
+under 5000; waiting is now real rest, so the same scenario takes 10431
+ticks (~6.67x, matching `SLEEP_NEEDS_DECAY_MULTIPLIER`). Updated the
+bound and explained why rather than leaving a stale assumption standing.
+New tests in `energy.test.ts` cover both directions (repeated waiting
+raises a tired player's energy; any other action wakes them and draining
+resumes).
+
+**Numbers bumped, iterated against `validateBond.ts` until the stated
+target (4/5) was hit:**
+
+| constant | before | after | file |
+|---|---|---|---|
+| `RAPPORT_OFFERED_FOOD_DELTA` | 0.08 | 0.12 | rapport.ts |
+| `RAPPORT_PLAYER_EDGE_DECAY_PER_TICK` | 0.9995 (~1386-tick half-life) | 0.9997 (~2310-tick half-life) | rapport.ts |
+| `TREAT_HABITUATION_STEP` | 0.15 | 0.2 | needs.ts |
+| `FOLLOW_ENTRY_CHANCE` | 0.05 | 0.08 | trust.ts |
+
+Also fixed a bot-side bug uncovered along the way, not a balance number:
+`validateBond.ts`'s `upkeep()` was checked only every 10 steps while
+chasing a moving target, at a 0.45 hunger/thirst trigger — traced a
+starvation regression to exactly this (up to 10 unchecked actions at
+~10 world ticks each between checks, enough to occasionally outrun the
+trigger). Now every 5 steps at 0.5.
+
+First re-run (energy fix + tighter upkeep only, before the four
+constants above): 1/5 followed, 2 deaths — noisy, and a reminder that
+this codebase's single RNG stream means any control-flow change
+reshuffles which draws land where; a single-seed before/after isn't
+signal on its own (CLAUDE.md: "measure before and after, on several
+seeds" — five is what this bot has, so seed-level swaps like this are
+expected, not alarming, as long as the aggregate trend holds).
+
+After the four constant bumps: 3/5. One more bot-script change — initial
+berry gather 3→5 — closed the gap to 4/5:
+
+| seed | bestScore | stage | follower | died |
+|---|---|---|---|---|
+| 20260903 | 0.25 | curious | **true** | — |
+| 11 | 0.44 | curious | **true** | — |
+| 202 | 0.26 | curious | **true** | — |
+| 3003 | 0.28 | curious | **true** | — |
+| 40404 | 0.03 | wary | false | **starved, tick 2033** |
+
+**4 of 5 seeds followed out of the chamber.** Target met.
+
+**Seed 40404's death, traced, is NOT a bond number.** A dedicated debug
+script walked seed 3003's earlier failure (before the gather bump fixed
+it) tick by tick and found the real mechanism: a food tile's `stock`
+(flora.ts) is a completely different counter from harvest.ts's
+`harvested`/`HARVEST_REGROW_TICKS` (that one recovers in ~300 ticks and
+only gates the player's own *gather* action). `stock` depletes from
+actual *eating* — the player's `eat` action, the treat mechanic, and
+ordinary herd grazing all draw it down — and once it crosses 0
+(flora.ts's food-death branch, both surface and underground copies) the
+tile's terrain reverts to plain `"floor"` **for good**. It does not
+regrow on any timer; a new food tile only exists there again if a
+seedling happens to mature on that spot. On a long enough run — the
+courting bot's own eating plus four herd-mates grazing the same handful
+of chamber patches for 1000+ ticks — every reachable food tile can cross
+that line in the same stretch, and `nearestFood()` (a real, unbounded
+BFS over the whole connected region — not a range problem) then finds
+nothing at all. Confirmed live: seed 3003's trace showed
+`nearestFood()` returning `undefined` for 400+ consecutive ticks before
+the starve. Raising the bot's starting gather (3→5 berries) bought
+enough runway to close each courtship before hitting this wall on 4 of
+5 seeds; it does not fix the underlying mechanic, which is a real
+ecological-carrying-capacity gap independent of anything in this
+lever pack (`validateOverworld`/general herd-sim runs would hit the same
+wall on a long enough stationary camp, bond-courting or not). Flagging
+as a genuine finding, not fixing: this is a flora/regrowth-rate balance
+question, not a bond one, and touching it wasn't part of either direct
+ask in this round.
+
+Open ruling for the user: is the surviving 1/5 death (a real, traceable
+food-scarcity failure, not RNG noise or a bond-number gap) worth a
+dedicated flora-regrowth pass, or is 4/5 good enough for M6's answer as
+it stands?

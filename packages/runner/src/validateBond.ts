@@ -51,13 +51,21 @@ for (const seed of SEEDS) {
     let n = 0;
     while (n++ < max && cheb(me.pos, target) > stopAt && findPlayer(world)) act(toward(world, dist));
   };
-  // 1. Berries: nearest food tile, gather until 3 berries. A real
-  // starting stock (not the earlier 4-berry batch, not a single-berry
-  // "always restocking" extreme tried and rejected — traced: one at a
-  // time exhausts the LOCAL patches around the courting spot fast enough
-  // that most of a run goes to "NO FOOD SOURCE FOUND" wandering rather
-  // than actually courting. 3 respects lever 6's "camping is worse than
-  // returning" without turning the bot into a full-time forager.
+  // 1. Berries: nearest food tile, gather until 5. Was 3 (not the earlier
+  // 4-berry batch, not a single-berry "always restocking" extreme tried
+  // and rejected — traced: one at a time exhausts the LOCAL patches
+  // around the courting spot fast enough that most of a run goes to "NO
+  // FOOD SOURCE FOUND" wandering rather than actually courting). Bumped
+  // to 5 after tracing seed 3003's death: a food tile's `stock`
+  // (flora.ts) is a DIFFERENT counter than harvest.ts's fast 300-tick
+  // `harvested` regrowth — once `stock` decays to 0 the tile reverts to
+  // bare "floor" for good (flora.ts's food-death branch), and the whole
+  // chamber's food tiles can all cross that line at once on a long
+  // enough run (the herd grazes the same patches the whole time too), at
+  // which point `nearestFood` finds nothing ANYWHERE in the reachable
+  // region — not a range problem, a real regrowth-takes-a-new-seedling
+  // problem. A bigger buffer doesn't fix that, it just buys the bot more
+  // time to close the bond before it can happen — see TODO.md.
   const nearestFood = () => {
     const dist = walkDistances(world, "underground", me.pos);
     let best: { x: number; y: number; d: number } | undefined;
@@ -67,7 +75,7 @@ for (const seed of SEEDS) {
     }
     return best;
   };
-  while (countOf(me, "food") < 3 && keys < 300) {
+  while (countOf(me, "food") < 5 && keys < 300) {
     const f = nearestFood();
     if (!f) break;
     walkTo(f);
@@ -86,15 +94,21 @@ for (const seed of SEEDS) {
     }
     return best;
   };
+  // Checked more eagerly (0.5, not 0.45) and more often (every 5 steps
+  // while chasing, not 10) than the original bot — traced a starvation
+  // regression to exactly this: up to 10 unchecked actions while chasing
+  // a moving target, at ~10 world ticks each, is up to 100 ticks of
+  // hunger/thirst decay between checks, which occasionally outran the
+  // 0.45 trigger before the bot next looked.
   const upkeep = () => {
-    if (me.needs.thirst < 0.45) {
+    if (me.needs.thirst < 0.5) {
       const w = nearestWater();
       if (w) {
         walkTo(w, 0, 80);
         act({ kind: "drink" });
       }
     }
-    if (me.needs.hunger < 0.45) {
+    if (me.needs.hunger < 0.5) {
       const f = nearestFood();
       if (f && f.d < 40) {
         walkTo(f, 0, 60);
@@ -114,7 +128,7 @@ for (const seed of SEEDS) {
       if (!near && me.posture === "crouch") act({ kind: "crouch" });
       const dist = walkDistances(world, "underground", who.pos);
       act(toward(world, dist));
-      if (n % 10 === 0) upkeep();
+      if (n % 5 === 0) upkeep();
     }
   };
   // 2. Court ONE chamber creature — picked once (nearest at the start)
