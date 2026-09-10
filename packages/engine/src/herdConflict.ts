@@ -5,7 +5,8 @@ import { stepAway, stepToward } from "./movement.js";
 import { stormAccuracyMultiplier } from "./weather.js";
 import { elevationAccuracyMultiplier } from "./elevation.js";
 import { tileAt } from "./world.js";
-import { FALLBACK_MAX_HP, manhattan } from "./predation.js";
+import { getStatStage } from "./status.js";
+import { FALLBACK_MAX_HP, manhattan, situationalAccuracyPenalty } from "./predation.js";
 import { RAPPORT_HERD_CLASH_DELTA, RAPPORT_SHARED_RESOURCE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
@@ -372,11 +373,13 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   if (
     !rollAccuracy(
       move,
-      0,
-      0,
+      getStatStage(attacker, "accuracy"),
+      getStatStage(defender, "evasion"),
       rng,
       stormAccuracyMultiplier(world, attacker.layer, attacker.pos) *
-        elevationAccuracyMultiplier(attackerElevation, defenderElevation)
+        elevationAccuracyMultiplier(attackerElevation, defenderElevation),
+      distance,
+      situationalAccuracyPenalty(world, attacker, defender)
     )
   ) {
     log?.record({

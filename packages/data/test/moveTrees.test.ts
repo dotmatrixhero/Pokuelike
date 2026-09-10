@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMoveTree } from "@pokuelike/engine";
+import { applyMoveTree, resolveAllyEffect, resolveShape, resolveSituationalBonuses, resolveStatChangesOnHit } from "@pokuelike/engine";
 import type { MoveSpec, MoveTreeNode } from "@pokuelike/engine";
 import { MOVES } from "../src/moves.js";
 
@@ -105,7 +105,7 @@ describe("every move tree in the curated roster is internally consistent", () =>
   }
 });
 
-describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () => {
+describe("Rock Throw tree: v4 — one rock, found, aimed and gone", () => {
   const rockThrow = MOVES.rock_throw;
 
   it("Pinning Impact applies a real but partial Speed debuff, not a stun", () => {
@@ -113,25 +113,56 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 16 });
   });
 
-  it("Crippling Snare widens the throw into a real cone, catching a spread of fleeing targets", () => {
-    const respec = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "dead_aim", "hobbling_throw", "broken_stride", "crippling_snare"]);
-    expect(respec.shape).toEqual({ kind: "cone", length: 3, width: 2 });
+  // v4 replaced `crippling_snare` (which set `shape: cone` and nothing else)
+  // with `driven_back`. The old node was INERT, and this pair of tests is the
+  // regression guard for the reason why: `shape` is only ever read inside
+  // `resolveAreaHit` (predation.ts), which `resolveHit` only calls when
+  // `hitsArea` is true. Rock Throw is a single-target move, so a tree node
+  // that only widened the footprint spent a skill point on nothing.
+  it("no node in the tree sets `shape` — it would be inert on a non-area move", () => {
+    const shapeSetters = Object.values(rockThrow.tree!).filter((n) => n.delta.shape !== undefined);
+    expect(shapeSetters).toEqual([]);
+    expect(rockThrow.hitsArea).toBeFalsy();
+    expect(Object.values(rockThrow.tree!).some((n) => n.delta.hitsArea)).toBe(false);
+  });
+
+  it("Driven Back replaces the inert cone with a real knockback, and keeps the fork", () => {
+    const respec = applyMoveTree(rockThrow, ["pinning_impact", "loose_scree", "hobbling_throw", "driven_back"]);
+    expect(respec.forcedMovement).toEqual({ mover: "defender", direction: "away", tiles: 1, timing: "onHit" });
+    // One tile of shove leaves the target inside the move's own range, so the
+    // fork buys distance without ending the engagement.
+    expect(respec.range!.max).toBeGreaterThan(1);
+    expect(rockThrow.tree!.driven_back.excludes).toEqual(["relentless_barrage"]);
+  });
+
+  it("Stone Underfoot is the tree's only consumesOwnTerrain setter, and escalates the base 3x", () => {
+    // The engine OVERWRITES `consumesOwnTerrain` (`applyMoveTree`), so a
+    // second setter anywhere in the tree would silently win or lose on
+    // allocation order. This move's whole identity is the boulder it spends,
+    // so exactly one node is allowed to touch it.
+    const setters = Object.values(rockThrow.tree!).filter((n) => n.delta.consumesOwnTerrain !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["stone_underfoot"]);
+    expect(rockThrow.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 3 });
+    const respec = applyMoveTree(rockThrow, ["bedrock_stance", "edge_on", "stone_underfoot"]);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 4.5 });
   });
 
   it("Quarry Break capstone trades lockTicks for a real power/penetration spike", () => {
+    // v4 walk: the aim lane (Dead Aim -> Cracked Joint -> Skyfall -> Longer
+    // Arm) into the deep notable, then the filler and the capstone. The
+    // assertions are unchanged from v3.
     const respec = applyMoveTree(rockThrow, [
       "pinning_impact",
-      "cracked_joint",
       "dead_aim",
-      "hobbling_throw",
-      "broken_stride",
-      "relentless_barrage",
+      "cracked_joint",
       "skyfall",
-      "dead_weight_finisher",
+      "longer_arm",
+      "broken_stride",
+      "quarry_footing",
       "quarry_break",
     ]);
     expect(respec.lockTicks).toBe(2);
-    expect(respec.defensePenetration).toBeCloseTo(0.3);
+    expect(respec.defensePenetration).toBeCloseTo(0.5); // Quarry Footing's 0.2 + the capstone's 0.3
     expect(respec.bonusVsType).toEqual({ type: "flying", multiplier: 1.5 });
   });
 
@@ -142,7 +173,6 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
       "granite_grip",
       "unshakeable",
       "bedrock_footing",
-      "granite_ward",
       "fracturing_blow",
       "bedrock_resolve",
       "bedrock_breaker",
@@ -150,23 +180,53 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.resistanceBreaker).toEqual({ multiplier: 2 });
   });
 
+  it("Fracturing Blow and Bedrock Breaker are one resistanceBreaker ladder, not two racing setters", () => {
+    const midway = applyMoveTree(rockThrow, [
+      "bedrock_stance",
+      "weathered_slab",
+      "granite_grip",
+      "unshakeable",
+      "bedrock_footing",
+      "fracturing_blow",
+    ]);
+    expect(midway.resistanceBreaker).toEqual({ multiplier: 1.4 });
+  });
+
   it("Tremor Call marks the target via the real rallyCall primitive, not a flat ally buff", () => {
     const respec = applyMoveTree(rockThrow, ["tremor_call"]);
     expect(respec.rallyCall).toEqual({ ticks: 20 });
   });
 
+  it("Carrying Rumble is the one node allowed to touch the mark after the opener", () => {
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "herd_grip", "carrying_rumble"]);
+    expect(respec.rallyCall).toEqual({ ticks: 34 });
+    const markSetters = Object.values(rockThrow.tree!).filter((n) => n.delta.rallyCall !== undefined);
+    expect(markSetters.map((n) => n.id).sort()).toEqual(["carrying_rumble", "tremor_call"]);
+  });
+
   it("Tremor Bond is a real, distinct Sociability lever (a herd heal), not another way to extend the mark", () => {
-    const respec = applyMoveTree(rockThrow, ["tremor_call", "sure_footing", "herd_grip", "tremor_bond"]);
+    const respec = applyMoveTree(rockThrow, ["tremor_call", "called_shot", "tremor_bond"]);
     expect(respec.rallyCall).toEqual({ ticks: 20 }); // untouched — Tremor Bond doesn't touch the mark at all
     expect(respec.targetsAlly).toBe(true);
     expect(respec.allyEffect).toEqual({ healFraction: 0.15 });
   });
 
+  it("Colony Watch makes the herd effect fire on every throw, escalating Tremor Bond's own allyEffect", () => {
+    const respec = applyMoveTree(rockThrow, [
+      "tremor_call",
+      "called_shot",
+      "tremor_bond",
+      "vanguard_call",
+      "colony_watch",
+    ]);
+    expect(respec.allyEffectOnAttack).toBe(true);
+    expect(respec.allyEffect).toEqual({ healFraction: 0.18, buff: { stat: "attack", stage: 1, ticks: 14 } });
+  });
+
   it("Herd Ascendant capstone pays off with jam + lifesteal, not a third round of mark-extension", () => {
     const respec = applyMoveTree(rockThrow, [
       "tremor_call",
-      "sure_footing",
-      "herd_grip",
+      "called_shot",
       "tremor_bond",
       "vanguard_call",
       "colony_watch",
@@ -186,63 +246,73 @@ describe("Rock Throw tree: v3 redesign — denial, not just bigger rocks", () =>
     expect(respec.lockTicks).toBeUndefined();
   });
 
-  it("Marked Advantage deepens Rolling Thunder further via the shared rallyMarked primitive", () => {
+  it("Marked Advantage deepens Rolling Thunder's own pin (principle 13), and every statChangeOnHit setter is on one chain", () => {
+    // v4 change of meaning, stated plainly: Marked Advantage used to grant a
+    // `situationalBonus` on `rallyMarked`, which (a) shared no lever with its
+    // own crosslink — the checker flagged it under principle 13 — and (b) was
+    // one of three independent `situationalBonus` setters racing each other
+    // through an overwrite field. It now escalates the exact thing Rolling
+    // Thunder does. The `rallyMarked` payoff did not disappear: it moved down
+    // one node, onto Converged Quarry, which is the bridge's notable and the
+    // tree's only `situationalBonus`.
     const respec = applyMoveTree(rockThrow, ["pinning_impact", "tremor_call", "rolling_thunder", "marked_advantage"]);
-    expect(respec.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.3 });
+    expect(respec.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 32 });
+
+    const situational = Object.values(rockThrow.tree!).filter((n) => n.delta.situationalBonus !== undefined);
+    expect(situational.map((n) => n.id)).toEqual(["converged_quarry"]);
   });
 
-  it("Hobbling Throw only needs one prior node, not both Cracked Joint and Dead Aim together", () => {
-    const viaCrackedJointOnly = applyMoveTree(rockThrow, ["pinning_impact", "cracked_joint", "hobbling_throw"]);
-    const viaDeadAimOnly = applyMoveTree(rockThrow, ["pinning_impact", "dead_aim", "hobbling_throw"]);
-    expect(viaCrackedJointOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
-    expect(viaDeadAimOnly.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -1, ticks: 20 });
-  });
-
-  it("Grinding Advance's bridge (Aggression<->Boldness) reaches both Broken Stride and Bedrock Footing", () => {
-    const viaAggr = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "bedrock_stance",
-      "grinding_advance",
-      "grinding_footing",
-      "bedrock_momentum",
-      "broken_stride",
-    ]);
-    expect(viaAggr.power).toBe(rockThrow.power + 8);
-
-    const viaBold = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "bedrock_stance",
-      "grinding_advance",
-      "grinding_footing",
-      "bedrock_momentum",
-      "bedrock_footing",
-    ]);
-    expect(viaBold.power).toBe(rockThrow.power + 5);
-  });
-
-  it("Rolling Thunder's bridge (Sociability<->Aggression) reaches both Tremor Bond and Broken Stride", () => {
-    const viaSoc = applyMoveTree(rockThrow, [
+  it("Hobbling Throw only needs one prior node, not a whole AND-set", () => {
+    // An inner `prerequisitesAnyOf` array is an AND-set in this schema, so a
+    // convergence node written as [[a, b]] would silently require both. Every
+    // alternative here is a single node, reachable on its own.
+    const viaOwnLane = applyMoveTree(rockThrow, ["pinning_impact", "loose_scree", "hobbling_throw"]);
+    const viaBridge = applyMoveTree(rockThrow, [
       "pinning_impact",
       "tremor_call",
       "rolling_thunder",
       "marked_advantage",
       "converged_quarry",
-      "tremor_bond",
+      "hobbling_throw",
     ]);
-    expect(viaSoc.targetsAlly).toBe(true);
+    expect(viaOwnLane.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+    expect(viaBridge.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+  });
 
-    const viaAggr = applyMoveTree(rockThrow, [
-      "pinning_impact",
-      "tremor_call",
-      "rolling_thunder",
-      "marked_advantage",
-      "converged_quarry",
-      "broken_stride",
-    ]);
-    expect(viaAggr.power).toBe(rockThrow.power + 8); // Broken Stride's own +8
-    // Converged Quarry deepens Marked Advantage's own rallyMarked payoff
-    // (overwrite) rather than bolting on a generic power bump.
+  it("Grinding Advance's bridge (Aggression<->Boldness) reaches a lane notable in BOTH branches", () => {
+    // v4 relocated where every bridge lands: on one LANE NOTABLE per branch
+    // it connects, one step short of that branch's fork (principles 11/12),
+    // rather than on a pre-fork filler. The assertion's meaning is unchanged
+    // — the bridge is a real alternate route into both branches.
+    const bridge = ["pinning_impact", "bedrock_stance", "grinding_advance", "grinding_footing", "bedrock_momentum"];
+
+    const viaAggr = applyMoveTree(rockThrow, [...bridge, "skyfall"]);
+    expect(viaAggr.bonusVsType).toEqual({ type: "flying", multiplier: 1.5 });
+
+    const viaBold = applyMoveTree(rockThrow, [...bridge, "unshakeable"]);
+    expect(viaBold.tree!.unshakeable.grantsPassive).toEqual({ kind: "immovable", value: 1 });
+  });
+
+  it("Rolling Thunder's bridge (Sociability<->Aggression) reaches a lane notable in BOTH branches", () => {
+    const bridge = ["pinning_impact", "tremor_call", "rolling_thunder", "marked_advantage", "converged_quarry"];
+
+    const viaSoc = applyMoveTree(rockThrow, [...bridge, "carrying_rumble"]);
+    expect(viaSoc.rallyCall).toEqual({ ticks: 34 });
+
+    const viaAggr = applyMoveTree(rockThrow, [...bridge, "hobbling_throw"]);
+    expect(viaAggr.statChangeOnHit).toEqual({ target: "defender", stat: "speed", stage: -2, ticks: 40 });
+    // Converged Quarry keeps the rallyMarked payoff it has always had.
     expect(viaAggr.situationalBonus).toEqual({ condition: "rallyMarked", multiplier: 1.6 });
+  });
+
+  it("Warning Tremor's bridge (Boldness<->Sociability) reaches a lane notable in BOTH branches", () => {
+    const bridge = ["bedrock_stance", "tremor_call", "warning_tremor", "warded_footing", "herds_bulwark"];
+
+    const viaBold = applyMoveTree(rockThrow, [...bridge, "stone_underfoot"]);
+    expect(viaBold.consumesOwnTerrain).toEqual({ terrain: "boulder", damageMultiplier: 4.5 });
+
+    const viaSoc = applyMoveTree(rockThrow, [...bridge, "tremor_bond"]);
+    expect(viaSoc.targetsAlly).toBe(true);
   });
 });
 
@@ -1120,5 +1190,782 @@ describe("Body Slam tree: inevitability, not just a heavier hit", () => {
     expect(respec.lockTicks).toBe(1);
     expect(respec.power).toBe(bodySlam.power + 10 + 10 + 15);
     expect(respec.lifestealFraction).toBeCloseTo(0.05);
+  });
+});
+
+describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
+  const ember = MOVES.ember;
+
+  it("Ring of Fire finally covers tiles: shape is dead without hitsArea, and this branch is named after its footprint", () => {
+    // The bug this fixes: `shape` is only ever read by `resolveShape` inside
+    // `resolveAreaHit`, which only runs for a `hitsArea` move. The Boldness
+    // opener set a ring and never set `hitsArea`, so it charged -10 power
+    // and +1 cooldown for a footprint that did nothing — a pure-downside
+    // node (principle 4) at the head of the branch named for it.
+    const respec = applyMoveTree(ember, ["ring_of_fire"]);
+    expect(respec.hitsArea).toBe(true);
+    expect(respec.shape).toEqual({ kind: "ring", radius: 1 });
+    expect(respec.power).toBe(ember.power - 10);
+    expect(ember.hitsArea).toBeUndefined();
+  });
+
+  it("Fill the Circle is a filled burst, not a hollow ring the range-1 move could never fire into", () => {
+    // `resolveShape` builds a ring as a hollow shell at exactly that
+    // Chebyshev radius. Ember is aimed at range 1, so a radius-2 ring is a
+    // footprint the move can never reach — the node would have been dead the
+    // moment `hitsArea` made it real.
+    const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring"]);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
+    expect(respec.range).toEqual({ min: 0, max: 1 });
+
+    // The radius is a deliberate balance number, not an implementation
+    // detail, so the footprint is asserted in TILES rather than left implicit
+    // in a constant. Burst radius is manhattan: r1 is 5 tiles, r2 is 13.
+    // Direct call on the size: "13 is probably too much. Do the burst R1."
+    expect(resolveShape(respec.shape, { x: 10, y: 10 }, "east")).toHaveLength(5);
+  });
+
+  it("the whole tree has exactly one shape lineage, and it is Boldness's", () => {
+    const shapers = Object.values(ember.tree!).filter((n) => n.delta.shape !== undefined);
+    expect(shapers.map((n) => n.id)).toEqual(["ring_of_fire", "wide_ring"]);
+    // wide_ring descends from ring_of_fire, so the overwrite is escalation
+    // rather than a co-takeable collision.
+    expect(shapers.every((n) => n.leaning === "boldness")).toBe(true);
+  });
+
+  it("Take Up the Coals spends a fire tile the caster is standing in — the loop the opener's own terrainBurn feeds", () => {
+    const respec = applyMoveTree(ember, [
+      "ring_of_fire",
+      "banked_heat",
+      "slow_burn",
+      "wide_ring",
+      "never_ours",
+      "take_up_the_coals",
+    ]);
+    expect(respec.consumesOwnTerrain).toEqual({ terrain: "fire", damageMultiplier: 1.6 });
+    // `wider_burn` is what puts those tiles on the map in the first place.
+    expect(ember.tree!.wider_burn.delta.terrainBurn).toBe(true);
+  });
+
+  it("Never Ours keeps the ring off the herd, and it lives under the node that grants hitsArea", () => {
+    // `excludesAllies` is only consulted inside `resolveAreaHit`, so putting
+    // it in Sociability would have been dead content for any build that
+    // skipped the branch carrying `hitsArea`.
+    const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring", "never_ours"]);
+    expect(respec.excludesAllies).toBe(true);
+    expect(respec.hitsArea).toBe(true);
+    expect(ember.tree!.never_ours.leaning).toBe("boldness");
+  });
+
+  it("Searing Wall answers 'standing inside your own fire' with fireproof, not another stacking damageReduction", () => {
+    expect(ember.tree!.searing_wall.grantsPassive).toEqual({ kind: "fireproof", value: 0.5 });
+    const drNodes = Object.values(ember.tree!).filter(
+      (n) => n.grantsPassive?.kind === "damageReduction" || (n.grantsPassives ?? []).some((g) => g.kind === "damageReduction")
+    );
+    expect(drNodes).toEqual([]);
+  });
+
+  it("Beat At the Flames is denial, not another damage number — jamCooldownTicks is additive", () => {
+    const respec = applyMoveTree(ember, [
+      "wider_burn",
+      "kindling",
+      "steady_flame",
+      "hot_coals",
+      "roaring_blaze",
+      "spreading_blaze",
+      "pyroclasm",
+      "beat_at_the_flames",
+    ]);
+    expect(respec.jamCooldownTicks).toBe(2);
+    expect(respec.statusSpreads).toBe(true);
+  });
+
+  it("Spit Coals is the tree's only hits setter, and the lane's answer to 'an ember is a spark'", () => {
+    const hitsNodes = Object.values(ember.tree!).filter((n) => n.delta.hits !== undefined);
+    expect(hitsNodes.map((n) => n.id)).toEqual(["hot_coals"]);
+    const respec = applyMoveTree(ember, ["wider_burn", "kindling", "steady_flame", "hot_coals"]);
+    expect(respec.hits).toEqual({ min: 1, max: 2 });
+  });
+
+  it("crit tops out at exactly rollCritical's clamp of 3 — no fourth crit node exists", () => {
+    const critTotal = Object.values(ember.tree!).reduce((sum, n) => sum + (n.delta.critRateStage ?? 0), 0);
+    expect(critTotal).toBe(3);
+  });
+
+  it("Inferno keeps only the half of itself that ever worked: reach, not a line it could not resolve", () => {
+    const respec = applyMoveTree(ember, ["wider_burn", "in_through_the_coat", "fan_the_flames", "inferno"]);
+    expect(respec.range).toEqual({ min: 0, max: 2 });
+    expect(respec.shape).toEqual({ kind: "point" });
+    expect(ember.tree!.inferno.excludes).toEqual(["wildfire_burst"]);
+  });
+
+  it("Nothing Left to Guard's bridge (Aggression<->Boldness) lands on one LANE NOTABLE in each branch it connects", () => {
+    const bridge = ["wider_burn", "ring_of_fire", "smoldering_ring", "scorched_ground", "nothing_left_to_guard"];
+
+    // Into Aggression: Fan the Flames without walking In Through the Coat.
+    const viaAggr = applyMoveTree(ember, [...bridge, "fan_the_flames"]);
+    expect(viaAggr.situationalBonus).toEqual({ condition: "targetBurning", multiplier: 2 });
+
+    // Into Boldness: Fill the Circle without walking Banked Heat / Slow Burn.
+    const viaBold = applyMoveTree(ember, [...bridge, "wide_ring"]);
+    expect(viaBold.shape).toEqual({ kind: "burst", radius: 1 });
+  });
+
+  it("Into the Coals' bridge (Boldness<->Sociability) deepens its own crosslink's swap rather than grabbing a stat", () => {
+    const bridge = ["ring_of_fire", "shared_warmth", "banked_embers", "change_places", "into_the_coals"];
+    const respec = applyMoveTree(ember, bridge);
+    expect(respec.positionSwap).toBe(true);
+    expect(respec.positionSwapPull).toBe(3); // 1 (Change Places) + 2 (Into the Coals)
+
+    // And it shortcuts into one lane notable of each branch it connects.
+    expect(applyMoveTree(ember, [...bridge, "give_ground"]).forcedMovement).toEqual({
+      mover: "defender",
+      direction: "away",
+      tiles: 1,
+      timing: "onHit",
+    });
+    expect(applyMoveTree(ember, [...bridge, "beacon_fire"]).rallyCall).toEqual({ ticks: 20 });
+  });
+
+  it("White Heat's bridge (Sociability<->Aggression) escalates crit without adding a stage the engine would clamp away", () => {
+    const bridge = ["shared_warmth", "wider_burn", "kindled_fury", "red_at_the_edges", "white_heat"];
+    const respec = applyMoveTree(ember, bridge);
+    expect(respec.critRateStage).toBe(2);
+    expect(respec.critCooldownReset).toBe(true);
+
+    expect(applyMoveTree(ember, [...bridge, "hot_coals"]).hits).toEqual({ min: 1, max: 2 });
+    expect(applyMoveTree(ember, [...bridge, "kindled_spirits"]).allyEffect).toEqual({
+      buff: { stat: "spAttack", stage: 1, ticks: 15 },
+    });
+  });
+});
+
+describe("additive delta fields: a build that pays twice gets twice", () => {
+  // The bug these exist for, in the user's words: "If you got both, would it
+  // just do nothing? [...] I like the idea of ADDING modifiers so you can
+  // stack your build, not setting them." Two co-takeable nodes on one
+  // OVERWRITE field used to resolve to whichever `applyMoveTree` reached
+  // LAST — so the second point bought nothing, and which one won depended on
+  // purchase order. Each case below asserts the stack AND asserts that
+  // reversing the order changes nothing.
+  const hydroPump = MOVES.hydro_pump;
+  const solarBeam = MOVES.solar_beam;
+
+  /** A legal chosen-node order reaching every one of `targets`, prerequisites first. */
+  const buildFor = (tree: Record<string, MoveTreeNode>, targets: string[]) => {
+    const into = new Set<string>();
+    for (const t of targets) resolveChosenSetFor(tree, t, into);
+    return [...into];
+  };
+
+  it("Hydro Pump's three independent '+1 Range' nodes now add up to +3, not +1", () => {
+    // Bought one at a time they were each `range: { max: 5 }` on a base of 4,
+    // so three points bought one tile between them.
+    expect(hydroPump.range).toEqual({ min: 0, max: 4 });
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, ["widening_main"])).range).toEqual({ min: 0, max: 5 });
+
+    const targets = ["widening_main", "channel_grip", "pod_reach"];
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, targets)).range).toEqual({ min: 0, max: 7 });
+    // A different — still legal — purchase order resolves identically. That
+    // is the property the overwrite form did not have.
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, [...targets].reverse())).range).toEqual({ min: 0, max: 7 });
+  });
+
+  it("Solar Beam's flanking and elevation bonuses both survive a build that takes both", () => {
+    const targets = ["withering_glare", "guardians_ground"];
+    const conditionsOf = (ids: string[]) =>
+      resolveSituationalBonuses(applyMoveTree(solarBeam, ids)).map((b) => `${b.condition}:${b.multiplier}`).sort();
+
+    const conditions = conditionsOf(buildFor(solarBeam.tree!, targets));
+    expect(conditions).toContain("flanking:1.4");
+    expect(conditions).toContain("elevation:1.3");
+    // Reversed purchase order, same resolved set — not merely the same count.
+    expect(conditionsOf(buildFor(solarBeam.tree!, [...targets].reverse()))).toEqual(conditions);
+  });
+
+  it("a same-condition ladder escalates to its strongest step, it does not multiply", () => {
+    // flare_wider (1.3) -> sunspot (1.6) on one chain. Multiplying a ladder
+    // would hand out 2.08x where the designer wrote 1.6x, and every ladder in
+    // this roster restates a full value rather than an increment.
+    const respec = applyMoveTree(solarBeam, [...resolveChosenSetFor(solarBeam.tree!, "sunspot")]);
+    const lowHp = resolveSituationalBonuses(respec).filter((b) => b.condition === "targetLowHp");
+    expect(lowHp).toEqual([{ condition: "targetLowHp", multiplier: 1.6 }]);
+  });
+
+  it("resolveStatChangesOnHit composes different stats and escalates the same one", () => {
+    const base: MoveSpec = { ...MOVES.tackle, statChangeOnHit: undefined, statChangesOnHit: undefined };
+    const compose = {
+      ...base,
+      statChangesOnHit: [
+        { target: "self" as const, stat: "defense" as const, stage: 1, ticks: 50 },
+        { target: "defender" as const, stat: "speed" as const, stage: -1, ticks: 50 },
+      ],
+    };
+    expect(resolveStatChangesOnHit(compose)).toHaveLength(2);
+
+    const ladder = {
+      ...base,
+      statChangesOnHit: [
+        { target: "self" as const, stat: "defense" as const, stage: 1, ticks: 50 },
+        { target: "self" as const, stat: "defense" as const, stage: 2, ticks: 80 },
+      ],
+    };
+    expect(resolveStatChangesOnHit(ladder)).toEqual([{ target: "self", stat: "defense", stage: 2, ticks: 80 }]);
+  });
+
+  it("resolveAllyEffect takes the strongest heal and every distinct buff", () => {
+    const base: MoveSpec = { ...MOVES.tackle, allyEffect: undefined };
+    const merged = resolveAllyEffect({
+      ...base,
+      allyEffects: [
+        { healFraction: 0.08 },
+        { healFraction: 0.2 },
+        { buff: { stat: "speed", stage: 1, ticks: 40 } },
+        { buff: { stat: "defense", stage: 2, ticks: 40 } },
+      ],
+    })!;
+    expect(merged.healFraction).toBe(0.2);
+    expect(merged.buffs.map((b) => b.stat).sort()).toEqual(["defense", "speed"]);
+    // A move with no ally payload at all still reads as absent — that is what
+    // the `targetsAlly` call sites gate on.
+    expect(resolveAllyEffect(base)).toBeUndefined();
+  });
+
+  it("areaBonus sums and turns on hitsArea, whichever order form and size are bought in", () => {
+    const move: MoveSpec = {
+      ...MOVES.tackle,
+      shape: { kind: "point" },
+      hitsArea: undefined,
+      tree: {
+        form: { id: "form", name: "Form", cost: 1, delta: { shape: { kind: "burst", radius: 1 } } },
+        wider: { id: "wider", name: "Wider", cost: 1, delta: { areaBonus: 1 } },
+        widest: { id: "widest", name: "Widest", cost: 1, delta: { areaBonus: 1 } },
+      },
+    };
+    // Form alone is not an area move — `areaBonus` is what turns that on.
+    expect(applyMoveTree(move, ["form"]).hitsArea).toBeUndefined();
+    const grown = applyMoveTree(move, ["form", "wider", "widest"]);
+    expect(grown.shape).toEqual({ kind: "burst", radius: 3 });
+    expect(grown.hitsArea).toBe(true);
+    // Size bought BEFORE the form: this was genuinely broken in the first cut
+    // (the bonus was applied at the node that carried it, so a later `shape`
+    // overwrite threw it away) and is the regression this line guards.
+    expect(applyMoveTree(move, ["widest", "wider", "form"]).shape).toEqual({ kind: "burst", radius: 3 });
+  });
+
+  it("hitsBonus and rallyCallTicks sum instead of racing", () => {
+    const move: MoveSpec = {
+      ...MOVES.tackle,
+      hits: undefined,
+      rallyCall: undefined,
+      tree: {
+        a: { id: "a", name: "A", cost: 1, delta: { hitsBonus: 1, rallyCallTicks: 20 } },
+        b: { id: "b", name: "B", cost: 1, delta: { hitsBonus: 2, rallyCallTicks: 30 } },
+      },
+    };
+    // No base `hits` counts as one strike, so +1 makes it a 2-hit move.
+    expect(applyMoveTree(move, ["a"]).hits).toEqual({ min: 2, max: 2 });
+    expect(applyMoveTree(move, ["a", "b"]).hits).toEqual({ min: 4, max: 4 });
+    expect(applyMoveTree(move, ["b", "a"]).hits).toEqual({ min: 4, max: 4 });
+    expect(applyMoveTree(move, ["a", "b"]).rallyCall).toEqual({ ticks: 50 });
+    expect(applyMoveTree(move, ["b", "a"]).rallyCall).toEqual({ ticks: 50 });
+  });
+});
+
+describe("Wing Attack tree: v4 two-lane — the wing, and everything it moves", () => {
+  const wingAttack = MOVES.wing_attack;
+  const tilesOf = (shape: Parameters<typeof resolveShape>[0]) => resolveShape(shape, { x: 10, y: 10 }, "E").length;
+
+  it("the base move really is an area move, so `shape` on this tree is live content and not another dead cone", () => {
+    // The lesson ember and rock_throw both paid for: `shape` is only ever
+    // read by `resolveShape` inside `resolveAreaHit`, which `resolveHit`
+    // only calls when `hitsArea` is true. Wing Attack ships with it on, so
+    // its one shape node genuinely changes which tiles get hit.
+    expect(wingAttack.hitsArea).toBe(true);
+    expect(wingAttack.shape).toEqual({ kind: "cone", length: 2, width: 2 });
+  });
+
+  it("The Whole Wingspan is asserted in TILES, and it is a trade, not a strict upgrade", () => {
+    // Counted, not inferred from the radius/length constants: cone(2,2) is a
+    // 3-then-5 fan reaching two tiles; cone(3,2) is 1-then-3-then-5 reaching
+    // three. The span narrows at the shoulder and opens at the tip.
+    expect(tilesOf(wingAttack.shape)).toBe(8);
+
+    const capstone = wingAttack.tree!.full_wingspan;
+    expect(tilesOf(capstone.delta.shape!)).toBe(9);
+    const perDepth = (shape: Parameters<typeof resolveShape>[0]) => {
+      const counts: Record<number, number> = {};
+      for (const t of resolveShape(shape, { x: 10, y: 10 }, "E")) counts[t.x - 10] = (counts[t.x - 10] ?? 0) + 1;
+      return counts;
+    };
+    expect(perDepth(wingAttack.shape)).toEqual({ 1: 3, 2: 5 });
+    expect(perDepth(capstone.delta.shape!)).toEqual({ 1: 1, 2: 3, 3: 5 });
+
+    // `range.max` moves with the footprint. A cast range longer than the
+    // shape is how rock_throw's cone managed to whiff on a legal target.
+    expect(capstone.delta.range).toEqual({ max: 3 });
+  });
+
+  it("is the tree's only `shape` setter, and its only `situationalBonus` — both are OVERWRITE fields", () => {
+    const nodes = Object.values(wingAttack.tree!);
+    expect(nodes.filter((n) => n.delta.shape !== undefined).map((n) => n.id)).toEqual(["full_wingspan"]);
+    expect(nodes.filter((n) => n.delta.situationalBonus !== undefined).map((n) => n.id)).toEqual(["storm_wings"]);
+  });
+
+  it("`forcedMovement` is one monotone scatter ladder — the shipped tree had five setters racing each other", () => {
+    const setters = Object.values(wingAttack.tree!).filter((n) => n.delta.forcedMovement !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["driven_off", "scattering_strike", "harder_scatter"]);
+    // Every one of them shoves the DEFENDER away — the deliberate inversion
+    // of peck's `Nowhere to Run`, which hooks the defender one tile closer.
+    for (const n of setters) {
+      expect(n.delta.forcedMovement!.mover).toBe("defender");
+      expect(n.delta.forcedMovement!.direction).toBe("away");
+    }
+    expect(setters.map((n) => n.delta.forcedMovement!.tiles).sort()).toEqual([1, 2, 3]);
+    expect(MOVES.peck.tree!.nowhere_to_run.delta.forcedMovement).toEqual({
+      mover: "defender",
+      direction: "closer",
+      tiles: 1,
+      timing: "onHit",
+    });
+  });
+
+  it("Scoured Bare leaves real terrain under wherever the gust put them — the only non-water terrainFill in the roster", () => {
+    const capstone = wingAttack.tree!.final_stoop;
+    expect(capstone.delta.terrainFill).toEqual({ terrain: "sand" });
+    // Every other terrainFill in the roster wets the ground; this one takes
+    // it away, and sand is a real 0.75 movement-speed tile (support.ts's
+    // `terrainSpeedMultiplier`), which is what makes a 3-tile shove
+    // survivable for the attacker.
+    const otherFills = Object.values(MOVES)
+      .filter((m) => m.tree && m.id !== "wing_attack")
+      .flatMap((m) => Object.values(m.tree!))
+      .filter((n) => n.delta.terrainFill)
+      .map((n) => n.delta.terrainFill!.terrain);
+    expect(otherFills.length).toBeGreaterThan(0);
+    expect(otherFills).not.toContain("sand");
+  });
+
+  it("Flock's Eye answers the move's own flaw: an eight-tile cone that does not know your flock from theirs", () => {
+    const built = applyMoveTree(wingAttack, [
+      "warning_cry",
+      "quicker_call",
+      "open_ranks",
+      "rousing_call",
+      "lifts_the_flock",
+      "steadfast_call",
+      "flocks_eye",
+    ]);
+    expect(built.excludesAllies).toBe(true);
+    expect(built.rallyCall).toEqual({ ticks: 40 });
+    expect(built.allyEffectOnAttack).toBe(true);
+    // The base move has no such mercy — that is the flaw the branch buys off.
+    expect(wingAttack.excludesAllies).toBeUndefined();
+  });
+
+  it("`weightScaling` is one ladder across the Riding-the-Gust bridge into Aggression's deep notable", () => {
+    const setters = Object.values(wingAttack.tree!).filter((n) => n.delta.weightScaling !== undefined);
+    expect(setters.map((n) => n.id)).toEqual(["everything_behind_it", "riding_the_gust", "gathering_updraft", "stooping_dive"]);
+    expect(setters.map((n) => n.delta.weightScaling!.factor).sort()).toEqual([0.05, 0.08, 0.12, 0.15]);
+    // Principle 4: the deep notable's cost lives in the same node as its benefit.
+    expect(wingAttack.tree!.everything_behind_it.delta.lockTicks).toBe(1);
+  });
+
+  it("Covering Wing shares its crosslink's own lever (principle 13) and the total pull is unchanged from v3", () => {
+    const bridge = ["evasive_flight", "warning_cry", "screening_dive", "covering_wing", "wingmate_shield"];
+    const built = applyMoveTree(wingAttack, bridge);
+    expect(built.positionSwap).toBe(true);
+    // 1 + 1 + 1, additive in `applyMoveTree` — v3 granted 2 from a single
+    // node whose filler shared nothing with its own crosslink.
+    expect(built.positionSwapPull).toBe(3);
+    expect(wingAttack.tree!.screening_dive.delta.positionSwapPull).toBe(1);
+    expect(wingAttack.tree!.covering_wing.delta.positionSwapPull).toBe(1);
+  });
+
+  it("accuracy surplus is spendable rather than dead, because the storm penalty is what the Boldness lane is for", () => {
+    // `rollAccuracy` (combat.ts) multiplies by `stormAccuracyMultiplier`'s
+    // 0.6 inside a storm cell, so the break-even before a point of accuracy
+    // buys literally nothing is 100 / 0.6 = 167. The tree stops short of it.
+    const everything = Object.values(wingAttack.tree!).reduce((sum, n) => sum + (n.delta.accuracy ?? 0), 0);
+    expect(wingAttack.accuracy).toBe(100);
+    expect(wingAttack.accuracy + everything).toBeLessThan(Math.ceil(100 / 0.6));
+  });
+
+  it("crit stage stays inside `rollCritical`'s clamp of 3", () => {
+    const total = Object.values(wingAttack.tree!).reduce((sum, n) => sum + (n.delta.critRateStage ?? 0), 0);
+    expect(total).toBeLessThanOrEqual(3);
+  });
+
+  it("spends no more cooldown than the 3x tempo cap allows on a base of 4", () => {
+    const cut = Object.values(wingAttack.tree!).reduce((sum, n) => sum + Math.max(0, -(n.delta.cooldownTicks ?? 0)), 0);
+    const floor = Math.ceil((wingAttack.cooldownTicks + 1) / 3) - 1;
+    expect(cut).toBeLessThanOrEqual(wingAttack.cooldownTicks - floor);
+    expect(cut).toBe(3); // unchanged from the shipped tree — no headroom was spent
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round six: the five trees that shipped for moves that previously had none.
+// ---------------------------------------------------------------------------
+
+/**
+ * A `utilityMove` NEVER reaches the hostile hit pipeline — `pickBestMove`
+ * (combat.ts) filters it out of hostile selection, so `resolveHit` is never
+ * called with it and nothing downstream of `resolveHit` can ever fire. Every
+ * one of these delta fields is read ONLY from there, so a status-move tree
+ * node that sets one is dead content, which this project treats as a bug.
+ *
+ * This is the rule the round-six drafts broke hardest: they carried
+ * `shape`/`hitsArea`, `defensePenetration`, `statusChance`, `jamCooldownTicks`,
+ * `situationalBonus` and `forcedMovement` nodes on Harden, Growth and Agility.
+ */
+const DEAD_ON_A_UTILITY_MOVE = [
+  "power", "accuracy", "hits", "shape", "hitsArea", "range", "excludesAllies",
+  "defensePenetration", "critRateStage", "critCooldownReset", "lifestealFraction",
+  "recoilFraction", "jamCooldownTicks", "situationalBonus", "selfStateBonus",
+  "statusChance", "statusSeverity", "statusSpreads", "forcedMovement",
+  "positionSwap", "positionSwapPull", "terrainBurn", "terrainFill",
+  "consumesOwnTerrain", "chargeAttack", "weightScaling", "bonusVsType",
+  "resistanceBreaker", "selfCostPerUse", "rallyCall", "allyEffectOnAttack",
+  "gatherBurst",
+] as const;
+
+/**
+ * The ONLY three effect fields `maybeUseUtilityMoveInCombat` (utilityMoves.ts)
+ * will spend a fight action on. It decides by effect field, not by move id, so
+ * a status tree whose branch reaches none of them can never fire in a fight —
+ * which is the single most important thing to check about one.
+ */
+const COMBAT_USABLE_FIELDS = ["selfHeal", "statChangeOnHit", "statusImmunityAura"] as const;
+
+const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, kind: string) =>
+  Object.values(move.tree)
+    .flatMap((n) => [...(n.grantsPassive ? [n.grantsPassive] : []), ...(n.grantsPassives ?? [])])
+    .filter((g) => g.kind === kind)
+    .reduce((sum, g) => sum + g.value, 0);
+
+describe("the three new status trees only pull levers a utilityMove can actually reach", () => {
+  for (const moveId of ["harden", "growth", "agility"]) {
+    const move = MOVES[moveId] as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+    it(`${moveId} is flagged utilityMove, so these are the right rules for it`, () => {
+      expect(move.utilityMove).toBe(true);
+      expect(Object.keys(move.tree)).toHaveLength(45);
+    });
+
+    it(`${moveId} has no node setting a field only the hostile hit pipeline reads`, () => {
+      const offenders: string[] = [];
+      for (const node of Object.values(move.tree)) {
+        for (const field of DEAD_ON_A_UTILITY_MOVE) {
+          if ((node.delta as Record<string, unknown>)[field] !== undefined) offenders.push(`${node.id}.${field}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it(`every ${moveId} statChangeOnHit targets self and is positive — the defender side would be dead`, () => {
+      for (const node of Object.values(move.tree)) {
+        const change = node.delta.statChangeOnHit;
+        if (!change) continue;
+        expect(change.target).toBe("self");
+        expect(change.stage).toBeGreaterThan(0);
+      }
+    });
+
+    it(`every ${moveId} branch reaches something maybeUseUtilityMoveInCombat would spend an action on`, () => {
+      for (const branch of ["aggression", "boldness", "sociability"] as const) {
+        const inBranch = Object.values(move.tree).filter((n) => n.leaning === branch);
+        expect(inBranch.length).toBeGreaterThan(0);
+        const reaches = inBranch.some((n) =>
+          COMBAT_USABLE_FIELDS.some((f) => (n.delta as Record<string, unknown>)[f] !== undefined)
+        );
+        // Harden's Aggression is the one deliberate exception: its entire
+        // payoff is passives (thorns/unshaken/defenseBoost), which need no
+        // trigger at all and are live even in a fight the agent never chooses
+        // to spend an action in.
+        if (moveId === "harden" && branch === "aggression") {
+          expect(reaches).toBe(false);
+          expect(inBranch.filter((n) => n.grantsPassive || n.grantsPassives).length).toBeGreaterThan(4);
+          continue;
+        }
+        expect(reaches).toBe(true);
+      }
+    });
+  }
+});
+
+describe("Harden tree: a body clenching until it is a different material", () => {
+  const harden = MOVES.harden as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("Chrysalis is voluntary helplessness: a real action lock bought for a real heal", () => {
+    const respec = applyMoveTree(harden, [...resolveChosenSetFor(harden.tree, "chrysalis")]);
+    // `lockTicks` is applied by `useMove`, which the utility path DOES call —
+    // so this is a genuine cost, not a decorative one.
+    expect(respec.lockTicks).toBe(6);
+    expect(respec.selfHeal).toEqual({ fraction: 0.15 });
+    expect(harden.lockTicks ?? 0).toBe(0); // the base move locks nobody
+    expect(harden.selfHeal).toBeUndefined(); // and cannot heal at all
+  });
+
+  it("The Long Sleep escalates Chrysalis instead of racing it — Chrysalis is its ancestor", () => {
+    // Both selfHeal setters lie on one ancestry chain (Chrysalis -> Dense Core
+    // -> Unbudgeable -> Slow to Shift -> The Long Sleep), so a build holding
+    // both is a deliberate ladder, not an order-dependent race.
+    const path = [
+      ...resolveChosenSetFor(harden.tree, "chrysalis"),
+      ...resolveChosenSetFor(harden.tree, "the_long_sleep"),
+    ];
+    expect(path).toContain("chrysalis");
+    const respec = applyMoveTree(harden, [...new Set(path)]);
+    expect(respec.selfHeal).toEqual({ fraction: 0.3 });
+    expect(respec.lockTicks).toBe(14); // 6 (Chrysalis) + 8 — lockTicks is additive
+    expect(Object.values(harden.tree).filter((n) => n.delta.selfHeal).map((n) => n.id).sort())
+      .toEqual(["chrysalis", "the_long_sleep"]);
+  });
+
+  it("the Defense ladder climbs 1 -> 2 -> 3 -> 4 on one chain, so no two setters race", () => {
+    const stageAt = (id: string) =>
+      applyMoveTree(harden, [...resolveChosenSetFor(harden.tree, id)]).statChangeOnHit?.stage;
+    expect(harden.statChangeOnHit?.stage).toBe(1);
+    expect(stageAt("settling_weight")).toBe(2);
+    expect(stageAt("hardening_habit")).toBe(3);
+    expect(stageAt("unbudgeable")).toBe(4);
+    expect(Object.values(harden.tree).filter((n) => n.delta.statChangeOnHit).map((n) => n.id).sort())
+      .toEqual(["hardening_habit", "settling_weight", "unbudgeable"]);
+  });
+
+  it("the shell that breaks feeds the ground it breaks on — a real, map-visible fertilityBoost", () => {
+    const respec = applyMoveTree(harden, [...resolveChosenSetFor(harden.tree, "brittle_edge")]);
+    expect(respec.fertilityBoost).toEqual({ amount: 0.6, radius: 2 });
+    expect(Object.values(harden.tree).filter((n) => n.delta.fertilityBoost).map((n) => n.id).sort())
+      .toEqual(["brittle_edge", "shell_grit", "splinter"]);
+  });
+
+  it("Let It Pass is Sociability's fight-usable node and the capstone widens it, on one chain", () => {
+    expect(applyMoveTree(harden, [...resolveChosenSetFor(harden.tree, "let_it_pass")]).statusImmunityAura)
+      .toEqual({ ticks: 60, radius: 3 });
+    expect(applyMoveTree(harden, [...resolveChosenSetFor(harden.tree, "the_forest_floor")]).statusImmunityAura)
+      .toEqual({ ticks: 140, radius: 5 });
+  });
+
+  it("stays inside its per-move passive budgets, including the +6 stat-stage clamp", () => {
+    expect(passiveTotal(harden, "thorns")).toBeLessThanOrEqual(0.5);
+    expect(passiveTotal(harden, "damageReduction")).toBeLessThanOrEqual(0.2);
+    // Stat stages clamp at +6 (`statStageMultiplier`, combat.ts) and the tree's
+    // own statChangeOnHit already reaches +4, so a bigger defenseBoost pile
+    // would be points spent on nothing.
+    expect(passiveTotal(harden, "defenseBoost")).toBeLessThanOrEqual(4);
+  });
+});
+
+describe("Growth tree: the only move in the roster whose target is the ground", () => {
+  const growth = MOVES.growth as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("has no damage branch at all — a first for this roster", () => {
+    for (const node of Object.values(growth.tree)) {
+      expect(node.delta.power).toBeUndefined();
+      expect(node.delta.hits).toBeUndefined();
+    }
+  });
+
+  it("every fertilityBoost setter is on ONE ancestry chain — the draft had 14 racing each other", () => {
+    const setters = Object.values(growth.tree).filter((n) => n.delta.fertilityBoost).map((n) => n.id);
+    expect(setters.length).toBeGreaterThan(1);
+    // The deepest setter's own resolved path must contain every other one.
+    const deepest = [...resolveChosenSetFor(growth.tree, "it_takes")];
+    for (const id of setters) expect(deepest).toContain(id);
+  });
+
+  it("It Takes floods a 5x5 of ground and pays for it with a real action lock", () => {
+    const respec = applyMoveTree(growth, [...resolveChosenSetFor(growth.tree, "it_takes")]);
+    expect(respec.fertilityBoost).toEqual({ amount: 1.2, radius: 2 });
+    expect(respec.lockTicks).toBe(4);
+    expect(growth.fertilityBoost).toEqual({ amount: 0.3, radius: 0 }); // base: own tile only
+  });
+
+  it("uses drainNeeds as a weapon — the bramble takes the food out of what stands in it", () => {
+    const respec = applyMoveTree(growth, [...resolveChosenSetFor(growth.tree, "thicket")]);
+    expect(respec.drainNeeds).toEqual({ need: "hunger", amount: 0.05, radius: 3 });
+    // `drainNeeds` only ever reads hunger/thirst; "energy" would be inert.
+    for (const node of Object.values(growth.tree)) {
+      if (node.delta.drainNeeds) expect(["hunger", "thirst"]).toContain(node.delta.drainNeeds.need);
+    }
+  });
+
+  it("The Orchard calls real weather down rather than inventing a terrain primitive", () => {
+    const respec = applyMoveTree(growth, [...resolveChosenSetFor(growth.tree, "the_orchard")]);
+    expect(respec.spawnsRain).toBe(true);
+    expect(respec.lockTicks).toBe(10); // 4 (It Takes) + 6 — additive
+  });
+
+  it("Homestead and Nobody Leaves land as a population curve, via the shipped matingRadiusBoost", () => {
+    expect(applyMoveTree(growth, [...resolveChosenSetFor(growth.tree, "homestead")]).matingRadiusBoost)
+      .toEqual({ multiplier: 2.2, ticks: 300 });
+    expect(applyMoveTree(growth, [...resolveChosenSetFor(growth.tree, "nobody_leaves")]).matingRadiusBoost)
+      .toEqual({ multiplier: 3, ticks: 400 });
+  });
+});
+
+describe("Agility tree: the difference between getting somewhere and dying partway", () => {
+  const agility = MOVES.agility as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("the Speed ladder climbs 2 -> 3 -> 4 -> 5 -> 6 on one chain and really feeds actionSpeedOf", () => {
+    const stageAt = (id: string) =>
+      applyMoveTree(agility, [...resolveChosenSetFor(agility.tree, id)]).statChangeOnHit?.stage;
+    expect(agility.statChangeOnHit?.stage).toBe(2);
+    expect(stageAt("first_move")).toBe(3);
+    expect(stageAt("wound_up")).toBe(4);
+    expect(stageAt("blur")).toBe(5);
+    expect(stageAt("faster_than_thought")).toBe(6); // the engine clamps stages at 6
+  });
+
+  it("Wound Up pairs its extra stage with a real wind-up cost in the same node (principle 4)", () => {
+    const node = agility.tree.wound_up;
+    expect(node.delta.lockTicks).toBe(1);
+    expect(node.delta.statChangeOnHit?.stage).toBe(4);
+  });
+
+  it("the bad-ground fantasy is carried by shipped `fireproof`, topping out at exactly 1.0", () => {
+    expect(passiveTotal(agility, "fireproof")).toBeCloseTo(1, 6);
+  });
+
+  it("Moving as One grants the shipped herd speed aura, not an invented one", () => {
+    expect(agility.tree.moving_as_one.grantsPassive).toEqual({ kind: "aquaticHaste", value: 0.25 });
+    const respec = applyMoveTree(agility, [...resolveChosenSetFor(agility.tree, "moving_as_one")]);
+    // resolved through `applySupportMove`, which does NOT exclude utility moves
+    expect(respec.targetsAlly).toBe(true);
+    expect(respec.allyEffect).toEqual({ buff: { stat: "speed", stage: 3, ticks: 90 } });
+  });
+
+  it("stays inside the 3x tempo cap: base 50 floors at 16, so at most -34", () => {
+    const cut = Object.values(agility.tree)
+      .map((n) => Math.max(0, -(n.delta.cooldownTicks ?? 0)))
+      .reduce((a, b) => a + b, 0);
+    expect(cut).toBe(34);
+    expect(agility.cooldownTicks - cut).toBe(16);
+  });
+});
+
+describe("Twineedle tree: a poison delivery system with wings", () => {
+  const twineedle = MOVES.twineedle as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("Nothing Forgets sets hitsArea alongside its shape — shape alone is dead content", () => {
+    const respec = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "nothing_forgets")]);
+    expect(respec.hitsArea).toBe(true);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
+    // `burst` is a filled MANHATTAN diamond: radius 1 is five tiles.
+    expect(resolveShape(respec.shape, { x: 0, y: 0 }, "north")).toHaveLength(5);
+    expect(twineedle.hitsArea).toBeUndefined(); // the base move is single-target
+  });
+
+  it("The Swarm Decides widens the same cloud rather than redeclaring it, and spares the hive", () => {
+    const respec = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "the_swarm_decides")]);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 2 });
+    expect(resolveShape(respec.shape, { x: 0, y: 0 }, "north")).toHaveLength(13);
+    expect(respec.excludesAllies).toBe(true);
+    expect(respec.hitsArea).toBe(true); // inherited from Nothing Forgets, its own ancestor
+  });
+
+  it("the two Aggression lanes differ in KIND: volume in lane P, depth bought with energy in lane R", () => {
+    const volume = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "fourth_needle")]);
+    expect(volume.hits).toEqual({ min: 3, max: 4 });
+    expect(volume.statusSeverity).toBeUndefined();
+
+    const depth = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "pincushion")]);
+    expect(depth.statusSeverity).toBe(3);
+    expect(depth.selfCostPerUse).toEqual({ need: "energy", amount: 0.01 }); // Venom Sacs' real price
+    // Lane R adds NO needles of its own — the {3,3} it shows is the shared
+    // opener's, which both lanes walk through. More needles is lane P's answer.
+    expect(depth.hits).toEqual({ min: 3, max: 3 });
+    expect(twineedle.tree.venom_sacs.delta.hits).toBeUndefined();
+    expect(twineedle.tree.measured_strikes.delta.hits).toBeUndefined();
+    expect(twineedle.tree.pincushion.delta.hits).toBeUndefined();
+    expect(twineedle.tree.conserving_draw.delta.hits).toBeUndefined();
+  });
+
+  it("Venom Sacs and Empty the Sacs carry benefit and cost in the same node (principle 4)", () => {
+    expect(twineedle.tree.venom_sacs.delta.statusChance).toBe(0.1);
+    expect(twineedle.tree.venom_sacs.delta.selfCostPerUse).toEqual({ need: "energy", amount: 0.01 });
+    const cap = twineedle.tree.empty_the_sacs.delta;
+    expect(cap.hits).toEqual({ min: 4, max: 6 });
+    expect(cap.selfCostPerUse).toEqual({ need: "energy", amount: 0.06 });
+  });
+
+  it("the retreat ladder is one chain — 2 -> 3 -> 4 tiles — not three racing forcedMovement setters", () => {
+    const tilesAt = (id: string) =>
+      applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, id)]).forcedMovement?.tiles;
+    expect(tilesAt("hit_and_gone")).toBe(2);
+    expect(tilesAt("never_landed")).toBe(3);
+    expect(tilesAt("never_there")).toBe(4);
+    expect(Object.values(twineedle.tree).filter((n) => n.delta.forcedMovement).map((n) => n.id).sort())
+      .toEqual(["hit_and_gone", "never_landed", "never_there"]);
+  });
+
+  it("High Pass buys real cast range and strips the cover the target was standing in", () => {
+    const respec = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "high_pass")]);
+    expect(respec.range).toEqual({ min: 0, max: 3 });
+    expect(respec.terrainBurn).toBe(true);
+    expect(respec.power).toBe(twineedle.power - 5); // it pays for the reach
+  });
+});
+
+describe("Poison Sting tree: the sting is not the point, the sting is delivery", () => {
+  const poisonSting = MOVES.poison_sting as MoveSpec & { tree: Record<string, MoveTreeNode> };
+
+  it("Sickened ships the half of its own design the engine can actually run", () => {
+    const respec = applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, "sickened")]);
+    expect(respec.statusSeverity).toBe(2.4);
+    expect(respec.jamCooldownTicks).toBe(12);
+    // The needs-interference half could NOT ship: nothing on any needs-recovery
+    // path in needs.ts reads `agent.status`, and `drainNeeds` is unreachable on
+    // a non-utility move (utilityMoves.ts is its only reader).
+    for (const node of Object.values(poisonSting.tree)) {
+      expect(node.delta.drainNeeds).toBeUndefined();
+    }
+  });
+
+  it("the severity ladder is one chain, 1.3 -> 1.6 -> 2.4 -> 3.2", () => {
+    const sevAt = (id: string) =>
+      applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, id)]).statusSeverity;
+    expect(poisonSting.statusSeverity).toBeUndefined();
+    expect(sevAt("slow_working")).toBe(1.3);
+    expect(sevAt("thin_blood")).toBe(1.6);
+    expect(sevAt("sickened")).toBe(2.4);
+    expect(sevAt("let_it_work")).toBe(3.2);
+  });
+
+  it("Dry Bite genuinely abandons the tree's own premise: real power for real venom", () => {
+    const node = poisonSting.tree.dry_bite;
+    expect(node.delta.power).toBe(25);
+    expect(node.delta.statusChance).toBe(-0.2);
+    const respec = applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, "dry_bite")]);
+    expect(respec.statusChance).toBeCloseTo(0.1, 6); // base 0.3 - 0.2
+    expect(respec.power).toBe(poisonSting.power + 25);
+  });
+
+  it("The Long Meal breaks the resist Poison actually runs into, and feeds the pack", () => {
+    const respec = applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, "the_long_meal")]);
+    expect(respec.resistanceBreaker).toEqual({ multiplier: 1.6 });
+    // `gatherBurst` is genuinely live here: the canopy-harvest path (needs.ts)
+    // picks a `power > 0 && category !== "status"` move, which this is.
+    expect(respec.gatherBurst).toBe(3);
+    expect(poisonSting.power).toBeGreaterThan(0);
+    expect(poisonSting.category).not.toBe("status");
+  });
+
+  it("The Nest Decides is a real venom cloud the nest itself is exempt from", () => {
+    const respec = applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, "the_nest_decides")]);
+    expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
+    expect(respec.hitsArea).toBe(true);
+    expect(respec.excludesAllies).toBe(true);
+    expect(resolveShape(respec.shape, { x: 0, y: 0 }, "north")).toHaveLength(5);
+  });
+
+  it("the mark ladder is one chain — 80 -> 200 -> 260 ticks — not racing rallyCall setters", () => {
+    const ticksAt = (id: string) =>
+      applyMoveTree(poisonSting, [...resolveChosenSetFor(poisonSting.tree, id)]).rallyCall?.ticks;
+    expect(ticksAt("scent_trail")).toBe(80);
+    expect(ticksAt("nothing_leaves")).toBe(200);
+    expect(ticksAt("circling_nest")).toBe(260);
   });
 });

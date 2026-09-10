@@ -282,6 +282,9 @@ describe("applyMoveTree: newer delta fields", () => {
           terrainFill: { terrain: "water" },
           drainNeeds: { need: "hunger", amount: 0.1, radius: 3 },
           matingRadiusBoost: { multiplier: 2, ticks: 30 },
+          selfHeal: { fraction: 0.04 },
+          statusImmunityAura: { ticks: 40, radius: 0 },
+          spawnsRain: true,
         },
       },
       overwrite_stack_2: {
@@ -302,6 +305,8 @@ describe("applyMoveTree: newer delta fields", () => {
           terrainFill: { terrain: "mud" },
           drainNeeds: { need: "thirst", amount: 0.2, radius: 5 },
           matingRadiusBoost: { multiplier: 3, ticks: 60 },
+          selfHeal: { fraction: 0.09 },
+          statusImmunityAura: { ticks: 120, radius: 3 },
         },
       },
     },
@@ -332,7 +337,14 @@ describe("applyMoveTree: newer delta fields", () => {
     expect(respec.terrainFill).toEqual({ terrain: "mud" });
     expect(respec.drainNeeds).toEqual({ need: "thirst", amount: 0.2, radius: 5 });
     expect(respec.matingRadiusBoost).toEqual({ multiplier: 3, ticks: 60 });
+    // The `utilityMove` effect fields a tree can now set. These are the only
+    // three `maybeUseUtilityMoveInCombat` will spend a fight action on, so
+    // without them a status move's tree could never reach combat at all —
+    // leech_seed's v4 tree is the first to use them.
+    expect(respec.selfHeal).toEqual({ fraction: 0.09 });
+    expect(respec.statusImmunityAura).toEqual({ ticks: 120, radius: 3 });
     // Fields not touched by the second node keep the first node's value.
+    expect(respec.spawnsRain).toBe(true);
     expect(respec.positionSwap).toBe(true);
     expect(respec.allyEffectOnAttack).toBe(true);
     expect(respec.targetsAlly).toBe(true);

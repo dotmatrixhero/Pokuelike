@@ -21,9 +21,12 @@ reported all 17 trees clean without reading a single one, and a PP density
 rule silently passed everything because it compared against an undefined
 pool (`NaN > NaN` is false). So the checker runs `--selftest` against a
 deliberately malformed tree and **exits non-zero if it fails to find the
-problems it is supposed to find**. It currently catches 16 on that tree.
+problems it is supposed to find**. It currently catches 28 on that tree.
 
 When adding a rule, add its failing case to the selftest in the same commit.
+A rule that says "use X instead of Y" needs BOTH halves in the selftest: the
+Y that must be reported, and the X that must not. Without the second half a
+checker can pass by reporting everything.
 
 ## Structural rules
 
@@ -54,6 +57,31 @@ When adding a rule, add its failing case to the selftest in the same commit.
 | **Principle 17** — one signature lever must not answer a whole branch | ≤60% of identity nodes; shipped roster tops out at 50% | "twin needle just fuckin does the same shit the entire branch for sociable" |
 | **Colour-pie coverage** — a branch draws on ≥3 flavours | shipped averages 3.8 | "Branches need to have multiple Flavors to it, not a linear path" |
 | **Principle 4** — no pure-downside node | benefit and cost in the *same* node | A node that cost a skill point for `recoilFraction` alone |
+| **OVERWRITE collision** — now the FULL surface, derived by reading `applyMoveTree` | two co-takeable nodes setting any field the engine writes with `delta.X ?? result.X`, booleans excluded (those OR-merge, so two setters agree by construction) | Shipped leech_seed: *Twin Taproot* (thirst) and *Insatiable* (hunger) were independently takeable, so a build with both silently got whichever the engine reached last. The list was hand-maintained and kept missing fields — `weightScaling` was absent entirely while rock_slide shipped **six** independently-takeable setters of it |
+| **Additive forms are NOT reported** | — | `rangeBonus`, `hitsBonus`, `areaBonus`, `rallyCallTicks`, `situationalBonuses`, `statChangesOnHit`, `allyEffects` sum or append in `applyMoveTree`, so two setters both count. The selftest asserts BOTH halves: it must report the overwrite pair AND must stay silent on the same pair written additively — otherwise the fix would look identical to the bug |
+| **An additive field is the same LEVER as the field it replaces** | — | Principle 13 keys on delta field names. Migrating a crosslink to `situationalBonuses` made scratch's frenzied_burrow/wrong_side bridge read as "shares no lever" overnight. `ADDITIVE_TO_OVERWRITE` canonicalises the pair |
+
+**Known hole in the OVERWRITE rule, measured and not yet fixed.** The check
+treats two setters as safe when one is an *ancestor* of the other — but
+ancestry through `prerequisitesAnyOf` is a route, not a purchase order.
+`maybeAutoRespec` appends nodes in the order it buys them and `applyMoveTree`
+applies them in exactly that order, so a bridge shortcut lets an agent buy the
+deep node first and the shallow one later, and the shallow one wins.
+
+Re-measured after the additive-fields pass, all 17 trees at 3 rng seeds:
+**7 of 17 trees drift** (flamethrower and water_gun and leech_seed on
+`allyEffect`, rock_throw on `resistanceBreaker`, hydro_pump and wing_attack on
+`forcedMovement`, rock_slide on `weightScaling`, leech_seed on
+`statChangeOnHit`/`fertilityBoost`). Every drifting field is one still on the
+overwrite path — **making a field additive fixes its order-dependence as a
+side effect**, because a sum and a max are both commutative. Solar Beam's
+`situationalBonuses` array still comes out in a different order and the
+resolved multipliers are identical, which is the point.
+
+The fix is a decision, not a cleanup: sorting `chosenNodeIds` by depth is one
+line and changes the resolved spec of 7 shipped trees at once. See
+MOVES_DESIGN.md's "The additive fields ship" section for the table and the
+three options.
 
 Two refinements worth recording, because both were flaws in the *measurement*
 rather than the design:

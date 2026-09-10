@@ -5,8 +5,8 @@ import { applyForcedMovement, stepAway, stepToward } from "./movement.js";
 import { migrate } from "./migration.js";
 import { calculateDamage, pickBestMove, useMove, rollAccuracy, rollCritical, rollHitCount } from "./combat.js";
 import { elevationAccuracyMultiplier } from "./elevation.js";
-import type { Direction } from "./moves.js";
-import { resolveShape } from "./moves.js";
+import type { Direction, SituationalBonus } from "./moves.js";
+import { resolveShape, resolveAllyEffect, resolveSituationalBonuses, resolveStatChangesOnHit } from "./moves.js";
 import type { MoveSpec } from "./moves.js";
 import { canBreed, grantKillExp, maybeGrantHitSkillPoint, type LevelingContext } from "./leveling.js";
 import { GIANT_SLAYER_LEVEL_GAP } from "./notables.js";
@@ -869,6 +869,56 @@ function canAttackFromHere(world: World, agent: Agent, target: Agent, distance: 
 }
 
 /** True if a "bush" tile is what `agent` is currently standing on — see `Tile.concealment`. */
+/**
+ * Accuracy a shot loses to things that are TRUE ON THE MAP — not to a stat
+ * anyone is holding.
+ *
+ * This is the whole design position, in one function. Direct ask on the
+ * alternative: raw evasion stages are a hidden meter, and *"mechanics should
+ * be visible on the map, not hidden in a meter."* A defender at +4 evasion
+ * looks exactly like one at 0 and the chronicle can only say "it missed".
+ * Every term below is instead something a player can point at: a bush, the
+ * dark, a creature running.
+ *
+ * Flat points, not multipliers, and on the same scale as distance
+ * (`ACCURACY_LOST_PER_TILE`), so they can be reasoned about together: cover
+ * is "about four tiles of distance".
+ */
+export function situationalAccuracyPenalty(world: World, attacker: Agent, defender: Agent): number {
+  let penalty = 0;
+
+  // COVER. `isConcealed` was already real and already shrank the radius at
+  // which this agent gets NOTICED — it just did nothing once a fight
+  // started, so standing in a bush made you harder to find and no harder to
+  // hit. Direct call on the number: "Yes. Flat 20."
+  if (isConcealed(world, defender)) penalty += CONCEALED_ACCURACY_PENALTY;
+
+  // DARKNESS, unless the attacker hunts by night. A nocturnal species is the
+  // sim's existing night-vision trait — no new flag invented for this.
+  if (isNight(world.tick) && (attacker.activityPattern ?? "cathemeral") !== "nocturnal") {
+    penalty += NIGHT_ACCURACY_PENALTY;
+  }
+
+  // A TARGET MID-SPRINT, harder the longer it has been running. Direct: "I
+  // don't like how easy it is to chase down and kill things." Capped, or a
+  // long chase would become unwinnable rather than merely costly — and the
+  // streak breaks the instant the target stops to do anything else, so this
+  // is paid for in actions not spent fighting back.
+  const streak = Math.min(defender.consecutiveMoveActions ?? 0, MAX_SPRINT_ACCURACY_STACKS);
+  penalty += streak * SPRINT_ACCURACY_PENALTY_PER_ACTION;
+
+  return penalty;
+}
+
+/** Flat accuracy lost shooting at something in cover — roughly four tiles of distance. */
+const CONCEALED_ACCURACY_PENALTY = 20;
+/** Flat accuracy lost shooting in the dark, unless the attacker is nocturnal. */
+const NIGHT_ACCURACY_PENALTY = 15;
+/** Flat accuracy lost per consecutive action the TARGET spent moving. */
+const SPRINT_ACCURACY_PENALTY_PER_ACTION = 5;
+/** Cap on the sprint stacks, so a long chase is costly rather than impossible. */
+const MAX_SPRINT_ACCURACY_STACKS = 4;
+
 function isConcealed(world: World, agent: Agent): boolean {
   if ((agent.burrowedTicksRemaining ?? 0) > 0) return true;
   return tileAt(world, agent.layer, agent.pos.x, agent.pos.y)?.concealment === true;
@@ -956,8 +1006,17 @@ function isBeingHunted(world: World, agent: Agent): boolean {
  * `situationalBonus`, or its condition doesn't currently hold.
  */
 function situationalMultiplier(world: World, attacker: Agent, defender: Agent, move: MoveSpec): number {
-  const bonus = move.situationalBonus;
-  if (!bonus) return 1;
+  // Every bonus whose condition currently holds multiplies in — a build that
+  // paid for "hits harder from high ground" AND "hits harder from a flank"
+  // gets both. `resolveSituationalBonuses` (moves.ts) has already collapsed
+  // same-condition ladders to their strongest entry, so this is a product
+  // over DISTINCT conditions and cannot double-count one of them.
+  let total = 1;
+  for (const bonus of resolveSituationalBonuses(move)) total *= oneSituationalMultiplier(world, attacker, defender, bonus);
+  return total;
+}
+
+function oneSituationalMultiplier(world: World, attacker: Agent, defender: Agent, bonus: SituationalBonus): number {
   switch (bonus.condition) {
     case "targetLowHp":
       return defender.hp !== undefined && defender.maxHp !== undefined && defender.maxHp > 0 && defender.hp / defender.maxHp <= 0.5
@@ -1268,7 +1327,49 @@ function resolveHitAgainstTarget(
   const defenderElevation = tileAt(world, defender.layer, defender.pos.x, defender.pos.y)?.elevation ?? 0;
   const elevationMultiplier = elevationAccuracyMultiplier(attackerElevation, defenderElevation);
 
-  if (!rollAccuracy(move, 0, 0, rng, stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier * elevationMultiplier)) {
+  const accuracyExtra =
+    stormAccuracyMultiplier(world, attacker.layer, attacker.pos) * accuracyBonusMultiplier * elevationMultiplier;
+
+  let diedTrue = false;
+  let landed = 0;
+  const hitCount = rollHitCount(move.hits, rng);
+  for (let i = 0; i < hitCount; i++) {
+    if (isDead(defender)) break; // died mid-flurry — nothing left for later hits of this same move to land on
+
+    // Accuracy is rolled PER HIT, not once for the whole flurry. Direct:
+    // "Accuracy should be per hit I think." Rolling once made a multi-hit
+    // move land every hit or none, which inverted the intuition badly — a
+    // 3-hit move was no less reliable than a 1-hit one, so accuracy was
+    // worth strictly MORE on a multi-hit build than a single-hit one. Now a
+    // flurry can connect partially, and the expected damage of a 3-hit move
+    // at 80 accuracy is 2.4 hits rather than "3 hits, 80% of the time".
+    if (
+      !rollAccuracy(
+        move,
+        getStatStage(attacker, "accuracy"),
+        getStatStage(defender, "evasion"),
+        rng,
+        accuracyExtra,
+        manhattan(attacker.pos, defender.pos),
+        situationalAccuracyPenalty(world, attacker, defender)
+      )
+    )
+      continue;
+
+    // Fire thaws on the first hit that actually connects, not on the swing.
+    if (landed === 0) maybeThawOnFireHit(defender, move.type, world, log);
+    landed++;
+
+    if (applySingleDamageInstance(world, attacker, defender, move, log, faintKind, ctx, rng)) {
+      diedTrue = true;
+      break;
+    }
+  }
+
+  if (landed === 0) {
+    // A whole-flurry miss reads as one "missed" beat, not one per hit — the
+    // chronicle wants "it swung and missed", not three lines of it. Single-hit
+    // moves are byte-identical to the old behaviour here.
     log?.record({
       kind: "missed",
       tick: world.tick,
@@ -1282,20 +1383,6 @@ function resolveHitAgainstTarget(
     return false;
   }
 
-  // A landed Fire hit thaws a frozen defender instantly, independent of
-  // whether this move itself inflicts anything — real mainline behavior.
-  maybeThawOnFireHit(defender, move.type, world, log);
-
-  let diedTrue = false;
-  const hitCount = rollHitCount(move.hits, rng);
-  for (let i = 0; i < hitCount; i++) {
-    if (isDead(defender)) break; // died mid-flurry — nothing left for later hits of this same move to land on
-    if (applySingleDamageInstance(world, attacker, defender, move, log, faintKind, ctx, rng)) {
-      diedTrue = true;
-      break;
-    }
-  }
-
   if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
     // A landed, damaging, non-killing hit — the one place status, the
     // defender-side stat change, on-hit forced movement, and a position
@@ -1304,8 +1391,10 @@ function resolveHitAgainstTarget(
     if (move.statusSpreads && defender.status) {
       maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
     }
-    if (move.statChangeOnHit?.target === "defender") {
-      applyStatStage(defender, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+    for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "defender")) {
+      // Keyed by the move, so hitting the same target with the same move
+      // again refreshes the debuff instead of stacking a second copy of it.
+      applyStatStage(defender, change.stat, change.stage, change.ticks, move.id);
     }
     if (move.forcedMovement?.timing === "onHit") applyForcedMovement(world, move.forcedMovement, attacker, defender);
     if (move.positionSwap) {
@@ -1494,17 +1583,20 @@ function resolveHit(
 
   // A self-side stat change (e.g. a windup buff) always applies the moment
   // the move is used — see `MoveSpec.statChangeOnHit`'s own doc comment.
-  if (move.statChangeOnHit?.target === "self") {
-    applyStatStage(attacker, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+    // Keyed by the move: using it again refreshes the windup buff rather
+    // than stacking another stage, so spamming one move can never beat
+    // building it. A DIFFERENT move still adds its own entry.
+    applyStatStage(attacker, change.stat, change.stage, change.ticks, move.id);
   }
 
   // `allyEffectOnAttack`: the ally-effect piggybacks on a hostile attack,
   // additively — same "the moment the move is used" timing as the self-side
   // stat change above, independent of whether this attack itself lands. A
   // no-op if no eligible herd-mate is in range this tick.
-  if (move.allyEffectOnAttack && move.allyEffect) {
+  if (move.allyEffectOnAttack && resolveAllyEffect(move)) {
     const ally = nearestAllyEffectTarget(world, attacker, move);
-    if (ally) applyAllyEffect(world, attacker, ally, move.allyEffect, log);
+    if (ally) applyAllyEffect(world, attacker, ally, resolveAllyEffect(move)!, log);
   }
 
   if (move.hitsArea) return resolveAreaHit(world, attacker, defender, move, log, faintKind, ctx, rng, accuracyBonusMultiplier);
@@ -1633,6 +1725,145 @@ function giveUpAndRelocate(world: World, agent: Agent, log: EventLog | undefined
  * `agent.relocateTarget`'s own persistence, unchanged by this) once thirst
  * is satisfied again.
  */
+/**
+ * Attackers whose level is more than this far BELOW the agent's don't count
+ * toward being surrounded. Direct: "3 attackers unless they're really weak
+ * like, more than 8 levels below."
+ *
+ * Deliberately wider than `GIANT_SLAYER_LEVEL_GAP` (5, notables.ts): that
+ * one asks "was this an upset?", this one asks "is this a threat at all?",
+ * and being mobbed by things you outclass should read as an annoyance rather
+ * than a crisis.
+ */
+export const OUTMATCHED_ATTACKER_LEVEL_GAP = 8;
+
+/** How many real attackers it takes to trigger fight-or-flight. */
+export const SURROUNDED_ATTACKER_COUNT = 3;
+
+/** Actions an agent sticks with its fight-or-flight choice before re-deciding. */
+export const FIGHT_OR_FLIGHT_COMMIT_ACTIONS = 6;
+
+/**
+ * Everything currently pointed at `agent` and worth worrying about — within
+ * `FLEE_DETECT_RADIUS`, targeting it by `huntTarget` or `fightTarget`, and
+ * not more than `OUTMATCHED_ATTACKER_LEVEL_GAP` levels beneath it.
+ *
+ * This is the number the sim never had. `isBeingHunted` is a BOOLEAN, so one
+ * hunter and five were the same value, and the only flee trigger was
+ * `isCriticallyHurt` — the sim's answer to being surrounded was to keep
+ * doing whatever you were doing until nearly dead.
+ */
+export function threateningAttackers(world: World, agent: Agent): Agent[] {
+  const myLevel = agent.level ?? 1;
+  return agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(
+    (other) =>
+      other.alive !== false &&
+      (other.huntTarget === agent.id || other.fightTarget === agent.id) &&
+      (other.level ?? 1) >= myLevel - OUTMATCHED_ATTACKER_LEVEL_GAP
+  );
+}
+
+/**
+ * Surrounded: pick fight or flight, then COMMIT to it for a few actions.
+ *
+ * Weighted roll rather than a lookup, on request — a deterministic table
+ * would make one species always do one thing, and the variety is the point.
+ * The weights read off things that are already true and already visible: a
+ * bold or aggressive animal turns, a sociable one runs, herd-mates at your
+ * shoulder make standing look better, being hurt makes it look worse.
+ *
+ * Returns whether it took the agent's action.
+ */
+function applyFightOrFlight(
+  world: World,
+  agent: Agent,
+  log: EventLog | undefined,
+  ctx: LevelingContext | undefined,
+  rng: () => number
+): boolean {
+  const attackers = threateningAttackers(world, agent);
+
+  // The commitment ends the moment its reason does — nothing pointed at you
+  // is not a thing to keep running from.
+  if (attackers.length === 0) {
+    agent.fightOrFlightActionsLeft = 0;
+    agent.fightOrFlightChoice = undefined;
+    return false;
+  }
+
+  const committed = (agent.fightOrFlightActionsLeft ?? 0) > 0 && agent.fightOrFlightChoice !== undefined;
+
+  if (!committed) {
+    if (attackers.length < SURROUNDED_ATTACKER_COUNT) return false;
+
+    const disposition = agent.disposition;
+    // Standing weights: temperament, then the two facts that actually change
+    // whether standing is survivable.
+    let fightWeight = (disposition?.aggression ?? 0.5) + (disposition?.boldness ?? 0.5);
+    let flightWeight = (disposition?.sociability ?? 0.5) + 0.5;
+
+    const allies = countHerdAllies(
+      world,
+      agent.id,
+      agent.species,
+      agent.herdId,
+      agent.layer,
+      agent.pos,
+      FLEE_DETECT_RADIUS
+    );
+    fightWeight += allies * 0.4;
+
+    const hpFraction = agent.hp !== undefined && agent.maxHp ? agent.hp / agent.maxHp : 1;
+    flightWeight += (1 - hpFraction) * 1.5;
+
+    // Outnumbered is itself a reason to run, and it applies to PREDATORS too.
+    // Direct: "Yeah also flee when out numbered." Before this, a predator
+    // being mobbed only ever broke off when critically hurt, which is the
+    // thing that made mobbing feel weightless.
+    flightWeight += (attackers.length - SURROUNDED_ATTACKER_COUNT + 1) * 0.5;
+
+    agent.fightOrFlightChoice = rng() * (fightWeight + flightWeight) < flightWeight ? "flee" : "fight";
+    agent.fightOrFlightActionsLeft = FIGHT_OR_FLIGHT_COMMIT_ACTIONS;
+  }
+
+  agent.fightOrFlightActionsLeft = (agent.fightOrFlightActionsLeft ?? 1) - 1;
+
+  const target = nearest(agent, attackers);
+  if (!target) return false;
+
+  // Being surrounded wakes you.
+  agent.asleep = false;
+  agent.sleepTicks = 0;
+
+  if (agent.fightOrFlightChoice === "flee") {
+    logBehaviorChange(log, world, agent, "flee");
+    agent.behavior = "flee";
+    agent.huntTarget = undefined;
+    agent.fightTarget = undefined;
+    agent.pos = stepAway(world, agent.layer, agent.pos, target.pos, agent);
+    return true;
+  }
+
+  // Standing. Carried out here rather than by falling through to the normal
+  // threat path below, because that path re-decides on mob size and level
+  // gap every action and would simply undo the choice — the commitment is
+  // the whole feature. Non-lethal `"defeated"`, same as the mob-fight
+  // branch: a cornered animal that turns is making the fight cost
+  // something, not expected to win it.
+  const distance = manhattan(agent.pos, target.pos);
+  logBehaviorChange(log, world, agent, "fight");
+  agent.behavior = "fight";
+  agent.huntTarget = undefined;
+  agent.fightTarget = target.id;
+  if (canAttackFromHere(world, agent, target, distance)) {
+    resolveHit(world, agent, target, log, "defeated", ctx, distance, rng);
+  } else {
+    // stopAdjacent=true — see stepToward's doc comment.
+    agent.pos = stepToward(world, agent.layer, agent.pos, target.pos, agent, undefined, true);
+  }
+  return true;
+}
+
 export function applyPredationInstincts(
   world: World,
   agent: Agent,
@@ -1665,6 +1896,13 @@ export function applyPredationInstincts(
   // logic would apply as if this feature didn't single it out. A
   // non-predator's priority is completely unchanged.
   if (!agent.isPredator && applyEggDefense(world, agent, ctx, log, rng)) return true;
+
+  // Surrounded — runs BEFORE the critically-hurt check on purpose. The old
+  // order meant the only trigger for changing your mind was already being
+  // nearly dead; being three-on-one is supposed to be the thing you react to
+  // *before* that. Skipped while asleep, like every other volitional branch
+  // here.
+  if (!agent.asleep && applyFightOrFlight(world, agent, log, ctx, rng)) return true;
 
   if (!agent.asleep && isCriticallyHurt(agent)) {
     const attackers = agentsWithin(world, agent, FLEE_DETECT_RADIUS).filter(

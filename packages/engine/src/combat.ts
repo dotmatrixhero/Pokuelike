@@ -57,10 +57,14 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
  * PokeRogue's convention for "can't miss") always hits regardless of
  * stages/`extraMultiplier` — a guaranteed-hit move stays guaranteed even
  * mid-storm, matching how it already ignores accuracy/evasion stages.
- * Stages default to 0 (no agent in the sim currently has accuracy/evasion
- * stages), so `accuracyStageMultiplier` is a no-op multiplier until
- * something changes them — but the roll itself is real: a move with
- * `accuracy < 100` can now actually miss. See TODO.md.
+ * Accuracy and evasion stages are REAL now: `"accuracy"` and `"evasion"` are
+ * `StatKey`s (nature.ts), so any tree node can grant them through the same
+ * `statChangeOnHit` plumbing every other stat uses, and both call sites —
+ * predation.ts's `resolveHitAgainstTarget` and herdConflict.ts's
+ * `resolveRivalryHit` — pass the attacker's accuracy stage against the
+ * defender's evasion stage. They were hardcoded to 0 at both sites for most
+ * of this project's life, which made this parameter pair, and
+ * `accuracyStageMultiplier` with it, elaborate dead code.
  *
  * `extraMultiplier` (default 1) is a second, independent multiplier on top
  * of the stage-based one — currently weather.ts's Phase 3 storm accuracy
@@ -69,15 +73,60 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
  * accuracy-affecting effect composes the same way rather than needing its
  * own bespoke parameter.
  */
+/**
+ * Accuracy lost per tile of distance to the target — so a shot across the
+ * map is a real gamble and standing next to something is not. Direct: "I
+ * think accuracy should reduce naturally by like 5 for every tile you're far
+ * away from a target so like at 5 tiles away you are 25 less accuracy."
+ *
+ * SUBTRACTED from the accuracy percentage, not multiplied: at 5 tiles a
+ * 100-accuracy move is 75%, exactly as described, and a 90-accuracy move is
+ * 65%. A multiplier would have scaled the penalty with the move's own
+ * accuracy, which reads backwards — distance should cost a sniper the same
+ * points it costs everyone else.
+ *
+ * The FIRST tile is free, and every tile past it costs 8. Adjacent melee is
+ * therefore untouched — which matters, because it is the baseline every move
+ * in the roster was tuned at, and a flat per-tile rate had quietly made a
+ * 100-accuracy melee swing a 95% one.
+ *
+ * The free tile costs nothing at the range most of the roster actually
+ * fights at, and 5 per tile past it keeps a long shot a real gamble without
+ * making the ranged builds that spent points on reach unusable.
+ *
+ *   distance  1    2    3    4    5    6    7
+ *   penalty   0   -5  -10  -15  -20  -25  -30
+ */
+export const ACCURACY_LOST_PER_TILE = 5;
+
+/** The flat accuracy penalty for firing from `distance` tiles away — the first tile is free. */
+export function distanceAccuracyPenalty(distance: number): number {
+  return Math.max(0, Math.floor(distance) - 1) * ACCURACY_LOST_PER_TILE;
+}
+
 export function rollAccuracy(
   move: Pick<MoveSpec, "accuracy">,
   accuracyStage = 0,
   evasionStage = 0,
   rng: () => number = Math.random,
-  extraMultiplier = 1
+  extraMultiplier = 1,
+  /** Tiles between attacker and target — the first is free, each one past it costs `ACCURACY_LOST_PER_TILE`. Defaults to melee, which is free. */
+  distance = 1,
+  /**
+   * Any further flat accuracy the shot loses to things that are TRUE ON THE
+   * MAP rather than held in a stat — cover, darkness, a target mid-sprint.
+   * See predation.ts's `situationalAccuracyPenalty`, which is the only real
+   * source; kept as a plain number here so combat.ts stays ignorant of what
+   * caused it.
+   */
+  situationalPenalty = 0
 ): boolean {
   if (move.accuracy < 0) return true;
-  const chance = move.accuracy * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
+  // Flat penalties come off the base accuracy BEFORE the stage and weather
+  // multipliers scale it, so a storm makes a long shot worse proportionally
+  // rather than the two being independent cuts.
+  const base = Math.max(0, move.accuracy - distanceAccuracyPenalty(distance) - situationalPenalty);
+  const chance = base * accuracyStageMultiplier(accuracyStage, evasionStage) * extraMultiplier;
   return rng() * 100 < chance;
 }
 

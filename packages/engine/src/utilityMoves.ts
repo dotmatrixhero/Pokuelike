@@ -1,5 +1,6 @@
 import type { Agent, World } from "./types.js";
-import type { StatKey } from "./nature.js";
+import type { MoveSpec } from "./moves.js";
+import { resolveStatChangesOnHit } from "./moves.js";
 import type { EventLog } from "./events.js";
 import { tileAt } from "./world.js";
 import { useMove } from "./combat.js";
@@ -70,8 +71,8 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
       }
     }
 
-    if (move.statChangeOnHit?.target === "self") {
-      applyStatStage(agent, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+    for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+      applyStatStage(agent, change.stat, change.stage, change.ticks);
     }
 
     if (move.statusImmunityAura) {
@@ -116,6 +117,9 @@ const COMBAT_HEAL_HP_FRACTION = 0.6;
  */
 const COMBAT_MAX_SELF_BUFF_STAGES = 2;
 
+/** A self-buff this move already owns is worth re-spending a fight action on only once it is nearly gone. */
+const REFRESH_WHEN_TICKS_LEFT = 5;
+
 /**
  * Is this utility move worth an ACTION IN A FIGHT, right now?
  *
@@ -132,17 +136,27 @@ const COMBAT_MAX_SELF_BUFF_STAGES = 2;
  * because bracing and heavy hits both already talk to the stat-stage system,
  * not because anything pairs the two moves together.
  */
-function worthAnActionInCombat(agent: Agent, move: { selfHeal?: unknown; statChangeOnHit?: { target?: string; stat: StatKey; stage: number }; statusImmunityAura?: unknown }): boolean {
+function worthAnActionInCombat(agent: Agent, move: MoveSpec): boolean {
   if (move.selfHeal && agent.hp !== undefined && agent.maxHp !== undefined && agent.maxHp > 0) {
     if (agent.hp / agent.maxHp <= COMBAT_HEAL_HP_FRACTION) return true;
   }
-  const change = move.statChangeOnHit;
-  if (change?.target === "self" && change.stage > 0) {
-    // Only while the buff is still buying something. Re-applying a stat the
-    // agent has already stacked is the classic "AI wastes its whole fight
-    // on setup" failure, and it is a real one here: `applyStatStage` PUSHES
-    // rather than replaces, so nothing else stops it.
-    if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) return true;
+  for (const change of resolveStatChangesOnHit(move)) {
+    if (change.target !== "self" || change.stage <= 0) continue;
+    // Two reasons to spend an action here, and the second one only matters
+    // now that `applyStatStage` keys entries by their source move:
+    //
+    //  1. The agent is not yet at the setup ceiling. Re-buffing past that is
+    //     the classic "AI wastes its whole fight on setup" failure.
+    //  2. This move's OWN entry is about to expire. Entries refresh rather
+    //     than stack now, so a +3 buff sits above the ceiling forever and
+    //     rule 1 alone would make the move permanently unusable the moment
+    //     it first landed — worse than the bug the ceiling prevents.
+    const mine = (agent.statStages ?? []).find((st) => st.stat === change.stat && st.sourceMoveId === move.id);
+    if (!mine) {
+      if (getStatStage(agent, change.stat) < COMBAT_MAX_SELF_BUFF_STAGES) return true;
+    } else if ((mine.ticksRemaining ?? Infinity) <= REFRESH_WHEN_TICKS_LEFT) {
+      return true;
+    }
   }
   // Status immunity is worth an action only against something that can
   // actually inflict a status — checked by the caller, which has the
@@ -193,8 +207,8 @@ export function maybeUseUtilityMoveInCombat(
     if (move.selfHeal.sunbeamBonus && isNearSunbeam(world, agent.pos)) fraction += move.selfHeal.sunbeamBonus;
     agent.hp = Math.min(agent.maxHp, agent.hp + agent.maxHp * fraction);
   }
-  if (move.statChangeOnHit?.target === "self") {
-    applyStatStage(agent, move.statChangeOnHit.stat, move.statChangeOnHit.stage, move.statChangeOnHit.ticks);
+  for (const change of resolveStatChangesOnHit(move).filter((c) => c.target === "self")) {
+    applyStatStage(agent, change.stat, change.stage, change.ticks);
   }
   if (move.statusImmunityAura) {
     const { ticks, radius } = move.statusImmunityAura;

@@ -602,6 +602,40 @@ describe("applySupportMove: ally-targeting effects", () => {
     );
   });
 
+  it("a burrow move can be a support move too — support.ts does not exclude them, and Dig's Sociability lane depends on that", () => {
+    // `pickBestMove` (combat.ts) excludes every `burrow` move from hostile
+    // selection, which is why Dig can never be resolved as a hit. This path
+    // deliberately does NOT, so a Dig specced with `targetsAlly` + `allyEffect`
+    // really does dig a den for a hurt herd-mate on an idle tick — and pays
+    // the same full cooldown that gates its own burrow-escape, which is the
+    // whole cost of that build.
+    const DIG_A_DEN: MoveSpec = { ...HEAL_ALLY, id: "dig-a-den", burrow: { ticks: 20 }, cooldownTicks: 15 };
+    const world = createWorld(10, 10);
+    const digger = makeAgent({ id: "s1", pos: { x: 5, y: 5 }, herdId: "h1", moves: [DIG_A_DEN] });
+    const ally = makeAgent({ id: "a2", pos: { x: 6, y: 5 }, herdId: "h1", hp: 40, maxHp: 100 });
+    world.agents.push(digger, ally);
+
+    expect(applySupportMove(world, digger, undefined)).toBe(true);
+    expect(ally.hp).toBeCloseTo(60);
+    expect(digger.moveCooldowns?.["dig-a-den"]).toBe(15);
+
+    // Control: the same burrow move without the ally-effect deltas is not a
+    // support move at all, so this is reading `targetsAlly`/`allyEffect` and
+    // not merely "any burrow move gets picked up here".
+    const control = createWorld(10, 10);
+    const plain = makeAgent({
+      id: "s2",
+      pos: { x: 5, y: 5 },
+      herdId: "h2",
+      moves: [{ ...DIG_A_DEN, id: "plain-dig", targetsAlly: undefined, allyEffect: undefined }],
+    });
+    const hurt = makeAgent({ id: "a3", pos: { x: 6, y: 5 }, herdId: "h2", hp: 40, maxHp: 100 });
+    control.agents.push(plain, hurt);
+
+    expect(applySupportMove(control, plain, undefined)).toBe(false);
+    expect(hurt.hp).toBe(40);
+  });
+
   it("applies a buff (with duration) instead of/in addition to healing", () => {
     const world = createWorld(10, 10);
     const supporter = makeAgent({ id: "s1", pos: { x: 5, y: 5 }, herdId: "h1", moves: [BUFF_ALLY] });

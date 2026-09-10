@@ -5071,3 +5071,2319 @@ deeper trees are still outrunning what an 8,000-tick population levels into.
 Every capstone and every bridge shortcut *is* legal and reachable, proved by
 walking all six routes through the real `applyMoveTree` (which throws on an
 illegal walk) and by proving that harness rejects an illegal walk first.
+
+### Dig converted to v4 — "the only move whose payoff is absence"
+
+29 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. All
+three v3 forks survive, relocated to the tail of a lane. Checker findings for
+this tree: **10 → 0**, with no overwrite collisions left over.
+
+**The trap had to be cleared before any design was possible.** Dig is never
+resolved as a hit — `pickBestMove` (combat.ts) excludes every `burrow` move —
+so power/accuracy/crit/penetration/forced-movement and everything else the
+template usually leans on are dead weight. The tree's own source comment went
+further and claimed cooldown and passives were "the only two real levers
+left," and that turned out to be **read off the delta schema, never off the
+call sites**. Measured against the real engine, each with its own control:
+
+| lever | reaches dig through | verified |
+|---|---|---|
+| `cooldownTicks` | `useMove` + every off-cooldown gate | already known |
+| `gatherBurst` | needs.ts crop-dig and spring-dig | already known |
+| **`lockTicks`** | `useMove` (combat.ts), which the burrow-flee branch calls | lockTicks 3 → `actionLockTicks` 3, control 0 |
+| **`targetsAlly` + `allyEffect`** | `applySupportMove` (support.ts) — it filters on `targetsAlly && allyEffect && !cooldown` and does **not** exclude burrow moves | healed an adjacent herd-mate on an idle tick; the shipped dig, as control, did not |
+| **`range`** | only that same support path, deciding which herd-mates are reachable | max 1 could not reach an ally 3 tiles off, max 3 could |
+| `power` | nothing | 200 power changed no outcome; `pickBestMove` returns undefined |
+
+Both new engine facts are now regression-guarded with their controls in
+`predation.test.ts` and `support.test.ts`.
+
+**The fantasy:**
+
+> Dig is the ground opening under something and closing again. Nothing is
+> struck; something is simply not there any more. For a Diglett or a
+> Sandshrew the tunnel is not an escape hatch, it is the house — it is where
+> the water is, where the roots are, and where the other burrowers already
+> live. It is the only move in the roster whose payoff is absence, and the
+> only one whose real work happens where nobody can watch it.
+
+| branch | lane A | lane B | the new idea |
+|---|---|---|---|
+| **Gone Before It Lands** (agg) | FREQUENCY — be gone and back before anything gets a turn (`-1`, grit, *Never Still*) | COMMITMENT — go down, stay down, come up with it (`lockTicks` + `gatherBurst`, *Straight to the Root*, then the preserved vanish-vs-bite fork) | *Stays Down* |
+| **The Roof Holds** (bold) | SOAK — flat mitigation, strong early, marginal late | DENIAL — *Set in the Wall*'s `immovable`: not "the hit hurts less" but "you do not get to move me" | *Set in the Wall* |
+| **Shared Ground** (soc) | PREVENTION — the tunnels are neutral ground, nothing starts down here | REPAIR — *Dug You a Den* spends the escape hatch digging cover for somebody else | *Dug You a Den*, *Open Tunnels* |
+
+**The best node in the tree is *Dug You a Den*, and it is the one no other
+move could have.** Every other support move in the roster hands out a heal it
+was already going to hand out. Dig's support use costs the thing the move is
+*for*: `applySupportMove` puts it on the same full 15-tick cooldown that gates
+the burrow-escape, so a Diglett that just dug a den for a hurt herd-mate
+cannot vanish for itself. Predation runs before support in `tickAgentAction`,
+so it never costs a flee it was about to make — it costs the *next* one.
+
+**Two dead-content bugs found and fixed in passing:**
+
+- *Shallow Dive* was named **"-2 Cooldown"** and its delta was `-1`. Principle
+  5, shipped.
+- *Stone Hide* granted `damageReductionFlat: 1` against its own fork partner
+  *Weathered Scales*' `1.5` — the same passive, strictly less of it. Nobody
+  picks that. Changed to `defenseBoost`, which the doc's own "Stop overusing
+  `damageReduction`" section says an armour fiction should have been using
+  anyway: physical-only, scaling with the defence stat, so it is weak early
+  and strong late — the exact opposite curve to the flat soak it now competes
+  with. That is a real decision about *when in a run* you expect to need it.
+
+**Two ceilings this tree runs into, both worth knowing before touching it
+again:**
+
+- **`calmingPresence` is already past its useful maximum.** The escalation
+  multiplier is `1 - total` floored at `MIN_CALMING_MULTIPLIER` = 0.5
+  (herdConflict.ts), and dig alone grants **0.78**. Everything past 0.50 buys
+  nothing, so this conversion added **no new calming node at all** — one would
+  have been provably dead. Same reason there is no second `nonTerritorial`,
+  `unshaken` or `immovable` grant: all three are read as booleans (`> 0`).
+- **`gatherBurst` saturates at +15**, because `SPRING_DIG_TICKS` is 20 and the
+  base burst is 5, so a single use past that already completes the longest
+  gather in the game in one tick. The Aggression branch alone reaches exactly
+  +15 — no single lane wastes any of it. A hypothetical full-tree 45-point
+  build reaches +29 and wastes the last 14, the same way it wastes calm.
+
+**The colour-pie ceiling, stated plainly.** Dig can reach **5 of the 16
+flavours**, not because its fantasy is thin but because 11 of them are gated
+behind `resolveHit` or the `utilityMove` idle path and this move is neither.
+`environment` is the painful one — a digger churning earth is the obvious
+flavour and `terrainFill`/`consumesOwnTerrain`/`fertilityBoost` are all
+hit-or-utility-gated. Flagging dig as `utilityMove` would unlock them and was
+**rejected**: `maybeUseUtilityMove` would burn dig's cooldown on idle ticks,
+directly starving the burrow-escape and both gather paths that gate on the
+same cooldown. That is a regression to the move's core, bought with flavour
+variety. `fireproof` was rejected too — fire spreads only through
+flora/bush/tree/food/seedling (fire.ts) and a burrower's answer to fire is
+already free, since the engine's strict same-layer targeting means an agent
+underground is not standing on the burning tile at all.
+
+### Slash converted to v4 (Shipped) — "the stillness before the swing"
+
+Fifth structural conversion, and the second designed *against* a specific
+neighbour rather than in isolation. Scratch had just shipped as "four claws
+and no technique... a rake that LEAVES THINGS BEHIND," and Slash is the other
+half of that sentence.
+
+**The fantasy, written before a node was touched:**
+
+> Slash is a cut, and a cut is a decision made before the arm moves. There is
+> one line through an animal that opens it and a hundred that skid off bone,
+> and the whole move is the discipline of waiting for that line to show
+> itself. Nothing is left behind: no filth, no torn ground, no wound that
+> keeps working after. The edge goes in clean, comes out clean, and the thing
+> it cut simply stops. Every species that knows it carries an implement
+> instead of a paw — Scyther's scythes, Pinsir's pincers, Farfetch'd's leek
+> held like a sword, Charizard's talons. What is dangerous about Slash is not
+> the swing. It is the stillness before it.
+
+The four learners were the gift here: **scyther, charizard, farfetch'd,
+pinsir**, and not one of them fights with a bare paw. Slash is the move of
+things that carry an edge.
+
+**The separation from Scratch is written into the source as three rules,
+not as a vibe.**
+
+| | Scratch | Slash |
+|---|---|---|
+| what it leaves | a septic wound, mud, a shredded bush, a scored tree | nothing — no `statusChance`, no `statusSpreads`, no `terrainFill`/`terrainBurn`/`consumesOwnTerrain` anywhere in the tree |
+| the wind-up | none ("the paw is already moving"); its own comment names `chargeAttack` as deliberately absent | all of it — `chargeAttack` is Boldness's lane notable |
+| Sociability | marking and shouting (`rallyCall` on a raked flank, `nonTerritorial` on a scored tree) | **teaching**: technique is the one thing about this move that can be handed to another animal |
+
+**Lanes differ in kind, not degree:**
+
+| branch | lane A | lane B | different how |
+|---|---|---|---|
+| Aggression — *The One Cut* | **The Stroke** — how the swing is spent (the crit lane, and the three-way fork) | **Where The Edge Reaches** — the seam, then two tiles of it (`range`) | severity vs. geometry |
+| Boldness — *The Stillness* | **The Held Stance** — `chargeAttack`, `immovable`, `unshaken` | **The Footwork** — one tile, exactly on time (`forcedMovement` both directions) | refusing to move at all vs. moving exactly |
+| Sociability — *The Form Passed On* | **The Drill** — the demonstration that stops needing to be a separate errand (`allyEffectOnAttack`) | **The Clean Kill** — the herd eats because of the edge (`gatherBurst`) | teaching vs. feeding |
+
+**The three payoffs worth naming.** *The Long Moment* is the roster's fourth
+`chargeAttack` and the **only one that does not travel** — `leapTiles: 0`
+against Tackle's six tiles and Peck's three — which turns out to make the
+fantasy literal, because predation.ts refuses every attack against a charging
+agent outright. Going still *is* the defence. *The Long Guard* buys `range.max`
+1 → 2, the one geometry lever a point move like Scratch structurally cannot
+have, and it pays out twice: `moveRange` makes the holder stop stepping into
+melee, and needs.ts's canopy-harvest path scales a damage move's food burst by
+`range.max - 1`, so a Slash user visibly cuts fruit down faster. *Unflinching*
+grants `unshaken` — three users in the whole roster, and the only defensive
+passive that is not a percentage: the next hit is negated entirely, then
+recharges.
+
+**Rejected, with reasons — unreachable content is a bug.**
+`critCooldownReset` was the best flavour idea in the pass ("a cut that clean,
+the arm is already back on guard") and is **specifically unsafe on this tree**:
+it is an invisible second tempo multiplier the tempo formula cannot see, and a
+fully-invested Reaping build sits at crit stage 3 = every hit crits = the
+cooldown resets every hit = **6.0x tempo on a move whose cap is 3.0x**. The one
+lever that is unsafe here *because* Slash is the crit move. `statusImmunityAura`
+and `selfHeal` are both driven by `maybeUseUtilityMove`, which needs the
+`utilityMove` flag an attack move cannot carry — dead on Slash, same class of
+finding as Scratch's `drainNeeds`. And **four of the five `situationalBonus`
+setters** came out: it is an OVERWRITE field, v2 shipped five co-takeable ones,
+and on any mixed build three of them silently did nothing.
+
+**Crit, counted rather than assumed.** `rollCritical` clamps the stage at 3,
+so the tree grants exactly +3 and not one more: The Line Shows Itself → Reaping
+Slash → Apex Predator. Only the Reaping fork reaches 3 (100%); Frenzy and
+Cleaving builds stop at 2 (50%). That is the fork paying off in kind. Verified
+by walking all twelve maximal builds through the real `applyMoveTree` — the
+harness was proved able to reject an illegal walk and an illegal fork pair
+first.
+
+**Passives went down where it matters, measured.** `damageReduction` and
+`regenFlat` both came out — the two kinds that sum uncapped across a species'
+whole movepool. What went in cannot stack: `unshaken` is read as
+`passives.unshaken > 0`, `immovable` is a flat opt-out, `calmingPresence`
+saturates at a floor. `passive-exposure.ts`, all four learners:
+
+| species | dmgReduction | healing | | |
+|---|---|---|---|---|
+| scyther | 10% → **0%** | 1.7%/tick → **0.0%** | | |
+| charizard | 16% → **6%** | 5.7%/tick → **4.0%** | | |
+| farfetch'd | 10% → **0%** | 4.7%/tick → **3.0%** | | |
+| pinsir | 10% → **0%** | 1.7%/tick → **0.0%** | | |
+
+Thorns unchanged, and no species entered or left the tool's reported worst
+cases. *The One They Watch*'s `calmingPresence` is **0.2 and the number is
+measured**: `herdConflictChance` floors the multiplier at 0.5, so a species'
+summed calm past 0.50 buys nothing, and Charizard already carries 0.30 from
+Flamethrower — the first draft's 0.35 wasted 0.15 of a skill point on one of
+the four learners.
+
+**Numbers, roster as control:**
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **10** | **0** | — |
+| nodes | 29 | 45 | 45 |
+| distinct levers | 12 | **17** | 24 |
+| colour-pie flavours | 3 | **5** | 10 |
+| tempo | 2.29x (cap 2.67) | 2.29x | 2.00x |
+| cheapest capstone | 7 pts | 7 pts | 10 pts |
+
+Levers and flavours are both still short of the median and both are at the
+honest ceiling described above — 17 of a possible 19, and 5 of a possible 5.
+Tempo did not move: the conversion added **no** cooldown node, and the
+often-repeated line that dig sits "at the 3x tempo cap" is off by one tick —
+it is at 2.29x against a 2.67x ceiling for a base-15 move, with `-1` still
+unspent.
+
+**Cross-move passive exposure moved, and it is the one thing here worth a
+second opinion** (`passive-exposure.ts`, worst case if a species takes every
+passive node across its whole movepool). Only the four dig species moved;
+nothing else in the roster changed:
+
+| | diglett / dugtrio | sandshrew / sandslash |
+|---|---|---|
+| thorns | 25% → **40%** | 25% → **40%** |
+| damageReductionFlat | 13.00 → **14.75** | 9.50 → **11.25** |
+| defenseBoost | 0.10 → 0.30 | 0.10 → 0.30 |
+| damageReduction | 33% (unchanged) | 33% (unchanged) |
+| regen + healAura | 9.6% (unchanged) | 13.6% (unchanged) |
+
+The thorns move is the deliberate one — "what comes down on the roof comes
+back" is Boldness's whole payoff here — and it was **63% on the first pass**
+before a second thorns grant was pulled off the Aggression capstone. 40% sits
+below Venusaur's 65% and above Bulbasaur's 35%. It is a real change to how
+these four species feel to attack, and it is a balance number, so it is
+recorded here rather than presented as settled.
+
+| nodes | 36 | 45 | 45 |
+| distinct levers | 21 | **28** | 24 |
+| colour-pie flavours | 9 | **12** | 11 |
+| tempo | 3.00x (cap 3.00) | 3.00x (cap 3.00) | 2.00x |
+| power | 2.36x | **2.94x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+
+**Tempo was already at the cap before this pass and not one tick was spent.**
+Base 5, `cdFloor` 1, `maxCut` -4 — and v2 had already spent exactly -4. The
+four -1 nodes in the v4 tree are the same four that shipped in v2. Slash is
+the roster's only tree sitting on a 3.00x cap, which is worth knowing before
+anyone reaches for cooldown here again.
+
+**Two self-caught regressions in the first draft, both fixed before commit.**
+The power multiplier came out at **3.94x**, the highest in the roster, because
+`+power` was being used as generic "upside" to satisfy the pure-downside rule
+on filler — fifteen nodes were trimmed to bring it to 2.94x. And the cheapest
+capstone read **7 pts** against a converted-tree norm of 9-11, because every
+node had been set to `cost: 1`; the shipped v4 trees keep `cost: 2` on the
+four identity nodes per branch, and matching that put it at 10.
+
+**One honest limit.** The accuracy total came down 105 → 80, but Slash's canon
+accuracy is 100 and surplus only ever pays out through `rollAccuracy`'s
+`extraMultiplier` — a storm (0.6x) or attacking uphill (down to 0.7x). A
+fully-invested Retreat build reaches 195 accuracy, which is live only in those
+conditions and inert everywhere else. The fix that actually made accuracy a
+real purchase was *Opportunist's Strike* taking the move to **85**, which is a
+genuine miss chance at any weather and finally gives Keen Eye's +15 something
+to cover.
+
+### Ember converted to v4 (Shipped) — "the first fire, and it catches"
+
+Eighth conversion, and the worst tree on the board going in: **35 nodes, 14
+checker problems**, the highest count in the roster. It was also the tree
+carrying the most *dead* content — three separate mechanics that had shipped,
+rendered, and never once done anything.
+
+**The fantasy, written before a node was touched**, and written against
+`flamethrower` rather than in isolation, because the brief was that Ember
+must not be a small Flamethrower:
+
+> Ember is the first fire a creature makes. Not a jet and not a beam — a
+> mouthful of coals spat one tile, by a throat still learning the trick.
+> Forty power: on its own it barely singes. What is dangerous about an ember
+> is that it does not stop when it lands. It **catches** — in the dry grass
+> behind the target, in the bush the thing was hiding in, in the next bush
+> over — and a dozen ticks later what is hurting you is the ground, not the
+> creature that spat at you. The same coal is also a hearth: the thing a herd
+> sleeps around. Fire has no allegiance, and the creature that threw it is
+> standing in the same dry grass.
+
+Flamethrower is one held breath aimed at one thing, and it is over when the
+breath runs out. Ember is one spark and no control over what happens next.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable |
+|---|---|---|---|
+| **Wildfire** (agg) | **the catch** — how many sparks and how hard what lands sticks (*Spit Coals*, the tree's only `hits` setter, then raw power) | **when it catches** — reach and opportunity (`defensePenetration`, *Fan the Flames* on an already-burning target, then the preserved reach-vs-intensity fork) | *Spreading Blaze* — the moment the fire stops being yours |
+| **Ring of Fire** (bold) | **the ring** — how far it reaches and who it spares (*Fill the Circle*, then *Never Ours*) | **the middle** — keeping the inside of it yours (*Give Ground*, then the preserved plant-vs-fireproof fork) | ***Take Up the Coals*** |
+| **Hearthfire** (soc) | **the hearth** — warmth given away (`allyEffectOnAttack`, then *Kindled Spirits*) | **the watch** — the fire as a signal (*Beacon Fire*'s `rallyCall`, then the preserved tend-vs-perform fork) | *Eternal Flame* |
+
+#### Three shipped bugs, all found by running the engine rather than reading it
+
+**1. `shape` does nothing without `hitsArea`, and the Boldness branch is
+named after its footprint.** `shape` is only ever read by `resolveShape`
+inside `resolveAreaHit`, which only runs for a `hitsArea` move. Ember had
+three `shape` nodes — `ring_of_fire`, `wide_ring`, and Aggression's `inferno`
+— and `hitsArea` on none of them. Measured on a real `tickWorld` with a body
+on each side of the caster:
+
+| | primary | second body |
+|---|---|---|
+| ring radius 1, no `hitsArea` | 13 | **0** |
+| ring radius 1, `hitsArea` (control) | 13 | **13** |
+
+**2. Which made `ring_of_fire` a pure-downside opener** (principle 4): it
+charged −10 power and +1 cooldown for a ring that never covered a tile, at
+the head of the branch built on it.
+
+**3. Ember was the only tree in the roster carrying cost-3 nodes.** This
+document already measured cost-3 as *unreachable outright* (0 of 4 distinct
+nodes ever picked across a living population; 2 of 4 after
+`SKILLPOINT_SAVE_CHANCE` was added). All four were fork tips — the branch's
+actual decision. Flattened to 2, the roster's own ceiling.
+
+And one bug introduced *by* fixing the first: a `ring` is a **hollow**
+Chebyshev shell in `resolveShape`, so `wide_ring`'s radius 2, the moment it
+became real, was a footprint a range-1 move can never fire into. Measured:
+radius-2 ring did 9 to a body two tiles out and **0 to the one standing next
+to the caster**. It is now `burst` radius 2 — the filled form, 13 tiles —
+renamed *Fill the Circle*, which is the escalation the name always described.
+
+#### The best node in the tree
+
+***Take Up the Coals*** — `consumesOwnTerrain: { terrain: "fire" }`. The
+caster is standing in a fire its own opener started, so it reaches down and
+throws it. Measured on a real `tickWorld`:
+
+| | damage | attacker's tile after |
+|---|---|---|
+| standing in fire, node taken | **14** | `fire` → **`floor`** |
+| standing in fire, node not taken (control) | 9 | `fire` |
+| node taken, not standing in fire (control) | 9 | `floor` |
+
+Water Gun's writeup records why Hydro Pump could **not** spend water this way:
+consuming a tile deletes a resource the sim meters. Fire is the one terrain
+where that objection does not apply — `tickFires` was going to leave that tile
+as scorched `"floor"` within `FIRE_BURN_TICKS` regardless. Spending it costs
+the map nothing it was not already about to lose.
+
+#### Fire is thin where Ember's own species live, and that is the point
+
+Measured over `createDemoWorld`, 3 seeds, and then measured again as ignition
+per landed `terrainBurn` hit against those exact fuel densities:
+
+| biome | fuel | ignition per landed hit |
+|---|---|---|
+| desert | 1.5% | 5% |
+| badlands | 2.0% | 8% |
+| grassland | 6.7% | 25% |
+| jungle (control, no Ember learner lives here) | 17.1% | 57% |
+
+Ember's learners are charmander/charmeleon (badlands), vulpix and magmar
+(desert/badlands), growlithe, ponyta/rapidash (grassland/highland). So fire on
+the map is **occasional and precious** for this move rather than constant —
+which is the argument for *Take Up the Coals* being a deep notable rather than
+a filler: the tree that makes fires is the one tree with a reason to spend one.
+
+#### Levers checked at the call site and rejected — unreachable content is a bug
+
+- **`terrainFill: { terrain: "fire" }`** — reads like a shortcut past the fuel
+  problem. `resolveHitAgainstTarget` calls `waterSoil(tile)` unconditionally
+  after any `terrainFill`, so it would have *fertilised* the ground it set
+  alight, and `TERRAIN_FILLABLE` is a dry-walkable set that has nothing to do
+  with flammability.
+- **`gatherBurst`** — the canopy-harvest path is the only one a non-`burrow`
+  damage move can feed, and the only canopy crop is Apple
+  (`eligibleBiomes: ["forest"]`). No Ember learner lives in forest. Same
+  rejection Rock Slide and Water Gun made, for the same reason.
+- **`drainNeeds`, `spawnsRain`, `fertilityBoost`, `statusImmunityAura`,
+  `selfHeal`** — every one is read only inside `maybeUseUtilityMove`, whose
+  candidate list is `agent.moves.filter(m => m.utilityMove)`. `spawnsRain` in
+  particular reads as an obvious Fire-tree capstone and would have been dead
+  the moment it shipped.
+- **A fourth `critRateStage` node.** `rollCritical` clamps the stage at 3, and
+  the Kindled Fury bridge plus *Wildfire Call* reach exactly 3. The bridge's
+  own notable therefore escalates the lever with `critCooldownReset` instead
+  of a stage the engine would throw away — the same discipline Water Gun's
+  writeup records.
+- **Three `+10 Accuracy` fillers on a 100-accuracy move.** `rollAccuracy`
+  only ever spends surplus through `stormAccuracyMultiplier` and the elevation
+  multiplier — and a **storm is the weather that puts fires out**
+  (`FIRE_RAIN_BURNOUT_MULTIPLIER`, and a rained-on fire does not spread at
+  all). Unlike Water Gun, where two of six were kept on purpose, none of
+  Ember's three were worth keeping: this move least wants to fight in the one
+  condition that surplus buys back. All three became real levers
+  (`excludesAllies`, `allyEffectOnAttack`, and a `defensePenetration` filler).
+
+#### Passives went DOWN, measured
+
+`passive-exposure.ts`, before → after, for every Ember learner:
+
+| species | damageReduction before | after |
+|---|---|---|
+| charmander, growlithe, vulpix, ponyta, magmar | 10% | **0%** |
+| charmeleon, rapidash | 18% | **8%** |
+
+Healing (`regen` + `healAura` + `regenFlat/43`) is **byte-identical** before
+and after, at 6.8%/tick for the tree — the roster-wide worst case is unchanged
+at 13.6%. Thorns unchanged. `charmeleon` drops out of the roster's top-12
+damageReduction table entirely.
+
+The change is *Searing Wall*, which was a flat `damageReduction: 0.1` — the
+lever this document has a whole section asking us to stop reaching for, and
+one of the two that stack uncapped into real invulnerability. It now grants
+**`fireproof: 0.5`**, which is the exact, bounded thing the node was already
+describing: `applyFireDamage` clamps it at 1 and it touches nothing but
+standing in a fire tile, which is precisely what a creature inside its own
+ring is doing. Fifth user of `fireproof` in the roster.
+
+### Leech Seed converted to v4 (Shipped) — "the thing that never had to be there"
+
+31 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Checker
+findings for this tree: **7 → 0**. It is one of only two STATUS moves with a
+real tree, and it runs on a completely different engine path from every damage
+move — which is the whole story of this conversion.
+
+**The fantasy, written before any node:**
+
+> Leech Seed never hits anything. A seed goes in, roots take hold under the
+> skin, and from then on the victim is working for somebody else: the berries
+> it walked all morning to find end up in a bulb across the clearing. There is
+> no wound to point at and nothing to fight back against — the host simply gets
+> hungrier than its day can explain, and it keeps getting hungrier after the
+> plant that did it has wandered off. What it costs the seeder is honesty. A
+> bulb that eats this way has stopped making its own food, and it only works on
+> somebody who has something worth taking: plant it in an empty field and it is
+> a plant standing in an empty field.
+
+#### The lever set is small because most of the roster's levers are DEAD here
+
+`pickBestMove` (combat.ts:275) excludes every `utilityMove` from hostile
+selection, so Leech Seed never reaches `resolveHit`. Read off the call sites,
+that kills `power`, `hits`, `range`, `shape`, `critRateStage`,
+`defensePenetration`, `forcedMovement`, `rallyCall`, `statusChance`,
+`statusSeverity`, `lockTicks`, `selfCostPerUse`, `jamCooldownTicks`,
+`weightScaling`, `bonusVsType`, `resistanceBreaker`, `terrainBurn`,
+`excludesAllies`, `allyEffectOnAttack` and `lifestealFraction` — all of them
+resolve in predation.ts. `gatherBurst` is dead too for a second reason: its two
+call sites (needs.ts:1695, 1707) require a `power > 0 && category !== "status"`
+move or a `burrow` move, and Leech Seed is neither.
+
+What is left, and where each one runs:
+
+| path | fields it reads |
+|---|---|
+| `maybeUseUtilityMove` (idle tick) | `drainNeeds`, `selfHeal`, `fertilityBoost`, self `statChangeOnHit`, `statusImmunityAura`, `spawnsRain`, `matingRadiusBoost` |
+| `maybeUseUtilityMoveInCombat` | **only** `selfHeal` (under 60% HP), a positive self `statChangeOnHit` (under 2 stacked stages), `statusImmunityAura` (against an opponent that can inflict one) |
+| `applySupportMove` (support.ts) | `targetsAlly` + `allyEffect` — independent of `utilityMove` entirely |
+| always | `grantsPassive` / `grantsPassives` |
+
+**That middle row is the design constraint that mattered most.** Status moves
+were only just made usable in a fight, and `maybeUseUtilityMoveInCombat`
+decides **by effect field**, not by move id. So a status tree that spends all
+its budget on `drainNeeds` and `fertilityBoost` is a tree that can never fire
+in combat, no matter how deep it is. Each branch therefore owns exactly one of
+the three fields that can: **Aggression's Attack stage, Boldness's status
+filter, and the Sociability↔Aggression bridge's self-heal.** Verified by
+running `maybeUseUtilityMoveInCombat` on real builds:
+
+| build | fires in a fight? | what happened |
+|---|---|---|
+| base move, no tree | **no** | — |
+| Aggression lane B (`first_taste`) | **yes** | +1 attack stage, 15 ticks |
+| Boldness lane B (`filter_roots`) | **yes** | 40 ticks status immunity |
+| S↔A bridge (`feeding_ground`), full HP | no | not worth an action yet |
+| S↔A bridge (`feeding_ground`), 30% HP | **yes** | hp 12 → 13.6 |
+| Sociability lane A (`feed_the_soil`) | **no** | fertility has nothing to say mid-fight |
+
+The last row is the control: it proves the gate is the effect field, not "did
+you buy any node".
+
+#### Lanes, and how they differ in kind
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Nothing Grows Here** (agg) | **the haul** — how much comes out and out of what: `drainNeeds` 0.25→0.35→0.5, ending in the preserved hunger/thirst fork | **the surplus** — what a body does with food it didn't work for: a self Attack stage whose axis is DURATION (15t → 45t → 80t), not magnitude | *Feeding Frenzy* — two stages at once, exactly `COMBAT_MAX_SELF_BUFF_STAGES` | ***Gorged Bloom*** |
+| **You Have To Come To It** (bold) | **the stalk** — the body absorbs (`damageReductionFlat`, `defenseBoost`) | **what reaches it** — nothing lands cleanly and nothing sticks (`damageReduction`, `statusImmunityAura`, and its own new fork) | *Set Too Deep* — `unshaken` | ***Rain From the Root*** |
+| **What the Roots Take, the Grove Gets** (soc) | **the ground** — the stolen bulk goes into the soil the herd grazes, slow and world-facing (`fertilityBoost` 0.2/r1 → 0.5/r3) | **the body** — it goes straight into a herd-mate, now (`targetsAlly`/`allyEffect`) | *One Mouth* — the ally heal also braces | ***Roots That Feed the Grove*** |
+
+Lane A vs lane B in Sociability is the clearest "different in kind, not degree"
+in the tree: same theft, two completely different timescales, and two different
+things changed — a tile that is still enriched next season against a herd-mate
+that is alive right now.
+
+#### Two capstones the roster does not already have
+
+***Gorged Bloom*** (Aggression) is `matingRadiusBoost`. Sweet Scent is the only
+other user of that primitive anywhere, and nothing in the roster has ever used
+it as a capstone: it is the only node in the game whose payoff is measured in
+descendants rather than damage. It also rhymes with the move — the thing that
+plants seeds in other animals ends by planting them in the valley.
+
+***Rain From the Root*** (Boldness) is `spawnsRain`, second user after Rain
+Dance. It is the reason that branch is Boldness rather than more armour: a
+taproot set deep enough reaches water no surface root does and pushes it back
+up until it falls out of the sky. Drought is a mechanic this sim actually runs,
+it dries the ponds and kills the berry patches this species eats, and nothing
+else in a Grass movepool answers it. Visible on the map rather than hidden in a
+meter, and it pays out for every animal standing in it — including the ones
+being robbed.
+
+#### Preserving the last pass's work, with its lever corrected
+
+The previous round repurposed *Feeding Ground* and *Richer Ground* from two
+identical "+1.5 HP Regen" nodes into `lifestealFraction`, because "a tree
+literally named for draining used no lifesteal anywhere." **The reasoning was
+right and is kept whole. The lever was not.** `lifestealFraction` is read at
+exactly one site — predation.ts:1095, inside `resolveHit` — which this move
+provably cannot reach, so both nodes were paying a skill point for nothing.
+
+The same bridge now carries `selfHeal`, which IS this engine path's lifesteal:
+`maybeUseUtilityMove` applies the drain and then *falls through* to `selfHeal`
+in the same use, so the HP genuinely comes out of the same theft. And unlike
+`lifestealFraction` it is one of the three fields that makes the move worth a
+fight action. Measured live, one use, tree vs. base as control:
+
+| | with the tree | control (base move) |
+|---|---|---|
+| victim's hunger | 0.90 → **0.65** | 0.90 → 0.75 |
+| caster's HP | 20 → **23.6** | 20 → 20 |
+| tile fertility | 0.10 → **0.60** | 0.10 → 0.10 |
+| rain cells in world | 0 → **1** | 0 |
+| mate-search boost ticks | **300** | none |
+
+#### The `drainNeeds` overwrite collision the checker could not see
+
+`applyMoveTree` OVERWRITES `drainNeeds` (moves.ts:786), and the shipped v2 tree
+had two independently-takeable setters: Boldness's *Twin Taproot* (thirst) and
+Aggression's *Insatiable* (hunger). A build with both got whichever the engine
+reached last, so the tree's best fork — the resource switch, which the file's
+own comment called the real highlight — silently evaporated. Nothing caught it,
+because the checker's OVERWRITE list only carried the hit-pipeline fields.
+
+Two fixes: the fork is relocated onto the tail of the Aggression lane that owns
+the drain, so it is the last word on the field and nothing downstream touches
+it; and `check-proposed-trees.ts` now lists the five `utilityMove` overwrite
+fields (`drainNeeds`, `selfHeal`, `fertilityBoost`, `statusImmunityAura`,
+`matingRadiusBoost`) alongside the others, with its own failing case in
+`--selftest`. Adding them flagged **no** other shipped tree; leech_seed is the
+only user of any of them today.
+
+#### Which fork survived, which one did not, and why
+
+Three `excludes` forks, three preserved as forks — but not the same three.
+
+- **Preserved and promoted:** *Bountiful Roots* | *Twin Taproot* (hunger, wide
+  vs. thirst, close), moved from Boldness to the Aggression drain lane's tail
+  for the overwrite reason above. It is a better fork where it now sits: the
+  lane is about what you take, and the fork is the last word on it.
+- **Preserved in place:** *Deepening Calm* | *Watchful Roots*.
+- **Dissolved, deliberately:** *Insatiable* | *Sharpened Hunger*. Both nodes
+  survive with their exact mechanics — they are now the two Aggression lane
+  notables. The exclusion could not: a lane notable that excludes the other
+  lane's notable makes the deep notable's convergence unreachable, so that
+  specific fork is structurally incompatible with v4's two-lane shape. The
+  decision it expressed ("take more" vs. "convert it") is exactly what the two
+  lanes now express, with skill-point scarcity doing the excluding.
+- **New:** *Sealed Sap* | *Shared Filter* — duration for yourself against reach
+  for the herd, on the same `statusImmunityAura`. Fork count stays at 6.
+
+#### Passive discipline: one new kind, chosen because it CANNOT stack
+
+The bulbasaur line is the roster's worst case — 65% thorns, 27% damage
+reduction — and leech_seed was recently pulled back to the healing cap. So
+every existing passive total in this tree is **unchanged to the decimal**:
+
+| kind | before | after | how |
+|---|---|---|---|
+| `defenseBoost` | 0.20 | 0.20 | same five nodes |
+| `damageReductionFlat` | 1.00 | 1.00 | split 0.5/0.5 across Thick Bark and Ancient Roots |
+| `damageReduction` | 0.06 | 0.06 | moved from Ironroot to Bitter Sap |
+| `regen` | 0.045 | 0.045 | moved from Ancient Roots to Gorged Bloom |
+| `regenFlat` | 1.50 | 1.50 | split 1.0/0.5 across Watchful Roots and One Root System |
+| `healAura` | 0.008 | 0.008 | — |
+| `calmingPresence` | 0.60 | 0.60 | same five nodes |
+| `thorns` | **0** | **0** | — |
+| `unshaken` | 0 | **1** | new |
+
+Healing still reads **8.8%/tick** against the 10% per-move ceiling; damage
+reduction 6% against 20%; thorns 0.
+
+`unshaken` was chosen over another point of `damageReduction` specifically
+because predation.ts:1242 gates it on `> 0` rather than summing, so it is
+structurally incapable of stacking into invulnerability across a movepool. It
+is the only passive kind on the board with that property, which makes it the
+right one to hand the species that already has the two worst uncapped totals.
+
+`passive-exposure.ts`, before and after: the only line that moved is
+bulbasaur/ivysaur/venusaur gaining `unshaken 1.00`. Every regen, thorns,
+damage-reduction and calming figure is byte-identical.
+
+#### Two dead-content findings, reported not fixed
+
+1. **`calmingPresence` in this tree already overshoots its own floor.**
+   `calmingMultiplier` (herdConflict.ts) is `max(0.5, 1 − total)`, so anything
+   past 0.50 buys nothing. leech_seed grants 0.60 on the *Deepening Calm* fork
+   side, and it is the bulbasaur line's ONLY source of the passive — so the
+   last 0.10 is provably dead. Trimming it to 0.50 would be a no-op in effect
+   today. Left alone because it is a balance number.
+2. **PP is data-only.** `ppCost` and `maxPPBonus` have zero call sites in the
+   engine; the checker has rules for them and nothing spends them. Leech Seed's
+   10-PP pool is real canon and nothing reads it. No PP node was added here for
+   that reason.
+
+#### The finding that is bigger than this tree: purchase order decides every OVERWRITE field
+
+Driving the real `maybeAutoRespec` on a fully-pointed Bulbasaur, the finished
+Leech Seed came out with `drainNeeds` set to *Wider Reach*'s 0.35/r5 rather
+than the deeper *Insatiable*'s 0.5/r6. Root cause: `maybeAutoRespec` appends
+each bought node to `moveTreeChoices` in **purchase order** and
+`applyMoveTree` applies them in exactly that order, last-writer-wins. Because
+`insatiable` is reachable through the `ironroot` bridge shortcut, an agent can
+buy the deep node first and the shallow one later — and the shallow one wins.
+The checker's "ancestrally related ⇒ safe" test does not catch this, because
+the ancestry runs through `prerequisitesAnyOf`, which is a *route*, not a
+purchase-order guarantee.
+
+**This is not something the conversion introduced — it is roster-wide and
+pre-existing.** Measured across every shipped tree, three rng seeds each,
+comparing the auto-respec result against the same node set applied in depth
+order:
+
+| tree | field that drifts | bought-order result | depth-order result |
+|---|---|---|---|
+| tackle | `situationalBonus` | flanking ×1.7 | concealed ×1.5 |
+| tackle | `statChangeOnHit` | self attack +2 | self defense +1 |
+| ember | `shape` | ring r2 | line len2 |
+| earthquake | `forcedMovement` | attacker, closer, 2 | defender, away, 1 |
+| water_gun | `allyEffect` | buff only | heal 0.25 + buff |
+| solar_beam | `allyEffect` | heal 0.25 | heal 0.25 + buff |
+| wing_attack | `forcedMovement` | defender, away, 2 | attacker, away, 1 |
+| leech_seed | `drainNeeds` | hunger 0.35 r5 | hunger 0.5 r6 |
+
+Every tree with an overwrite field drifts, at every seed. **The fix belongs in
+the engine, not in one tree's shape** — sorting `chosenNodeIds` by depth inside
+`applyMoveTree` (or in `maybeAutoRespec` before applying) would make every
+build deterministic and always land on the deepest node a build actually
+bought. That changes every tree's outcome, so it is written down here as a
+decision to make rather than made.
+
+#### Balance, with the roster as control
+
+| | before | after | roster median |
+|---|---|---|---|
+| checker problems | **14** (worst in the roster) | **0** | — |
+| nodes | 35 | **45** | 45 |
+| distinct levers | 21 | **34** (joint 1st) | 24 |
+| colour-pie flavours | 9 | **14** (1st) | 11 |
+| tempo | 2.00x (cap 2.00) | **2.00x — unchanged** | 2.00x |
+| power | 2.38x | 2.75x | 2.20x |
+| cheapest capstone | 12 pts | 11 pts | 10 pts |
+
+**No cooldown number was moved.** Ember was already spending the full −2 the
+3x cap allows on a base-3 move, so there was no headroom to spend and none was
+taken. The one number that did move is power, 2.38x → 2.75x, which sits
+between Peck (2.57x) and Tackle (3.38x); an earlier draft read 3.13x and three
+`+5 power` riders were trimmed off notables to bring it back into the band.
+
+**The real balance change to look at is `ring_of_fire`'s `hitsArea`.** It is
+a bug fix by the letter — the node was charging for nothing — but a fully
+specced Boldness build now hits 13 tiles where it used to hit one, which no
+amount of "it was dead anyway" makes small. The one-line revert is removing
+`hitsArea: true`, which puts the branch back to what it has always actually
+done, i.e. nothing.
+
+#### Verified by running it, not by reading it
+
+Driving the engine's own `maybeAutoRespec` on a real Charmander with points
+to spend, once per disposition: **42 of 45 nodes bought in each case** (the
+missing three are the excluded fork sides), **all three capstones reached
+from every disposition**, and every new lever present on the resulting spec
+(`hits`, `hitsArea`, `burst`, `jamCooldownTicks 2`, `critRateStage 3` —
+exactly the engine's clamp). And driving `tickWorld` itself, with controls:
+
+| | measured | control |
+|---|---|---|
+| *Ring of Fire*, a body each side | 8 and **8** | base move: 9 and **0** |
+| *Fill the Circle*, bodies at 1 and 2 tiles | 9 and **9** | hollow ring r2: **0** and 9 |
+| *Never Ours*, herd-mate in the blast | foe 8, herd-mate **0** | without it: foe 8, herd-mate **8** |
+| *Take Up the Coals*, standing in fire | **14**, tile `fire`→`floor` | 9 off fire, 9 without the node |
+| *Beat At the Flames*, a target with a cooldown of 2 | **3** | without it: 1 |
+
+**An honest limit, stated plainly.** Reachability of *Take Up the Coals* in a
+real population is probabilistic and was **not** measured end-to-end: the
+mechanic is proven, and the ignition rates above bound how often a fire exists
+to stand in, but no long run was done to count how often a specced agent
+actually ends a turn on one. That is the same class of gap the Rock Slide and
+Peck conversions recorded for their own lone learners.
+
+### Rock Throw converted to v4 (Shipped) — "one rock, found, aimed and gone"
+
+Eighth structural conversion, and the one that had to be designed *against*
+Rock Slide, converted immediately before it, on the same species. Rock Slide
+is "Onix rears against a slope and the slope lets go"; the brief here was
+that Rock Throw must be a different thing entirely.
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 38 | **45** | 45 |
+| checker problems | **8** | **0** | — |
+| distinct levers | 17 | **23** | 24 |
+| colour-pie flavours | 10 | 10 | 10 |
+| tempo | **1.00x** (roster floor) | 1.67x (cap 2.50x) | 1.80–2.00x |
+| power | 2.62x | 2.92x | 2.20x |
+| max defensePenetration | 0.60 | 0.80 | (solar_beam 1.10, earthquake 0.95) |
+| cheapest capstone | 8 pts | 10 pts | 10 pts |
+| new passives | — | **zero** | — |
+
+**The fantasy, written before a node moved:**
+
+> Rock Throw is the only move in the roster that spends something it did not
+> make. The boulder under Onix's tail is real terrain — measured at 64–189
+> tiles of a 5,400-tile surface across three seeds, 1.2–3.5%, laid down at
+> worldgen and never replaced by anything in the sim — and the throw EATS it:
+> the tile drops to bare floor, the sight-block it gave is gone, and
+> something up to three tiles away takes a rock at triple damage. Rock Slide
+> is a hillside letting go and Earthquake is the ground itself; this is ONE
+> rock, found on the ground, aimed, and gone. Everything dangerous about it
+> is a supply question — is there a rock under you right now, is this target
+> worth the last one, and what does the ground look like once you have
+> thrown them all.
+
+Lanes differ in kind, per branch:
+
+- **Aggression — "make it count."** Lane A is THE AIM (accuracy to the exact
+  90→100 the roll can actually spend, *Skyfall*'s angle, and +1 Range — the
+  v3 "reach a lumbering body wouldn't have" finally spent on). Lane B is THE
+  CATCH (the Speed pin, deepened in DURATION rather than magnitude because
+  stat stages stack). Precision versus attrition. Deep notable *Already
+  Reaching* is `critCooldownReset` — the rock that lands on the joint means
+  the next one is out of the ground already.
+- **Boldness — "the ground you are standing on IS the ammunition."** Lane A
+  is THE STANCE (`immovable`: nothing drags you off your own quarry). Lane B
+  is THE TAKE, and its notable *Stone Underfoot* is the tree's identity node
+  and its ONE `consumesOwnTerrain` setter — 3x becomes 4.5x. Boulders are
+  zero percent of the underground layer, so for an underground native this
+  notable is a real reason to be up top.
+- **Sociability — "somebody else has seen the rock."** A thrown rock is a
+  pointer. Lane A is THE CALL (*Carrying Rumble* takes the mark from 20 to 34
+  ticks — the node that makes `rallyCall` actually converge anybody, since a
+  20-tick mark on a target three tiles away expires before a herd-mate can
+  walk to it). Lane B is THE CARRY. Deep notable *Colony Watch* adds
+  `allyEffectOnAttack`, so every rock thrown at something else is also a hand
+  on a herd-mate's shoulder.
+
+**A real bug found and fixed: the fork tip that did nothing.** `crippling_snare`
+set `shape: { kind: "cone", length: 3, width: 2 }` and nothing else — and
+`shape` is only ever read inside `resolveAreaHit`, which `resolveHit` only
+calls when `hitsArea` is true. Rock Throw is single-target, so the node spent
+a skill point on a footprint the engine never looked at. Proved by running
+the real `resolveHit` with a bystander standing inside where the cone would
+reach, **with a control** (the same cone plus `hitsArea`) so a "nobody was
+hit" reading could not be a broken harness:
+
+| spec | target hp | bystander hp |
+|---|---|---|
+| base (line 3, no `hitsArea`) | 175 | 200 |
+| v3 cone delta, no `hitsArea` | 175 | **200** |
+| CONTROL: same cone + `hitsArea` | 175 | **177** |
+
+It could not simply be fixed by adding `hitsArea`, and that is the more
+useful finding: `resolveAreaHit` builds its target set from `resolveShape`
+tiles, so any footprint narrower than the move's own range envelope can whiff
+outright on a legal target — a cone of length 3 does not cover a target three
+tiles away on a diagonal. Rock Slide gets away with `burst` radius 1 because
+its range is also 1. At range 3 the only safe footprint is a radius-3 burst,
+which is Rock Slide's move. The fork is preserved, with the same decision
+(hit it harder / keep it off you) in a live lever: *Driven Back* is the
+tree's first physical lever, one tile of `forcedMovement` shove.
+
+**Levers rejected, each checked at the call site:** `excludesAllies` (only
+read by `resolveAreaHit`'s target filter — inert on a single-target move);
+`statusChance`/`statusSpreads`/`statusSeverity` (`statusKind` is not
+tree-settable and the base spec sets none); `gatherBurst` (canopy-harvest
+only, forest crops, wrong biomes — the same finding Rock Slide recorded);
+`weightScaling` and `chargeAttack` (Tackle's and Body Slam's signature, and
+every Rock Throw learner also knows Tackle); `selfCostPerUse` on the
+Aggression↔Boldness bridge (Rock Slide's *Mountainfall* is the same lever in
+the same structural slot); and — the interesting one — `terrainFill:
+{ terrain: "boulder" }`, which is buildable, would have dropped a fresh
+boulder where the rock landed, and would have been the only self-restocking
+ammunition loop in the roster. Rejected because it **erases the identity**:
+this move's whole point is spending a resource it did not create, and
+Earthquake already owns the fill-and-consume mud loop.
+
+**The overwrite audit is where most of the eight problems were.** Six
+co-takeable `statChangeOnHit` setters and three `situationalBonus` setters
+were silently racing each other. Both are now single ancestral chains:
+`pinning_impact → rolling_thunder → marked_advantage → hobbling_throw` for
+the pin (monotonic in duration, deepest last), and exactly one
+`situationalBonus` in the whole tree. The one that was cut is worth recording
+as a design call rather than a checker concession: `flanking` reads "the
+defender is not currently fighting or hunting ME", which for something
+throwing rocks from three tiles away is true most of the time. A condition
+that is nearly always on is not a condition. The tree's one situational
+payoff went to `rallyMarked`, which the Sociability branch has to earn.
+
+**Two things to flag for tuning, not decided here.**
+
+- **Tempo was raised, deliberately.** Rock Throw had no cooldown node at all
+  — a flat 1.00x, the roster floor against a 1.80–2.00x median. Two −1 nodes
+  in different branches take it to 1.67x, still below median and well under
+  its own 2.50x cap. Reverting to −1 (1.25x) or 0 is a one-line change.
+- **`critCooldownReset` is a tempo lever the cooldown cap cannot see**,
+  because it spends no `cooldownTicks`. It is on *Already Reaching* with a
+  crit stage in the same node.
+
+**Units, since this file has been burned by them before:** `cooldownTicks`
+counts the agent's own ACTIONS (`tickCooldowns` runs inside
+`tickAgentAction`), while `lockTicks` counts WORLD ticks (`tickActionLock`
+runs from `tickAgentNeeds`, every tick). Two different denominators —
+Quarry Break's 2 lock ticks is a smaller cost than it looks beside a
+cooldown of 4.
+
+**Accuracy surplus is conditional here, not dead.** Rock Throw's canon
+accuracy is 90, unlike the 100-accuracy move where six "+5 Accuracy" fillers
+were found to be pure filler. `rollAccuracy` computes
+`accuracy * stageMultiplier * extraMultiplier`, and both
+`stormAccuracyMultiplier` and `elevationAccuracyMultiplier` compose onto that
+same `extraMultiplier` — so past 100 the points buy weather-and-uphill
+insurance rather than nothing. Still capped at one accuracy node per lane;
+the "+8 Accuracy" tail filler behind Skyfall was cut.
+
+**Passive discipline: zero new passives, and `passive-exposure.ts` output is
+byte-identical before and after.** Onix/Geodude already carry
+`damageReductionFlat 12.50` / `immovable 4` / 27% thorns / 11.0%/tick healing
+summed across their movepool, and passives stack uncapped across every tree a
+species knows. Where a branch wanted more, it got a `delta`.
+
+**Verified by running it, not reading it.** Driving the engine's own
+`maybeAutoRespec` on a real Geodude with points to spend, once per
+disposition: **42 of 45 nodes bought in every case**, all three capstones
+reached, and the three unbought are exactly one side of each of the three
+`excludes` forks — 45 − 3 = 42 is the correct "everything" number. Same
+result Rock Slide's conversion produced. Note the same caveat: in a plain
+demo run the tree is inert, because three seeds × 2,000 ticks produced **zero
+living Rock Throw learners**. That is the population problem already logged
+against Rock Slide, not a tree problem.
+
+| nodes | 31 | **45** | 45 |
+| distinct levers | 14 * | **18** | 24 |
+| colour-pie flavours | 8 | **7** | 10 |
+| tempo | 1.41x (cap 2.82) | **1.94x** | 2.00x |
+| cheapest capstone | 7 pts | **10 pts** | 10 pts |
+| checker problems | **7** | **0** | — |
+| `*` = flagged >35% off the median | | | |
+
+Nothing is flagged any more. Two numbers deserve explaining rather than
+celebrating:
+
+- **Flavours went DOWN, 8 → 7, and that is the honest number.** The 8th was
+  "raw damage", contributed solely by the dead `lifestealFraction`. Seven is
+  the hard ceiling for this move: "stealth", "piercing", "wider aoe",
+  "reposition others", "aggressive movement", "rallying" and "no friendly
+  fire" are every one of them hit-pipeline flavours, and this move has no hit
+  pipeline. Every remaining flavour it can reach — resource economy, healing,
+  planted/duration, calming, defence, environment, ally buffing — is in the
+  tree.
+- **Tempo moved 1.41x → 1.94x, and that is a tuning decision, not a conversion
+  one.** The extra nodes brought six more `-1 Cooldown` fillers, landing the
+  move on a 15-tick cooldown against a base of 30 — the roster median, and well
+  inside the 2.82x cap. Reverting any of those six to another lever is a
+  one-line change each; the six are `bitter_sap`, `set_too_deep`,
+  `settled_stance`, `rain_from_the_root`, `one_mouth`, `one_root_system`.
+
+#### Verified by running it, not by reading it
+
+Driving the engine's own `maybeAutoRespec` on a real Bulbasaur with points to
+spend, once per disposition: **42 of 45 nodes bought in each case** (the three
+missing are the excluded fork sides), **all three capstones reached from every
+disposition**, and every new lever present on the resulting spec — `selfHeal`
+0.09, `statusImmunityAura`, `spawnsRain`, `matingRadiusBoost` ×2,
+`statChangeOnHit` attack +2/80t, `fertilityBoost` 0.5/r3, `allyEffect` heal
+0.18 + defense buff.
+
+Both fork sides walked through the real `applyMoveTree`: the hunger side ends
+on `drainNeeds hunger 0.25 r9` and 120t/r0 immunity, the thirst side on
+`drainNeeds thirst 0.5 r5` and 50t/r3 — the two forks genuinely diverge in the
+finished spec.
+
+`applySupportMove` on a real herd: *Rooted Calm* heals an ally 10 → 14; the
+finished *One Mouth* heals 10 → 17.2 **and** applies a real +1 defense stage.
+
+**And a limit stated plainly.** `maybeUseUtilityMove` is gated behind
+`chooseBehavior(agent.needs) === "idle"` (needs.ts:1544), and `chooseBehavior`
+returns `seekFood` the moment hunger drops below 0.70 — measured directly:
+hunger 0.75 → `idle`, hunger 0.69 → `seekFood`. **So the parasite can only
+feed when it is not hungry**, and `agent.needs[need] = min(1, …)` caps what it
+gains at whatever headroom is left. In practice `drainNeeds` is a weapon —
+it makes the other thing starve — far more than it is sustenance, and the tree
+is written to that reading. Whether that gate is intended is an engine
+question, not a tree one; it is untouched here.
+
+Separately, `maybeUseUtilityMoveInCombat` applies `selfHeal`,
+`statChangeOnHit` and `statusImmunityAura` but **not** `drainNeeds` — so a
+Leech Seed spent on a fight action buffs and heals but does not actually drain
+the thing it is fighting. That reads like a real gap rather than a decision,
+and it is the single highest-value follow-up for this move. Also untouched
+here: it would change what every `drainNeeds` node is worth.
+
+### Flamethrower converted to v4 (Shipped) — "one held breath"
+
+Fourteenth conversion, and the deliberate opposite pole to `ember`, which was
+converted one commit earlier. Going in: **39 nodes, 3 checker problems** (all
+three branches at 10 nodes against v4's 12). Out: **45 nodes, 0 problems.**
+
+**The fantasy, written before a node was touched**, and written against Ember
+rather than in isolation:
+
+> Flamethrower is ONE BREATH. The chest fills, and what comes out is not a
+> spark but a jet — held, aimed and steered for exactly as long as the lungs
+> last. Nothing inside the cone gets a moment to be somewhere else: you put it
+> on one thing and you keep it there until that thing is finished, or until
+> the air is. What is dangerous about it is that it does not let up. What is
+> dangerous to the creature holding it is the same fact — while the breath is
+> out it is rooted, pointed one way, and everything else on the field knows
+> exactly where it is and that it is busy.
+
+| | |
+|---|---|
+| **ember** | spark, then consequence — spread, aftermath, terrain |
+| **flamethrower** | control, then duration — aim, hold, commitment |
+
+Two of Ember's signature levers were therefore **removed** from this tree
+rather than kept: `statusSpreads` (a burn that jumps to the next body is
+*Spreading Blaze*'s whole payoff) and `terrainBurn` (this move's fire is over
+when the breath is). What went in instead is `lockTicks`, three times, as the
+recurring price of holding a breath — every big node here costs the caster its
+own next action tick. `lockTicks` locks the **user**, not the defender
+(combat.ts's `useMove`), which is why it is the right lever for this move and
+the wrong one for almost every other.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **One Breath, One Thing** (agg) | **reach** — what the jet gets through (*Nothing Melts Quickly*, then *Melting Blast*) | **severity** — what being held in it does, paid in the caster's own actions (*Held Breath*, then *Held to the Bone*, then the preserved beam-vs-cone fork) | *Combustion* | ***Until It's Finished*** |
+| **The Line It Holds** (bold) | **the footprint** — ***Open the Throat***, then *Nowhere to Step* | **the stance** — *Banked Coals*, then the preserved plant-vs-thorns fork | *Unburnt* | *Nothing Gets Past* |
+| **What It Holds, We Finish** (soc) | **the mark** — *Held in Plain Sight*'s `rallyCall`, then *United Blaze* | **the cover** — *Warm at Your Back*, then the preserved rouse-vs-calm fork | *Communal Blaze* | *Hold the Target* |
+
+Boldness was a generic armor ladder that vine_whip and rock_slide were running
+node-for-node; it is now geometry plus refusal. Sociability was Ember's hearth
+wearing a different name; it is now the inverse reading of the same flame — a
+creature that is rooted, blind and pointed one way is, to a herd, a pointing
+finger.
+
+#### Three shipped bugs, all found by running the engine rather than reading it
+
+**1. The cone had never covered a tile.** Flamethrower is the roster's cone
+move — `shape: { kind: "cone", length: 4, width: 2 }`, which `resolveShape`
+resolves to **12 real tiles** — and it set `hitsArea` nowhere. `shape` is read
+only by `resolveShape` inside `resolveAreaHit`, which only runs for a
+`hitsArea` move. Measured on a real `tickWorld`, three bodies laid inside that
+footprint, 8 ticks, same seed:
+
+| build | bodies in a `fought` event |
+|---|---|
+| shipped (control) | `prim` |
+| + *Open the Throat* (`hitsArea`, no shape change) | `prim`, `cone_side`, `cone_far` |
+
+Same class of bug as Ember's three dead `shape` nodes, on the one move in the
+roster whose entire silhouette is its cone. The fix is Boldness's lane
+notable, because turning a needle into a 12-tile cone is notable-tier currency
+(principle 14).
+
+**And it was worse than one dead node** — *Focused Beam*, one half of the
+tree's oldest fork, sets `shape: { kind: "line", length: 6 }` and was equally
+dead:
+
+| build | bodies hit |
+|---|---|
+| *Focused Beam* alone (control) | `prim` |
+| *Focused Beam* + *Open the Throat* | `prim`, `cone_far` |
+
+(`cone_side` sits off the line, which is the line behaving correctly.)
+
+**2. Four `fireproof` nodes summing to 2.5 against a clamp of 1.**
+`applyFireDamage` (fire.ts) does `Math.min(1, agent.passives.fireproof ?? 0)`,
+so **1.5 of that was provably dead** — the same clamp finding as Ember's crit
+stage 3. It is now exactly two nodes, *Scorchproof Hide* (0.5) and *Unburnt*
+(0.5), landing on 1.0 on the nose. *Set Your Feet* and *Living Furnace* spent
+their fireproof on real levers instead.
+
+**3. Three `+10 Accuracy` fillers on a 100-accuracy move.** `rollAccuracy`
+only ever spends surplus through `stormAccuracyMultiplier` and the elevation
+multiplier — and a **storm is the weather that puts fires out**. Ember made
+the same call for the same reason; all three are real levers now
+(`bonusVsType`, `power`+`statusChance`, `rallyCall`).
+
+#### The best node in the tree
+
+***Nothing Melts Quickly*** — `bonusVsType: { type: "rock", multiplier: 2 }`.
+Fire is **0.5x into Rock** on this engine's own chart (typing.ts), and a
+doubling puts it back at neutral. That is the whole duration fantasy said as a
+type matchup: a spat coal bounces off stone, a flame *held* on it does not.
+And the condition is one the map actually supplies — Charizard lives in
+badlands/highland, which is exactly where Geodude and Onix live.
+
+#### Levers checked at the call site and rejected
+
+- **`chargeAttack`** — the obvious "one held breath" primitive, and **Slash
+  already is it** ("the stillness before the swing", `ticks: 2, leapTiles: 0`).
+  Charizard is the only Flamethrower learner and it knows Slash. Same species,
+  same lever, twice.
+- **`situationalBonus: { condition: "drought" }`** — would have been the
+  roster's first `drought` user and reads perfect on a fire move. Measured over
+  **3 seeds x 4,000 ticks**, 40 sampled tiles per biome, sampling every 10th
+  tick:
+
+  | biome | drought share of sampled ticks | any weather |
+  |---|---|---|
+  | badlands | 0.0% / 4.9% / 0.6% | 10.6% / 13.5% / 19.0% |
+  | highland | 7.6% / 0.0% / 0.0% | 10.5% / 2.0% / 14.1% |
+  | grassland (control) | 0.2% / 0.0% / 0.1% | 12.0% / 4.2% / 15.5% |
+
+  Badlands has the roster's highest drought affinity (weight 3 in
+  `BIOME_WEATHER_AFFINITY`) and still spends an entire 4,000-tick run at 0.0%
+  on one seed in three. A capstone that is simply absent for a whole run is
+  unreachable content, not a spike. Rejected; the capstone went to
+  `targetLowHp` instead, which is the finisher reading and is common.
+- **`excludesAllies`** — read only inside `resolveAreaHit`'s target filter, so
+  it is dead unless the same build also bought `hitsArea`, which lives in a
+  different branch here. A node that only works if you invested elsewhere is
+  not a node.
+- **A second `unshaken`.** `resolveHitAgainstTarget` tests
+  `(defender.passives?.unshaken ?? 0) > 0` — **the value is never read**, only
+  its sign. Slash already grants Charizard `unshaken: 1`, so a second grant is
+  dead on the only species that can hold both. This is a cross-tree finding,
+  not a Flamethrower one: five trees grant `unshaken` and any species learning
+  two of them is wasting one.
+- **`terrainFill: { terrain: "fire" }`** — `resolveHitAgainstTarget` calls
+  `waterSoil(tile)` unconditionally after any `terrainFill`, so it would
+  fertilise the ground it lit. Same rejection Ember made.
+- **`drainNeeds`, `selfHeal`, `spawnsRain`, `fertilityBoost`,
+  `statusImmunityAura`** — all read only inside `maybeUseUtilityMove`, whose
+  candidate list is `agent.moves.filter(m => m.utilityMove)`. Dead on an
+  attack move.
+- **`gatherBurst`** — the only canopy crop is Apple (forest-only) and no
+  Flamethrower learner lives in forest. Same rejection as Ember, Rock Slide
+  and Water Gun.
+- **A fourth `critRateStage` node.** `rollCritical` clamps the stage at 3
+  (`Math.min(3, ...)`), and the Flashpoint bridge reaches exactly 3. Its own
+  notable therefore stops at the clamp instead of buying a stage the engine
+  throws away.
+
+#### One thing measured that the tree does NOT claim
+
+On an area hit, `isPrimaryTarget` gates status infliction, the defender-side
+stat change, on-hit forced movement, position swap, `jamCooldownTicks` **and**
+`terrainBurn` (predation.ts). So *Open the Throat* spreads **damage** across
+the cone and nothing else. *Nowhere to Step* and *Nothing Gets Past* land on
+the primary target only, and the node comments say so rather than implying a
+cone-wide slow or a cone-wide jam.
+
+#### Numbers, before and after
+
+`tree-balance.ts`, roster median as the control:
+
+| metric | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| checker problems | **3** | **0** | — |
+| distinct levers | 24 | **29** | 28 |
+| colour-pie flavours | 9 | **12** | 12 |
+| tempo multiplier | 1.75x | **1.75x** | 2.00x |
+| power multiplier | 1.61x | **2.20x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+
+**Cooldown deliberately untouched.** -3 against a base of 6 is 1.75x where the
+cap allows 2.33x. That is 12% under the median, not an outlier, and spending
+the last -1 of headroom would be a balance decision rather than a conversion.
+Flagged, not taken.
+
+#### Passives went DOWN, and nothing else moved
+
+`passive-exposure.ts` before and after is **byte-identical** — no species in
+the worst-case table moved, and the roster worst cases (33% damageReduction,
+65% thorns, 13.6%/tick healing) are unchanged. Charizard is the only learner,
+and the one thing that changed for it is the dead fireproof:
+
+| charizard passive | before | after |
+|---|---|---|
+| fireproof | 2.5 (clamp is 1) | **1.0** |
+| thorns | 0.32 | 0.32 |
+| damageReduction | 0.06 | 0.06 |
+| regen | 0.04 | 0.04 |
+
+No new passive kind was added anywhere in the tree. Every new node is a
+`delta`.
+
+#### Tests
+
+`pnpm -r test` is green at **1,587 tests, 0 changed**. No shipped test
+encoded this tree's node ids or paths, so no assertion's meaning changed. The
+two pre-existing `tsc --noEmit` errors in `engine/src/rapportProse.ts` and
+`engine/src/predation.ts` (a `RapportSubject.standing` field) are untouched by
+this work and were already failing on the branch.
+
+### Ember's Ring of Fire: how big the circle is
+
+The footprint and the fire count are two different numbers, and the first
+write-up of this conversion conflated them.
+
+| build | shape | tiles in footprint |
+|---|---|---|
+| base ember | point | 1 |
+| Ring of Fire (opener) | ring r1 (hollow) | 8 |
+| Fill the Circle (lane notable) | burst r1 (filled) | **5** |
+
+Those tiles are where the HIT lands. Damage only reaches agents standing on
+them, so an open-field cast is still one target.
+
+**Fire is a separate, much smaller number.** Exactly one node in the 45-node
+tree can ignite terrain (`wider_burn`, via `terrainBurn`), and `igniteNear`
+lights the agent's own tile or the first of four neighbours with fuel and
+then RETURNS — so ignitions are capped at **one per agent hit**, never one
+per tile. Fuel is roughly 5% of a real map. A fully-specced Ring of Fire
+starts one to three fires in a herd fight, not thirteen.
+
+The notable shipped at `burst radius: 2` — 13 tiles, since burst radius is
+manhattan — which was the roster's biggest single footprint on a 40-power
+move that also spreads burn. Direct call: *"13 is probably too much. Do the
+burst R1."* Five tiles still reads as an area, and it is still the escalation
+the name describes: the r1 ring is a hollow 8-tile shell that misses the
+caster's own adjacent diagonals, and the burst is the solid plus that covers
+them.
+
+The footprint is now asserted in TILES in `moveTrees.test.ts`, not left
+implicit in a radius constant, because it is a balance number rather than an
+implementation detail.
+
+### Vine Whip converted to v4 (Shipped) — "the limb, the grab, the reach"
+
+39 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Checker
+findings for this tree: **3 → 0**. Vine Whip is the tree that PROVED the v2
+template in the first place — the three-branch-plus-crosslink-triangle shape
+everything else in this file inherited started here — so it is fitting that it
+was one of the last three still standing at 39.
+
+**The fantasy, written before any node:**
+
+> Vine Whip is not a projectile and not a spell. It is a pair of limbs a plant
+> grows because it has none: two lengths of green muscle come out of the bulb
+> and go where the body is not going to walk. It hits like a limb, which means
+> it can also hook, coil, hold and haul — the whip and the grip are the same
+> motion at two different moments. What is dangerous about it is the distance:
+> whatever it catches has to come to the vine to answer it. What it costs is
+> that a vine with a grip on something is itself gripped, and the far end of
+> the reach is the soft end.
+
+The two neighbours it has to stay clear of are its own species-mates.
+**Leech Seed owns parasitism** — no wound, theft over time, a victim that keeps
+working for you after you have wandered off. **Solar Beam owns the grove and
+the canopy** — light, sun, the slow bloom. Vine Whip owns **contact and
+leverage**: it is the only Grass move in the roster that physically touches
+something and moves it.
+
+#### Lanes, and how they differ in kind
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Choking Grip** (agg) | **the lash** — landing at all, at arm's length: accuracy, `defensePenetration`, then *Past the Rind*'s `resistanceBreaker` | **the coil** — what happens after contact: *Set the Hook*'s `lockTicks`, the drain, ending in the preserved squeeze/drag fork | *Unbreakable Hold* — `jamCooldownTicks` | ***Endless Lashing*** |
+| **Root and Bind** (bold) | **the body** — the plant's own tissue: `defenseBoost`, and *Full of Rain*'s turgor | **the ground** — the earth under it: *It Takes Root*'s `terrainFill`, then the regen/thorns fork drawing on it | *Ironbark* | ***Bramble Ward*** |
+| **Shared Growth** (soc) | **the feed** — what the vines bring the herd out of the world: `gatherBurst`, paid for out of the plant's own hunger | **the herd** — what the vines do to herd-mates and what herd-mates then decide: *Called Out*'s mark, the ally heal, and its fork | *Reaching Growth* — the ally effect rides a hostile hit | ***Verdant Grove*** |
+
+Sociability's split is the sharpest: lane A takes food out of the *map* for
+the herd and lane B works on herd-mates' *bodies and attention* — one hand
+picks, the other holds. Boldness's is the one that needed the most work: the
+branch was a straight armour ladder (immovable → defenseBoost → regen/thorns →
+damageReduction → defenseBoost+thorns), five passive nodes in a row and two
+colour-pie flavours. It now has a lane that is about the plant's own turgor and
+a lane that is about the soil, and the two new nodes there are both `delta`s,
+not passives.
+
+#### The six new nodes, and why each one is not filler
+
+Every one of them is a lever this tree did not have, and each was checked at
+its call site before it was written.
+
+- ***Past the Rind*** (agg lane A tail) — `resistanceBreaker: 1.4`. Grass is
+  the worst-resisted attacking type in this roster and Bulbasaur's own valley
+  is full of Bug and Poison, so the move's real weakness is the lane's best
+  payoff: a limb does not argue with your typing, it finds skin. combat.ts:120
+  only fires it when effectiveness is already below 1 and clamps with
+  `Math.min(1, …)`, so it claws a resist back toward neutral and can never push
+  past it. Measured live, level 20 against a Bug/Flying defender: **0.5x / 8
+  damage on the base move, 0.7x / 23 on the full build**, with the control (a
+  Water defender, where grass is 2x) reading **2 before and 2 after**.
+- ***Set the Hook*** (agg lane B head) — `power: 5, lockTicks: 1`. A vine with
+  a grip on something is itself gripped. `lockTicks` locks the **user**
+  (combat.ts:308 — `agent.actionLockTicks`), which is the trade this lane is
+  about, and the benefit lives in the same node per principle 4. Verified:
+  `actionLockTicks` reads **1** after a use of the built spec, **undefined**
+  after the base move.
+- ***Full of Rain*** (bold lane A tail) — `situationalBonus: { rain, 1.35 }`.
+  A rooted thing drinks; a vine full of water is stiff. The condition is the
+  flavour here rather than a tax, and it is picked for fit: weather.ts:86's
+  `BIOME_WEATHER_AFFINITY` weights **grassland rain at 2.0 and forest at 1.5**
+  against drought 0.5/0.3, and grassland+forest are exactly Bulbasaur's biomes.
+  One other node in the whole roster uses this condition. Measured live with
+  the fight rng held identical across both runs so only the weather differed:
+  **26 damage dry, 34 in rain**.
+- ***It Takes Root*** (bold lane B head) — `terrainFill: { terrain: "flora" }`.
+  The vines do not just hold ground, they change it. predation.ts:1323
+  converts the defender's tile (floor/sand/mud only) and then calls
+  `waterSoil`, so the tile gets a real fertility bump on top of the flora. It
+  is the exact mirror of Aggression's own *Sapping Reach*, which CONSUMES a
+  flora tile for double damage — one branch eats the map, the other plants it,
+  and flora is this species' own `preferredTerrain`. Measured live: the
+  defender's tile came out **flora at fertility 1.00**, the control's stayed
+  **floor**.
+- ***Own Reserves*** (soc lane A tail) — `gatherBurst: 2` plus
+  `selfCostPerUse: { hunger, 0.05 }`. Bringing down more fruit than the plant
+  needs is not free: predation.ts:1457 takes the cost straight off the user's
+  own needs every use, and hunger is a satiation meter, so this Bulbasaur goes
+  hungrier every time it feeds the herd — the honest version of a branch whose
+  whole fantasy is spending yourself on everybody else. `gatherBurst` is live
+  for these learners rather than assumed: the only path a non-`burrow` damage
+  move can feed is needs.ts's canopy harvest, whose crop is forest-eligible,
+  and Bulbasaur's biomes are grassland and forest. Measured live: attacker
+  hunger **1.000 → 0.950** on one use, control **1.000**.
+- ***Called Out*** (soc lane B head) — `rallyCall: { ticks: 20 }`. The reach is
+  the point: a limb two or three tiles long can touch a thing the herd has not
+  walked to yet, and a lash that lands is the plainest way to say "that one."
+  The payoff is coordination rather than damage — other agents' own targeting
+  independently prefers a marked candidate. Measured live: defender
+  `rallyMarkTicksRemaining` **20**, control **undefined**.
+
+#### Levers checked at the call site and rejected
+
+- **`hitsArea`.** Vine Whip's base spec carries `shape: { kind: "line", length:
+  2 }` and **no node in the tree has ever set `hitsArea`, so that shape has
+  never resolved a single tile** — `resolveShape` is only ever reached from
+  `resolveAreaHit`. That is real dead content in a shipped base spec, and it is
+  reported here rather than fixed, because the fix is a footprint change and
+  footprints are a balance decision. It cannot be fixed by simply adding
+  `hitsArea` either, for the reason Rock Throw's own v4 notes already record: a
+  footprint narrower than the move's range envelope WHIFFS outright on a legal
+  target. Combat distance is manhattan and this move's range is 2 (3 with
+  *Snapback Lash*), so a length-2 line misses a target standing at (1,1) — the
+  sweep would land on empty grass while a legal target stood one tile off the
+  axis. The only footprints that cover the envelope are a burst radius 2 (13
+  tiles) or a cone length 3 — Rock Slide's move and Solar Beam's respectively,
+  and neither is two vines.
+- **`excludesAllies`.** Its only call site is `resolveAreaHit`'s target filter,
+  so on a single-target move it can never fire. It becomes available the day
+  `hitsArea` does, and the "no friendly fire" flavour still has no user
+  anywhere in the roster.
+- **`situationalBonus: { condition: "flanking" }`**, the obvious pick for a
+  reach lane, rejected for exactly the reason Rock Throw's *Aftershock Counter*
+  comment records: flanking reads "the defender is not currently fighting or
+  hunting ME", which for something striking from two or three tiles away is
+  true most of the time. A condition that is nearly always on is not a
+  condition.
+- **`fertilityBoost` / `statusImmunityAura` / `selfHeal`.** All three require
+  the `utilityMove` flag to ever be read (utilityMoves.ts). Vine Whip is a
+  damage move; they would have been three dead nodes.
+- **`positionSwapPull` as a Sociability filler.** It is documented as
+  "meaningless without `positionSwap` also set by some node in the chosen set",
+  and the only node that sets `positionSwap` is the Boldness↔Sociability
+  bridge — so a pure-Sociability build would have bought nothing.
+
+#### Every fork preserved, and the bridges re-landed
+
+All three `excludes` forks survive with their exact mechanics: *Throttling
+Grip* | *Constricting Pull* (squeeze versus drag), *Verdant Recovery* |
+*Thornbound* (draw from the ground versus arm it), *Vine Network* | *Bracing
+Growth* (heal the herd versus sharpen it). Fork count stays at 6. The only
+structural change to them is that the Sociability fork moved from the tail of
+the feed lane onto the tail of the herd lane, where its own content — two
+different `allyEffect`s — actually lives.
+
+Under v2 the crosslink shortcuts landed on plain fillers. Under v4 they land on
+one lane notable per branch they connect, which meant re-aiming all three:
+
+| bridge notable | lands on | lands on |
+|---|---|---|
+| *Hauled In* (agg↔bold) | *Deeper Hold* (agg lane B) | *Unyielding Stem* (bold lane A) |
+| *Living Trellis* (bold↔soc) | *Deeper Roots* (bold lane B) | *Shared Vigor* (soc lane B) |
+| *Bloom of Thorns* (soc↔agg) | *Crushing Coil* (agg lane A) | *Quickening Growth* (soc lane A) |
+
+**That first row is load-bearing and nearly went the other way.** The obvious
+wiring put *Hauled In* on the aggression lane A notable, which quietly broke a
+`forcedMovement` OVERWRITE that has been safe since v2: *Constricting Pull*'s
+drag and the bridge's own *Snapback Lash*/*Reeling Lash* drag are only
+co-takeable-safe because the bridge is an ANCESTOR of the fork. Landing the
+bridge on the other lane severed that ancestry and made them two independent
+setters of the same overwrite field. Caught by the checker before it shipped,
+which is the whole reason that rule exists.
+
+#### Passive discipline: nothing moved, deliberately
+
+The bulbasaur line is the roster's worst case for `thorns` at **65%**, with no
+engine cap anywhere. So this conversion adds **zero** passive nodes and changes
+**zero** passive values:
+
+| kind | before | after |
+|---|---|---|
+| `thorns` | 0.20 | 0.20 |
+| `damageReduction` | 0.13 | 0.13 |
+| `defenseBoost` | 0.16 | 0.16 |
+| `regenFlat` | 3.00 | 3.00 |
+| `healAura` | 0.015 | 0.015 |
+| `immovable` | 1 | 1 |
+
+`passive-exposure.ts` before and after the change is **byte-identical across
+all 100 species**. All six new nodes are `delta`s, which is the standing
+preference: a delta is bounded by the move, a passive is not.
+
+Healing reads 8.5%/tick against the 10% per-move ceiling, damage reduction 13%
+against 20%, thorns 20% against 50%.
+
+#### Balance, with the roster as control
+
+| metric | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| distinct levers | 24 | **30** | 28 |
+| colour-pie flavours | 8 | **11** | 11 |
+| tempo multiplier | 2.00x | **2.00x** (cap 2.00x) | 2.00x |
+| power multiplier | 1.89x | **2.00x** | 2.20x |
+| cheapest capstone | 11 pts | **9 pts** | 10 pts |
+| checker problems | 3 | **0** | — |
+
+Flavours per branch went 4 / 3 / 4 → **4 / 5 / 6**. Levers per branch (bridges
+excluded) are 10 / 10 / 11.
+
+**No cooldown headroom was spent, because there is none.** Base 3 gives
+`cdFloor = ceil(4/3) − 1 = 1` and a max cut of −2, and the shipped tree already
+spends exactly −2 across *Deeper Roots* and *Binding Roots*. Tempo was at its
+cap before this change and is at its cap after it.
+
+**The lifesteal ceiling was left alone and is flagged, not touched.** A full
+Aggression build reads **38% lifesteal** — the highest in the roster, against a
+~10% median — across four nodes that all predate this conversion (*Choking
+Grip*, *Deeper Hold*, *Throttling Grip*, *Endless Lashing*). Nothing here
+deepens it, and nothing here should decide unilaterally whether 38% is
+intended.
+
+#### Verified by running it, not by reading it
+
+A harness drove the real engine: a real world, a real mob-fight, one real
+landed hit, each new lever against a control. Everything in the six-node list
+above carries its measured number. Two things only a real run showed:
+
+- **A full build's flora tile does not land where the target was struck.** On a
+  build that also owns the Boldness↔Sociability bridge, `positionSwap` swaps
+  attacker and defender and then `positionSwapPull` shoves the defender three
+  further tiles — all of which resolves BEFORE `terrainFill` in
+  `resolveHitAgainstTarget`. So the vines throw the thing clear and something
+  grows where it lands, several tiles from where it was hit. That reads well
+  and is left as is; it is recorded because it was not obvious from the source.
+- **42 of 45 nodes are buyable in one legal purchase.** The other three are the
+  losing sides of the three forks, which is exactly right.
+
+`pnpm -r test` is green at 1,312 engine + 275 data tests. **No test needed
+changing**, which was not expected of the oldest tree in the file: the two
+tests that mention `vine_whip` (`leveling.test.ts`, `moveCap.test.ts`) both
+build their own synthetic spec and never touch the shipped tree, and
+`moveTrees.test.ts`'s vine-whip coverage is generic-across-the-roster rather
+than path-specific. No assertion's meaning changed.
+
+## The additive fields ship: "you don't know how they will interact"
+
+> "I like the idea of ADDING modifiers so you can stack your build, not
+> setting them. Because with the latter you don't know how they will interact
+> with each other."
+
+The earlier pass wrote the additive shapes into `proposed-trees.ts` as a
+draft. This pass built them in the engine, migrated the shipped trees that
+were actually colliding, and measured each one against the real combat
+pipeline.
+
+### The measured scope, first
+
+The collision list is derived by reading `applyMoveTree` itself — every field
+it writes with `delta.X ?? result.X`, minus the booleans (those OR-merge:
+once a node turns `terrainBurn` on, nothing turns it back off, so two setters
+agree by construction). Ancestry-aware, `excludes`-aware, all 17 shipped
+trees:
+
+| tree | field | colliding pairs | independent setters |
+|---|---|---|---|
+| wing_attack | `forcedMovement` | 7 | 5 |
+| solar_beam | `situationalBonus` | 4 | 5 |
+| rock_slide | `weightScaling` | 4 | 5 |
+| solar_beam | `range` | 3 | 3 |
+| hydro_pump | `range` | 3 | 3 |
+| hydro_pump | `situationalBonus` | 1 | 2 |
+| wing_attack | `situationalBonus` | 1 | 2 |
+| | **23 pairs** | **4 trees** | |
+
+That is the whole real surface — smaller than the 39 pairs the first audit
+counted, because the v4 conversions have been clearing them tree by tree
+since. Two things about this list are worth saying plainly:
+
+- **`weightScaling` was invisible to the checker.** It is an overwrite field
+  in `applyMoveTree` and was simply not in `check-proposed-trees.ts`'s
+  `OVERWRITE` list, so rock_slide shipped six independently-takeable setters
+  of it (0.08 to 0.25) and nothing said a word. The list is now the full
+  derived surface, not a hand-maintained subset.
+- **The same list expansion surfaced two collisions in the DRAFTS.** Not
+  shipped, so not fixed here, but they were invisible for the same reason:
+  `growth` has **14** co-takeable `fertilityBoost` pairs and `poison_sting`
+  **8** on `statusSeverity`. Both fields are plain scalars underneath and are
+  the obvious next additive candidates.
+- **`hits`, `statChangeOnHit`, `rallyCall` and `allyEffect` have zero shipped
+  collisions today.** They were built anyway, because the drafts author in
+  those shapes and because they are the fields the next conversions will
+  need.
+
+### What is additive now, and what it means
+
+| was (overwrite) | now | resolution rule |
+|---|---|---|
+| `range: {max}` | `rangeBonus: +N` | sums |
+| `hits: {min,max}` | `hitsBonus: +N` | sums; no base `hits` counts as one strike |
+| `rallyCall: {ticks}` | `rallyCallTicks: +N` | sums |
+| `hitsArea` + `shape.radius` | `areaBonus: +N` | sums, and turns `hitsArea` on |
+| `situationalBonus` | `situationalBonuses[]` | different conditions multiply; same condition takes the strongest |
+| `statChangeOnHit` | `statChangesOnHit[]` | different target+stat both apply; same pair takes the strongest |
+| `allyEffect` | `allyEffects[]` | strongest heal, plus the strongest buff per stat |
+
+**Why "strongest wins" inside one key rather than multiplying.** Every ladder
+in this roster restates a full value instead of an increment — Twineedle's
+concealed chain is 1.25 → 1.4 → 1.7, Solar Beam's low-HP chain is 1.3 → 1.6,
+Leech Seed's self-Attack chain is +1 → +2. Multiplying a ladder would hand
+out 2.98x where the designer wrote 1.7x. So distinct keys compose (that is
+the stacking the ask is about) and one key escalates (that is what a chain
+already meant). Both rules are order-independent, which is the actual defect:
+`situationalBonus` alone was last-writer-wins.
+
+**`shape` stays an overwrite, deliberately.** A cone is not a ring plus a
+line. Rival forms must `excludes` each other, and the checker enforces it.
+Only the SIZE became additive.
+
+**`areaBonus` accumulates separately from `shape`, and that was a real bug in
+the first cut.** Growing the shape in place lost the bonus the moment a later
+node overwrote `shape`: measured, buying the form first gave radius 2 and
+buying the size first gave radius 1 — the same order-dependence this pass
+exists to delete, reintroduced by the fix. It now sums across the whole
+selection and is applied once at the end.
+
+### Verified against the real engine, not by reading the code
+
+Every field below was driven through `applyMoveTree` and then through
+`tickWorld` → `applyPredationInstincts` → `resolveHit`, with damage read off
+the real `fought` events. BEFORE is the overwrite form in both purchase
+orders; CONTROL is the same measurement where it should show nothing.
+
+| field | BEFORE (overwrite) | AFTER (additive) | control |
+|---|---|---|---|
+| `rangeBonus` | 3 nodes, both orders: max **5** | max **7** either order | one node: 5. Real hits on a target 5 tiles out: **0** at range 4, **14** at range 5 |
+| `situationalBonuses` | order A **31** dmg (1.29x), order B **33** (1.38x) | **43** (1.79x) either order | flanking alone 33, elevation alone 31, neither 24. Ladder 1.3→1.6 on one condition: **38**, i.e. 1.6x, not 2.08x |
+| `hitsBonus` | order A 3 hits, order B 2 hits | **4** hits either order | real damage 336 → 672 (2.00x) → 1344 (4.00x); overwrite both = 1008 (3.00x) |
+| `rallyCallTicks` | order A 30 ticks, order B 20 | **50** either order | no node: unmarked. Real mark on the defender: 19 / 49 |
+| `statChangesOnHit` | order A defender Speed −1 only, order B self Defense +1 only | **both**, real stages on both agents | each alone applies only its own |
+| `allyEffects` | order A buff only (ally hp 2700), order B heal only (hp 5000, no stages) | **hp 5000 AND Defense +2** | heal-only and buff-only each do exactly one |
+| `areaBonus` | — | radius 1 → 2 → 3, same either order | real bystanders caught: 0 (no area) → 0 (radius 1, `hitsArea` off) → **4** → **6** |
+
+The range measurement needed a control of its own: a range-**20** move also
+lands 0 hits on a target 6 tiles away, so beyond 5 tiles the ceiling is the
+hunter's own detection radius and not the move's range. Without that, the
+zeroes further out would have read as a range result.
+
+### What was migrated, and what was left alone
+
+`hydro_pump` and `solar_beam` are at **0 checker problems** (from 2 and 3).
+15 shipped nodes moved to the additive forms: the three `+1 Range` nodes on
+Hydro Pump and three `+2 Range` on Solar Beam, and every `situationalBonus`
+setter on Hydro Pump, Solar Beam, Wing Attack and Scratch.
+
+The point-economy consequence is the reason to do it at all: a Hydro Pump
+build that buys all three `+1 Range` nodes used to pay three points for
+**+1** tile. It now gets **+3** (max 4 → 7). Solar Beam's three `+2` nodes go
+from +2 to +6 (max 5 → 11). Those are real balance changes and they are the
+literal content of the ask — flagging them rather than burying them.
+
+**Left as overwrite, on purpose:**
+
+- **`forcedMovement`** (wing_attack, 7 pairs). There is no sensible sum: the
+  fields are `mover`, `direction`, `timing`. "Drag them closer before the
+  hit" plus "shove them away after it" is not a bigger effect, it is two
+  different effects. This wants `excludes` between rival displacements, which
+  is a tree decision belonging to wing_attack's own v4 conversion (still
+  pre-v4 at 39 nodes), not an engine change.
+- **`weightScaling`** (rock_slide, 4 pairs). This one genuinely could be
+  additive — `factor` is a scalar. It is left alone because making it so
+  sums six setters into as much as +0.9 max-HP-scaled power, which is a
+  balance decision, not a cleanup. Reported, with the checker now able to see
+  it, rather than decided unilaterally.
+
+### One thing this pass changed that it did not have to
+
+Solar Beam's last non-collision problem was principle 13: the bridge filler
+*Deeper Shade* shared no lever with its crosslink *Shared Shade*. That is a
+collision between two rules, not an oversight — the node's own comment
+records that it was deliberately moved OFF healing to keep the tree under the
+10%/tick per-move healing budget (it sits at 9.4%, with 0.25 regenFlat of
+headroom). Deepening the crosslink's healing lever would break the cap.
+Resolved by giving *Shared Shade* the cover lever as a second passive
+(`defenseBoost` 0.03) so the filler deepens something the crosslink actually
+has. Solar Beam was using 0% of a 20% damage-reduction-style budget. The
+alternative — put regen back on Deeper Shade and raise the healing cap — is a
+balance call and was not taken.
+
+### The related finding: purchase ORDER, not depth, still decides every remaining overwrite field
+
+Not fixed here. This is a decision, not a cleanup.
+
+`maybeAutoRespec` appends each bought node to `moveTreeChoices` in the order
+it buys them, and `applyMoveTree` applies them in exactly that order. Because
+`prerequisitesAnyOf` bridges let an agent reach a deep node early, a build can
+buy the DEEP node first and a SHALLOW one later, and the shallow one wins.
+The checker's "ancestrally related ⇒ safe" test cannot see this: ancestry is
+a route, not a purchase order.
+
+Re-measured after this pass, driving the real `maybeAutoRespec` to a full
+build on all 17 trees at 3 rng seeds, comparing the bought order against the
+same node set sorted by depth:
+
+| tree | field | bought order | depth order |
+|---|---|---|---|
+| flamethrower | `allyEffect` | heal 0.15 + spAttack +1 | heal 0.05 + attack +1 |
+| rock_throw | `resistanceBreaker` | ×1.25 | ×2 |
+| water_gun | `allyEffect` | buff only | heal 0.25 + buff (30 ticks) |
+| hydro_pump | `forcedMovement` | attacker, closer, beforeHit | defender, away, onHit |
+| rock_slide | `weightScaling` | 0.15 | 0.25 |
+| wing_attack | `forcedMovement` | attacker, closer, 2 | attacker, away, 1 |
+| leech_seed | `statChangeOnHit` | self attack +1, 45t | self attack +2, 80t |
+| leech_seed | `fertilityBoost` | 0.4 / r2 | 0.5 / r3 |
+| leech_seed | `allyEffect` | heal only | heal + defense +1 |
+
+**7 of 17 trees drift.** Every drifting field is one still on the overwrite
+path. The additive fields do NOT drift: Solar Beam dropped off this list
+entirely, and its `situationalBonuses` array does come out in a different
+ORDER depending on what was bought first — but `resolveSituationalBonuses`
+collapses by condition and keeps the strongest, so nothing in the sim can
+observe the difference. That is the interesting half of the result: making a
+field additive fixes the order problem for that field as a side effect,
+because a sum and a max are both commutative.
+
+**The proposed fix is one line** — sort `chosenNodeIds` by depth inside
+`applyMoveTree` (or in `maybeAutoRespec` before applying). The argument for
+it: a build should land on the deepest node it actually bought, every time,
+and today an agent can pay for *Insatiable* and end up with *Wider Reach*
+because of what order the rng happened to hand out points in. The argument
+against, and why it is not in this commit: it changes the resolved spec of 7
+of 17 shipped trees in ways nobody has balanced, always in the direction of
+"the deeper, stronger node wins" — so it is a global power increase on top of
+the ones this pass already made, and it silently retires whatever balance
+those trees currently have.
+
+Three ways to take it, if it is wanted:
+
+1. **Sort by depth in `applyMoveTree`.** One line, deterministic, always the
+   deepest. Changes 7 trees at once.
+2. **Convert the remaining fields instead.** `weightScaling` is a trivially
+   additive scalar; `allyEffect` and `statChangeOnHit` are already plural in
+   the engine and only need the shipped nodes migrated. That leaves
+   `forcedMovement`, `resistanceBreaker` and `fertilityBoost` — which is a
+   short enough list to fix with `excludes` forks, one tree at a time, on
+   each tree's own conversion.
+3. **Both, in that order** — convert what converts, then sort what is left.
+
+Option 2 is the one that matches how this roster has been fixed so far, and
+it is the one I would take: every conversion is a tree-sized change with its
+own before/after, where the sort is a roster-sized change with none.
+
+### Wing Attack converted to v4 (Shipped) — "the wing, and everything it moves"
+
+Fourteenth structural conversion, and the one designed as the explicit
+counterweight to `peck`, converted immediately before it. Peck's brief was
+"the point, not the wing." This one is the wing.
+
+| | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| checker problems | **6** | **0** | — |
+| distinct levers | 22 | **30** | 28 |
+| colour-pie flavours | 10 | **13** | 12 |
+| tempo | 2.50x (cap 2.50x) | **2.50x** — unchanged | 2.00x |
+| power | 2.25x | **2.42x** | 2.20x |
+| cheapest capstone | 11 pts | **10 pts** | 10 pts |
+| new passive kinds | — | **one** (`immovable`) | — |
+
+**The fantasy, written before a node moved:**
+
+> Wing Attack is displacement, not puncture. A wing is the largest flat
+> surface in the roster and this move is that surface brought down across a
+> whole cone of ground at once — eight tiles already, and it does not check
+> who is standing on them. Nothing about it is precise: it knocks bodies off
+> the tile they chose and out of the line they were holding, and it does
+> exactly that to the flock-mate beside the target. What is dangerous about a
+> bird is never one bird. And the wing doing the pushing is the same wing
+> holding it up, so everything this move buys is bought off the thing keeping
+> it in the air.
+
+**The Peck inversion, in one field.** Peck's deep Boldness notable *Nowhere to
+Run* is `forcedMovement { mover: "defender", direction: "closer", tiles: 1 }`
+— the beak hooks and the target comes back onto the spot the next jab is
+already aimed at. Wing Attack's identity ladder is the same field pointed the
+other way: `away`, 1 → 2 → 3 tiles. The learner lists say the same thing
+independently — Peck's nine learners are mostly flightless (Doduo, Goldeen,
+Farfetch'd, Nidorino), Wing Attack's five are all real fliers (the Pidgey
+line, Golbat, Aerodactyl). The test file asserts both directions in the same
+`it`, so the inversion cannot silently drift.
+
+**Lanes differ in kind, per branch:**
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Nothing Stands Where It Was** (agg) | *The Downbeat* — where the target ENDS UP (the `forcedMovement` ladder's top rung, *Driven Off* at 3 tiles, then armour penetration) | *The Stoop* — what the bird SPENDS to land it (crit, `critCooldownReset`, and the preserved two-quick-strikes-vs-one-committed-dive fork) | *Everything Behind It* — `weightScaling`, the one node whose value depends on who is swinging, with its own `lockTicks` cost in the same node | ***Scoured Bare*** |
+| **The Air Is Not Neutral** (bold) | *Hold the Line* — survive the hit and keep the air (`damageReductionFlat`, `defenseBoost`) | *Fly the Weather* — the gale that grounds everyone else, incl. the preserved mend-between-gusts-vs-fly-into-it fork | *Nothing to Push Against* — `immovable`, the literal mirror of this tree's own Aggression identity | ***The Whole Wingspan*** |
+| **What One Bird Is Not** (soc) | *The Call* — the mark; changes what OTHER birds decide to attack (`rallyCall` 15 → 25) | *Open Ranks* — the formation; cover and stat support, incl. the preserved rouse-vs-settle fork | *Lifts the Flock* — `allyEffectOnAttack`: the same beat that throws the enemy back pushes air over whoever is behind you | ***Flock's Eye*** |
+
+**The best node in the pass is *Scoured Bare*, and it exists because the
+branch had an honest problem.** Aggression spends eleven points learning to
+throw things three tiles away — from a move that reaches two. A branch that
+gets worse the more you buy is a trap, not a design. So the capstone does not
+reach further; it strips the ground where they land. `terrainFill` resolves
+*after* `forcedMovement` inside the same landed-hit block (predation.ts:1300,
+then :1323), reading the defender's NEW position, so the sand goes down under
+wherever the gust put them, and `terrainSpeedMultiplier` (support.ts) puts
+anything walking on sand at 0.75 speed. They come back slower than they left.
+It is also the only `terrainFill` in the roster that is not water or mud —
+scratch, hydro_pump and earthquake all wet the ground; this one takes it away
+— and the test asserts that, with the other three as its control.
+
+***Final Stoop*'s old mechanic had to go, and the reason is a checker
+finding, not taste.** v3's `situationalBonus: targetLowHp` was one of two
+independently-takeable setters of an OVERWRITE field, racing *Storm Wings*.
+The tree now carries exactly one condition, and the one that survived is
+`storm`, because a storm is the only battlefield condition in the engine that
+is specifically about air. What the node's own v3 comment insisted on —
+"the old capstone widened it into a flock-sized AoE cone, undoing everything
+the branch just built" — was a decision, not a gap, and it still holds: the
+capstone stays single-target and the footprint change lives in Boldness.
+
+**Accuracy surplus is live here, and it is live for a reason the fantasy
+already wanted.** `stormAccuracyMultiplier` (weather.ts) multiplies every
+accuracy roll by **0.6** inside a storm cell, so the break-even past which a
+point of accuracy buys literally nothing is `100 / 0.6` = **167**. The
+fully-invested tree lands on **150**: a specced bird casts at 90% in a gale
+where an unspecced one is at 60%, and the Boldness lane that buys the storm
+DAMAGE bonus is the same lane that buys the accuracy back. That is the
+opposite of ember's dead accuracy fillers, and the test pins the threshold
+rather than the node count.
+
+**Six checker problems, and five of them were one bug wearing five hats.**
+`forcedMovement` is an OVERWRITE field and the shipped tree had **five**
+co-takeable setters with three different intents — the scatter (defender
+away), the approach lunge (attacker closer, *Riding the Gust* / *Gathering
+Updraft*) and the peel-out (attacker away, *Wind Shear*). Any build with two
+of them was paying skill points for whichever the engine reached last. The
+tree now has exactly one ancestral ladder, all `defender`/`away`, threaded
+through the Scattering Strike bridge (1 → 2) into Aggression's own *Driven
+Off* (3). The two rewritten nodes are the honest part:
+
+- ***Riding the Gust* / *Gathering Updraft*** became a `weightScaling` ladder
+  (0.05 → 0.08 → 0.12 at *Stooping Dive*, topped by *Everything Behind It* at
+  0.15). Boldness supplies the height, Aggression supplies the fall — gravity
+  is the only free power source a bird has. **The first draft of this section
+  claimed a species spread this lever does not have, and it was caught by
+  measuring instead of asserting:** at 0.15 and level 30 the bonus is +9.6
+  power on a Pidgey (`maxHp` 64) and +13.2 on an Aerodactyl (88), not the
+  "+5 vs +24" first written down. `maxHp` across this move's five learners at
+  level 30 only spans 64–89, so `weightScaling`'s real axis here is LEVEL,
+  not species — the same Pidgey is +5.6 at level 15. Real, and modest.
+- ***Wind Shear*** lost its peel entirely. This move's forced movement belongs
+  on the thing it hits, not on itself; what is left is the literal aviation
+  reading of its own name.
+
+The sixth problem was principle 13: *Covering Wing* shared no lever with its
+own crosslink. Fixed by splitting the pull — `screening_dive` and
+`covering_wing` grant 1 each (additive) instead of 0 and 2, and
+*Wingmate Shield* adds a third, so the bridge is one ladder end to end and
+the total is a real escalation rather than the v3 number moved sideways.
+
+#### The overwrite ORDER hole, measured on this tree
+
+DESIGN_VALIDATION.md's "known hole" — ancestry is a route, not a purchase
+order — bites hardest on a tree built out of escalating ladders, so it was
+measured rather than assumed. Driving the engine's own `maybeAutoRespec` on a
+real Pidgey, 3 dispositions × 8 rng seeds:
+
+| | reading | |
+|---|---|---|
+| nodes bought | **42 of 45**, every run | the three missing are exactly one side of each fork |
+| capstones reached | **3 of 3**, every run, from every disposition | |
+| final scatter | **3 tiles in 18/24 runs, 2 tiles in 6/24** | *Driven Off* is 3; the bridge's *Harder Scatter* is 2 |
+| final `weightScaling` | **0.15 in 6/24, 0.12 in 18/24** | perfectly anti-correlated with the row above — whichever ladder finished last wins |
+
+So roughly a quarter of builds get the shallower rung of one ladder. That is
+the engine hole, not a tree defect (ember's `shape`, earthquake's
+`forcedMovement` and tackle's `situationalBonus` all drift the same way), and
+it degrades gracefully in both cases — 2 tiles is still a real knockback, 0.12
+is still real mass. It is worth recording because this tree makes the number
+concrete: **the fix is worth about one rung of one ladder to a quarter of
+builds, per ladder.**
+
+#### The engine gate that decides what this move actually is
+
+`resolveHitAgainstTarget` gates `forcedMovement`, `terrainFill`,
+`jamCooldownTicks`, `statChangeOnHit`, `positionSwap`, `rallyCall` and status
+behind `isPrimaryTarget` (predation.ts:1289). **So on this AoE only the
+deliberately-picked target is ever scattered** — everyone else standing in the
+cone just takes the damage. The scatter is aimed; the cone is collateral. That
+is documented, deliberate behaviour (it is the same `isPrimaryTarget` finding
+water_gun's conversion recorded for its puddles), and the tree is written to
+what is real rather than to what the name implies.
+
+#### Levers rejected, each with the call site read first
+
+- **`terrainBurn`** — a downbeat flattening a bush was the most wing-shaped
+  idea in the pass, and it no longer does that. `resolveHitAgainstTarget`
+  now calls `igniteNear` (predation.ts:1321): the node lights a real,
+  persistent, spreading fire. A Flying move is not an ignition source, and
+  ember's own writeup records that it holds the roster's only ignition node.
+- **`gatherBurst`** — genuinely buildable and genuinely apt: Pidgey is
+  `homeLayer: "canopy"`, the canopy-harvest path takes any off-cooldown
+  damage move and scales with `range.max`, and a range-3 cone would be a
+  *better* fruit-shaker than Peck's range-1 beak. Rejected because Peck's
+  *Shake the Branch* is that exact node on that exact path one conversion
+  earlier, and "a flock shakes a tree" twice in a row is the copy-paste
+  failure this template exists to stop.
+- **`statusImmunityAura` / `drainNeeds` / `selfHeal`** — all require
+  `utilityMove`, and `pickBestMove` (combat.ts) *excludes* any `utilityMove`
+  from hostile selection. Putting one on a Wing Attack node would have
+  removed the move from combat. Same finding Peck recorded; still true.
+- **`chargeAttack`** — a stoop is the canonical charge and this branch is
+  literally about commitment. Rejected because Peck's capstone *Set the
+  Point* is `chargeAttack`, shipped one conversion ago.
+- **A wider cone at the Aggression capstone** (cone 3×3 = 15 tiles, counted).
+  It would have reversed a decision this document already records in the
+  node's own source comment. The footprint moved to Boldness instead, where
+  the colour pie puts it anyway.
+- **A third accuracy filler in Boldness**, cut for the same reason Peck's
+  "+8 Accuracy" tail filler was: the surplus is bounded by 167 and the tree
+  should stop well short of it.
+
+#### The one reuse this pass did NOT dodge
+
+*Flock's Eye*, the Sociability capstone, is `excludesAllies` — and that is not
+new: earthquake, ember, scratch, hydro_pump and rock_slide all have it, and
+Earthquake's whole Sociability branch is built on it. A capstone is supposed
+to be something the roster does not already have, so this is a real critique
+and it is recorded rather than dressed up. It is here anyway because it is the
+only lever in the engine that answers this move's actual flaw, and the flaw is
+the branch. The difference from Earthquake's drilled herd is direction:
+Earthquake's blast is centred on itself, so its flock is standing *around* the
+hit; this is the one AoE in the roster you AIM, so the flock is standing
+*behind* it. That is a formation, not a drill.
+
+#### Passive discipline: one new kind, and the honest limit of it
+
+`passive-exposure.ts` before/after differs on exactly one line:
+`aerodactyl`'s `calmingPresence` total **1.05 → 0.85**, because v3 spent both
+its Sociability fork tip AND its capstone on 0.2 of the same passive and the
+capstone now spends `excludesAllies` instead. Both readings are far above
+`MIN_CALMING_MULTIPLIER`'s 0.50 floor, so nothing an agent does changes.
+
+The one addition is `immovable` on *Nothing to Push Against*, chosen because
+it is the exact mirror of this tree's own Aggression identity — the move that
+throws everyone three tiles, on the branch that cannot be thrown anywhere —
+and because it is a **threshold** passive (`status.ts:418` checks `> 0`), so
+unlike `thorns` and `damageReduction` it cannot stack into invulnerability.
+
+**And its measured limit, stated rather than designed around:** every current
+learner also knows a move that already grants `immovable` — tackle for the
+Pidgey line and Golbat, rock_slide for Aerodactyl — so a build that fully
+invests in both trees reads `immovable 2` where 1 was already the whole
+effect. It is live for a wing-attack-only spec, which is the common case at
+the observed p50 level of 25, and the node's `power`/`defensePenetration`
+delta is live for every build regardless.
+
+#### Balance numbers: what moved and what deliberately did not
+
+- **Tempo did not move, and that is the point.** Wing Attack was already at
+  its own cap: base 4, `cdFloor` = 1, three `-1` nodes = the full `-3`,
+  2.50x. It is *above* the 1.80–2.00x roster median and there was no headroom
+  to spend, so none was spent.
+- **Power moved 2.25x → 2.42x** (median 2.20x). Six new nodes originally
+  carried `+5 Power` and pushed it to 2.75x; four were stripped back down
+  after measuring. Reverting either of the remaining two is a one-line change.
+- **Cheapest capstone 11 → 10 points**, landing exactly on the roster median,
+  and every capstone's cheapest route is 100% inside its own branch.
+
+#### The footprint, in tiles
+
+| build | shape | tiles | reach |
+|---|---|---|---|
+| base wing_attack | cone(2,2) | **8** (3 then 5) | 2 |
+| *The Whole Wingspan* (bold capstone) | cone(3,2) | **9** (1 then 3 then 5) | 3 |
+
+Not a strict upgrade, and that is deliberate: the span narrows at the shoulder
+(three tiles down to one at depth 1) and opens at the tip. `range.max` moves
+with it, because a cast range longer than the footprint is exactly how
+rock_throw's cone managed to whiff on a legal target. Both numbers are
+asserted in TILES in `moveTrees.test.ts`, not left implicit in a length/width
+constant.
+
+### Round six SHIPPED — the five bare moves finally get trees, and what a `utilityMove` can actually do
+
+`harden`, `twineedle`, `poison_sting`, `growth` and `agility` are live in
+`packages/data/src/moves.ts` at 45 nodes each, template v4, 9 `anyOf`, 3
+three-node bridges. `packages/data/scripts/proposed-trees.ts` is now the
+historical draft, not the source of truth.
+
+**This was not a copy-paste job, and the reason is one finding.**
+
+#### The finding: `pickBestMove` excludes every `utilityMove`, so most of the lever list is DEAD on a status move
+
+Read at the call site, not in this doc: `combat.ts`'s `pickBestMove` filters
+`utilityMove`-flagged specs out of hostile selection, exactly like `burrow`.
+So Harden, Growth and Agility never roll an accuracy check, never deal
+damage, and never run `resolveHit`. Everything downstream of `resolveHit` is
+therefore unreachable on them:
+
+| dead on a `utilityMove` | count in the drafts |
+|---|---|
+| `shape`/`hitsArea`, `power`, `hits`, `range`, `accuracy` | 5 draft nodes |
+| `defensePenetration`, `critRateStage`, `critCooldownReset` | 4 |
+| `statusChance`, `statusSeverity`, `statusSpreads` | 2 |
+| `jamCooldownTicks`, `situationalBonus`, `selfStateBonus` | 4 |
+| `forcedMovement`/`reposition`, `positionSwap`, `terrainBurn`/`terrainFill`, `consumesOwnTerrain` | 5 |
+| `selfCostPerUse`, `gatherBurst`, `allyEffectOnAttack`, `excludesAllies` | 5 |
+
+The live surface of a status move is small and worth writing down once:
+
+- `cooldownTicks` and `lockTicks` — applied by `useMove`, which the utility
+  path does call, so a real action lock is a real cost.
+- `selfHeal`, `statChangeOnHit` (self), `statusImmunityAura`,
+  `fertilityBoost`, `spawnsRain`, `matingRadiusBoost`, `drainNeeds` —
+  `utilityMoves.ts`'s `maybeUseUtilityMove`.
+- `targetsAlly` + `allyEffect` — `support.ts`'s `applySupportMove`, which
+  does **not** exclude utility moves. This is the one that saves the
+  Sociability branches.
+- every `grantsPassive` kind — agent-level, needs no trigger at all.
+
+That is 10 delta levers plus 13 passive kinds, and it maps to **8 of the
+colour pie's 15 flavours**. Harden and Agility reach 7 of those 8, which is
+why `tree-balance.ts` flags them at 7 flavours against a roster median of 11.
+That is a ceiling, not an under-explored fantasy — the same shape `dig` (5)
+and `leech_seed` (7) already sit in.
+
+#### The check that matters most: can a branch fire in a fight at all
+
+`maybeUseUtilityMoveInCombat` decides by EFFECT FIELD, not move id, and will
+only ever spend a fight action on `selfHeal`, a **positive self**
+`statChangeOnHit`, or `statusImmunityAura`. All three are OVERWRITE fields,
+so each can only have one ancestry chain per tree — which means placing them
+is a whole-tree constraint, not a per-branch decision.
+
+Placed one per branch on every status tree:
+
+| move | Aggression | Boldness | Sociability |
+|---|---|---|---|
+| harden | *passives only* (thorns/unshaken/defenseBoost) | `selfHeal` (Chrysalis) + Defense ladder | `statusImmunityAura` (Let It Pass) |
+| growth | `selfHeal` (Spore Reserve) | `statChangeOnHit` (Worked Ground) | `statusImmunityAura` (Homestead) |
+| agility | `statChangeOnHit` (Speed ladder) | `selfHeal` (Overland) | `statusImmunityAura` (One Pace) |
+
+**A test caught a real defect here mid-build.** Agility's Sociability branch
+originally had none of the three — it was allyEffect + passives only, so it
+could never spend a fight action. The `statusImmunityAura` chain moved out of
+Boldness and into Sociability to fix it, and Boldness's Pathfinder lane took
+`fertilityBoost` instead (a herd churning a path leaves ground things grow
+in — the live version of the draft's `createsTerrain` node). The test that
+caught it is in `packages/data/test/moveTrees.test.ts` and was proven to fail
+by injecting a `defensePenetration` onto an Agility node.
+
+#### Every "needs a new primitive" claim, checked at the call site
+
+None of these exist. Each was replaced with a live lever that serves the same
+fantasy, not shipped as a dead node:
+
+| draft primitive | verdict | what shipped instead |
+|---|---|---|
+| `bulk` (the Harden→Tackle weight idea) | `weightScaling` reads `attacker.maxHp` and nothing else — no term to add to | `defenseBoost` / `damageReductionFlat` |
+| `unnoticed`/`unnoticedAura`/`huntTargetSkip` | nothing subtracts from `isDetectable`'s `baseRadius` but the bush term | `calmingPresence` + `nonTerritorial` — the shipped "nothing near it starts anything" |
+| `thornsRubble` + a "rubble" `TerrainKind` | neither exists | `thorns` + a real `fertilityBoost`: the shell still sheds onto the ground, it grows things instead of blocking them |
+| `statusNeedsInterference` (*Sickened*) | `tickStatusEffects` gives poison a flat DOT and nothing else; no needs-recovery path reads `agent.status` | `statusSeverity` + `jamCooldownTicks` — see below |
+| `createsTerrain` at the caster's tile | `terrainFill` fires at the DEFENDER's tile on a landed hit; a utility move never lands one | a `fertilityBoost` flood big enough that flora.ts's own germination does the planting |
+| `fertilityCeilingBoost`, `floraRegrowthMultiplier`, `floraCompetition`, `herdForageBonus`, `herdMigrationResistance` | not delta fields, nothing reads them | `matingRadiusBoost` carries the settle-here fantasy, and shows up as a population curve |
+| `terrainUnhindered`, `dispersalSpeed`, `herdHaste`, `cooldownHaste` | not `PassiveKind`s | `fireproof` (ground that stops everything else), `aquaticHaste` (the shipped herd speed aura), plain `cooldownTicks` |
+| `ppCost` / `maxPPBonus` | no PP economy; `MoveSpec.pp` is inert | `selfCostPerUse` (energy) on Twineedle/Poison Sting — a real per-use price on the sim's own needs axes |
+
+**The one node that could not ship, stated plainly.** *Sickened* — "a poisoned
+agent recovers hunger and thirst at half rate, so the payoff of poisoning
+something is that it STARVES" — was the best idea in the round-six drafts and
+it is still unbuildable. `drainNeeds` is the nearest shipped primitive and is
+unreachable on Poison Sting: `utilityMoves.ts` is its only reader, and
+flagging Poison Sting `utilityMove` would remove it from combat entirely. It
+ships as the half that runs: venom severe enough that the thing it is in
+cannot get its own tempo back. **The needs-recovery hook in needs.ts is still
+the highest-value missing primitive for this move, and it is now the only
+thing standing between the draft and its own best node.**
+
+#### The OVERWRITE fix the checker caught
+
+The draft `growth` had **fourteen** co-takeable `fertilityBoost` setters —
+`applyMoveTree` overwrites that field, so a build with several of them
+silently got whichever the engine reached last. Every overwrite field in all
+five shipped trees is now on exactly one ancestry chain, so a later node
+escalates an earlier one instead of racing it:
+
+| tree | field | the chain |
+|---|---|---|
+| growth | `fertilityBoost` | Deep Roots 0.45 → Humus 0.6 → Old Ground 0.8/r1 → Seedbed 0.9 → It Takes 1.2/r2 |
+| harden | `statChangeOnHit` | base +1 → Settling Weight +2 → Hardening Habit +3 → Unbudgeable +4 |
+| agility | `statChangeOnHit` | base +2 → First Move +3 → Wound Up +4 → Blur +5 → Faster Than Thought +6 (the engine clamps at 6) |
+| twineedle | `forcedMovement` | Hit and Gone 2 → Never Landed 3 → Never There 4 tiles |
+| poison_sting | `statusSeverity` | 1.3 → 1.6 → 2.4 → 3.2 |
+
+#### `shape` is dead without `hitsArea`
+
+Only `resolveAreaHit` reads `shape`, and only `hitsArea` routes into it. Both
+burst nodes that shipped set both, and `resolveAreaHit` centres the shape on
+the **attacker**, not the target — which is what the live verification below
+had to be rebuilt around. `burst` radius 1 is a filled Manhattan diamond,
+5 tiles; radius 2 is 13.
+
+#### Balance, with the roster as control
+
+| move | nodes | levers | flavours | tempo (cap) | cheapest capstone |
+|---|---|---|---|---|---|
+| poison_sting | 45 | 30 | 11 | 1.50x (3.00) | 8 pts |
+| twineedle | 45 | 28 | 13 | 3.00x (3.00) | 8 pts |
+| growth | 45 | 21 | 8 | 2.82x (2.82) | 8 pts |
+| harden | 45 | 20 | 7 * | 2.93x (2.93) | 8 pts |
+| agility | 45 | 19 | 7 * | 3.00x (3.00) | 8 pts |
+| **roster median** | 45 | 25 | 11 | 2.00x | 10 pts |
+
+The two flagged flavour counts are the `utilityMove` ceiling described above,
+not padding. Every tempo figure is at or under its own cap.
+
+#### Passive exposure: the largest single change this project has made
+
+Five trees at once, `passive-exposure.ts` before and after. Roster worst case:
+
+| passive | before | after |
+|---|---|---|
+| damageReduction | 33% (diglett) | **36%** (krabby/kingler) |
+| thorns | 65% (venusaur) | 65% (venusaur, unchanged) |
+| regen + aura + regenFlat/43 | 18.8% (sandshrew) | **25.9%** (sandshrew) |
+
+Per species that learns one of the five (before → after):
+
+| species | movepool | dmgRed | thorns | healing | defenseBoost |
+|---|---|---|---|---|---|
+| krabby / kingler | tackle+water_gun+harden | 16% → **36%** | 15% → 45% | 10.2% → 20.0% | 0 → 4.0 |
+| metapod / kakuna / shellder | tackle+harden | 8% → 28% | 15% → 45% | 6.2% → 16.0% | 0 → 4.0 |
+| kabuto / kabutops | scratch+harden | 8% → 28% | 15% → 45% | 5.0% → 14.8% | 0 → 4.0 |
+| grimer / muk / pinsir | harden+sludge/slash | 0% → 20% | 0% → 30% | 0.0% → 9.8% | 0 → 4.0 |
+| oddish / gloom | tackle+growth+grassy_terrain | 8% → 18% | 15% → **49%** | 6.2% → 16.2% | 0 → 4.0 |
+| sandshrew | scratch+dig+agility+earthquake | 33% (unchanged) | 40% (unchanged) | 18.8% → **25.9%** | 0.3 → 4.8 |
+| rapidash | tackle+ember+agility | 8% (unchanged) | 15% (unchanged) | 13.1% → 20.1% | 0.5 → 5.0 |
+| the other 20 learners | — | mostly unchanged | mostly unchanged | +7-8 points | 0 → ~4.5 |
+
+Three deliberate trims were made during the build, all reported rather than
+buried:
+
+1. **Agility's `damageReduction` was pulled entirely.** At 0.18 it was legal
+   per-move but pushed Sandshrew (which already carries Dig's and
+   Earthquake's) to **51%** — over half of all incoming damage, uncapped.
+   Converted to `damageReductionFlat`/`defenseBoost`, which scale down late
+   the way MOVES_DESIGN's own note prefers. Sandshrew is back at 33%.
+2. **Harden's `thorns` went 0.38 → 0.30.** At 0.38 the seven Harden species
+   read 63%; they now read 45%, under Venusaur's existing 65% ceiling.
+3. **`defenseBoost` went 9.0 → 4.0 on Harden and 8.0 → 4.5 on Agility.**
+   `statStageMultiplier` (combat.ts) **clamps stages at ±6** and the trees'
+   own `statChangeOnHit` already climbs to +4, so everything past ~4 was
+   points spent on nothing — the same shape as `calmingPresence` past its
+   floor. Worth knowing: `defenseBoost` had essentially no roster exposure
+   before this (worst 0.5), so a naive spend would have gone from 0.5 to 9.0
+   without anyone noticing.
+
+Still true and still unfixed: `thorns` and `damageReduction` have no engine
+cap at all, and the healing softcap bends healing only.
+
+#### Verified by running it, not by reading it
+
+**Reach** — `maybeAutoRespec` driven for real on an actual learner of each
+move, 40 seeds x 60 points, control = shipped `tackle` on Rattata through the
+identical harness:
+
+| move | learner | nodes reached | capstones reached (of 40 seeds) |
+|---|---|---|---|
+| harden | metapod | **45/45** | 12 / 11 / 10 |
+| twineedle | beedrill | **45/45** | 3 / 8 / 4 |
+| poison_sting | ekans | **45/45** | 14 / 9 / 7 |
+| growth | oddish | **45/45** | 10 / 10 / 9 |
+| agility | scyther | **45/45** | 10 / 16 / 8 |
+| *tackle (control)* | *rattata* | *45/45* | *40 / 40 / 40* |
+
+Nothing is unreachable, and every capstone lands in a real build. The control
+reaching 40/40 is the expected shape — Rattata knows one move, so no points
+are split; a two- or three-move species spreads them, which is exactly why
+the new trees land at 3-16 rather than 40.
+
+**Live, one signature node per tree, each with a control that fires**, driven
+through the real `tickWorld`, 3 seeds each:
+
+| tree | node | with | control |
+|---|---|---|---|
+| harden | *Chrysalis* (`selfHeal` 0.15 + `lockTicks` 6) | in-combat utility uses 4, ticks healing ≥15% maxHp: **1-2** | same 3-4 uses, ticks healing ≥15%: **0** |
+| twineedle | *Nothing Forgets* (burst r1 + `hitsArea`) | bystander damage **488 / 49.5 / 542.5** | base point shape, bystander damage **0 / 0 / 0** |
+| poison_sting | *The Nest Decides* (+`excludesAllies`) | bystander is a herd-mate: **0 / 0 / 0** | same node, bystander is a FOE: **113 / 59 / 308.5** |
+| growth | *It Takes* (`fertilityBoost` 1.2 r2) | fertility at range 2 = **1.0** | base r0 move: **0.6** (ambient regen only), both with real utility uses |
+| agility | *Moving as One* (`aquaticHaste` 0.25) | herd-mate on water, mean `actionSpeedOf` **127.97** | same herd-mate on floor: **107.05** (ratio 1.19) |
+
+**Two things the first version of that harness got wrong**, recorded because
+both produced confident all-zero tables that looked like findings:
+
+- Nothing ever attacked, because a fight needs `HuntRules` keyed by the
+  attacker's species AND `isPreyOf`'s size gate (attacker `maxHp` well above
+  the target's) — two same-sized agents never fight no matter how hungry.
+- The AoE bystander was placed one tile past the target. `resolveAreaHit`
+  centres the shape on the **attacker**, so a burst r1 never covered it. The
+  first run reported "bystander damage 0" for both the burst and the control
+  and would have read as a passing test.
+
+`raiseFertility` also caps at the tile's own `fertilityCeiling`, so the growth
+measurement had to run on loam (1.0) rather than the default sandy (0.6),
+where ambient regen reaches the cap on its own and both arms read 0.6. That
+is worth remembering: **`fertilityBoost` buys speed to the ceiling, not a
+level above it** — which is exactly what the draft's `fertilityCeilingBoost`
+was reaching for, and it is still not buildable.
+
+#### Open, flagged not resolved
+
+- *Nobody Leaves* (Growth's Sociability capstone): a herd that has solved food
+  is a zone that never turns over, which collides with the standing
+  "equilibrium and variety, not a dominant answer" pillar. Shipped with the
+  concern written into its own node comment, as the draft did.
+- The needs-recovery hook for *Sickened*, above.
+- `thorns`/`damageReduction` still have no engine-side cap.
+
+---
+
+# Design pass: what accuracy and evasion should actually be
+
+Accuracy just became a stat worth having. This is the argument for what to do
+with it, written before any node is touched.
+
+## The plain version
+
+Until today, nothing in the game could miss for an interesting reason. Now
+three things make you miss — distance, weather, high ground — and one thing
+can fix it: accuracy. That is the good half.
+
+The bad half is the obvious next step, and I want to argue against it before
+we build it: **giving moves a raw "+2 evasion" node.** It is the standard
+Pokémon answer and it is wrong for this game specifically.
+
+Two reasons, both from our own pillars.
+
+**It is a hidden meter.** *"Mechanics should be visible on the map, not
+hidden in a meter."* We already chose the drought that dries up ponds over
+the drought that multiplies a thirst number. A defender with +4 evasion looks
+exactly like a defender with 0 evasion. Nothing on the map explains why the
+attack missed, so the chronicle can only say "it missed" — which is the same
+"sad and vague" failure as "it just died out".
+
+**It is the classic dominant answer.** *"We want equilibrium and variety, not
+a dominant answer."* Evasion stacking is the most reliably degenerate
+strategy in the genre. And our numbers make it worse than usual: four move
+slots, each able to hold its own evasion stage, and the cap is +6 net —
+which is a **1/3 multiplier on every incoming attack, permanently**, for a
+build that just re-casts.
+
+## What to do instead
+
+Every accuracy modifier should come from something already drawn on the map.
+We have the vocabulary for this — `oneSituationalMultiplier` already resolves
+twelve conditions, and most of them are visible: `concealed`, `elevation`,
+`night`, `storm`, `rain`, `drought`, `coldSnap`, `flanking`.
+
+So: **you get harder to hit by doing something, somewhere, that a player can
+see.** Not by holding a number.
+
+### The gap this exposes, and it is a good one
+
+`isConcealed` (predation.ts) is already real: it covers a burrowed agent and
+any tile with `concealment` — bushes. It already shrinks the radius at which
+you get NOTICED (`BUSH_CONCEALMENT_DETECTION_REDUCTION`).
+
+**It does nothing once a fight starts.** Standing in a bush makes you harder
+to find and no harder to hit. That is the single most intuitive "hard to hit"
+condition in the game, it is already on the map in a colour the player can
+see, and it is currently worth nothing defensively.
+
+That is where evasion should live.
+
+## The three axes, and who owns them
+
+| axis | already real? | visible? | whose flavour |
+|---|---|---|---|
+| distance | yes, new — first tile free then −5/tile | yes, it's the map | ranged trees pay it, accuracy nodes buy it back |
+| weather / elevation | yes | yes | Boldness ("the air is not neutral", "fly the weather") |
+| **cover / concealment** | **detection only — combat gap** | **yes** | **Aggression's stealth-ambush flavour** |
+| raw evasion stage | wired, unused | **no** | — argue: don't |
+
+## What this buys us
+
+- **Accuracy stops being universal filler.** It is worthless on a range-1
+  move with no weather plan and real on Solar Beam at reach 11 (50% today).
+  A conditional lever is better than a flat one, and it is legible from the
+  move itself.
+- **Cover becomes a real tactical decision** rather than a detection detail —
+  and it is a decision the player makes by MOVING, which is the most visible
+  action there is.
+- **It rewards noticing a pattern** rather than punishing one uninformed
+  choice: "things are hard to hit in the scrub" is learnable across many
+  fights.
+
+## Answered, and shipped
+
+1. **Cover: yes, flat −20.** `isConcealed` (bush tile or burrowed) now costs
+   the attacker 20 accuracy. It already shrank detection radius; it does
+   something defensive at last.
+2. **A running target: yes.** *"Definitely. I don't like how easy it is to
+   chase down and kill things."* −5 per consecutive action the DEFENDER spent
+   moving, capped at 4 stacks (−20). Counted in the defender's own actions,
+   so committing to running is what earns it, not raw Speed. The streak
+   breaks the moment it does anything else, so it is paid for in actions not
+   spent fighting back.
+3. **Raw evasion nodes: allowed after all**, and my objection was too broad.
+   *"We can allow evasion nodes for sure. Esp as temporary boost or
+   conditional (ex. Upon moving multiple times in a row gain x for y turns,
+   or be more evasive the further you are away)."* The thing that is bad is
+   FLAT PERMANENT stacking — a number nobody can see, held forever. A
+   temporary or conditional stage keeps the cause visible and situational,
+   which was the actual point. Both examples given are already expressible:
+   the sprint streak is live in `Agent.consecutiveMoveActions`, and distance
+   is already in the roll.
+4. **Night: yes.** −15 for any attacker that is not `nocturnal` — the sim's
+   existing activity-pattern trait, no new flag invented.
+
+### The numbers, all flat points on the same scale as distance
+
+| cause | cost | visible as |
+|---|---|---|
+| distance | 0 for the first tile, then −5/tile | the map |
+| cover | −20 | a bush, or a burrow |
+| darkness | −15 (0 if the attacker is nocturnal) | the clock |
+| running | −5 per consecutive move action, max −20 | the thing running |
+
+They stack, because they are independent facts. A creature sprinting through
+scrub at night is −55: a 100-accuracy move is a coin flip against it. That is
+the intended shape.
+
+### The finding that came out of building it
+
+**Every world starts at tick 0, which is MIDNIGHT.** So the night penalty
+applies to the whole opening stretch of every run, and it broke nine existing
+tests at once — none of them wrong, all of them fighting in the dark at a
+fleeing target without knowing it. Worth remembering before reading any early
+combat numbers: the sim's default condition is night.
+
+---
+
+# Design pass: fight or flight when you are surrounded
+
+*"If a Pokémon gets targeted by multiple attacks they really need to enter
+fight or flight mode."*
+
+## The gap is real, and it is bigger than it sounds
+
+`isBeingHunted` (predation.ts) is a **boolean**. One hunter and five hunters
+are the same value. Nothing anywhere counts how many things are pointed at
+you, and the only flee trigger is `isCriticallyHurt` — so the sim's answer to
+being surrounded is *"keep doing whatever you were doing until you are nearly
+dead."*
+
+Measured, 3 seeds x 4000 ticks, sampled every 20 ticks (15,146 agent-samples):
+
+| attackers on one agent | share |
+|---|---|
+| 0 | 77.53% |
+| 1 | 17.73% |
+| **2** | **4.01%** |
+| **3** | **0.68%** |
+| **4** | **0.05%** |
+
+Most ever on one agent: **4**. So being ganged up on is 4.73% of samples —
+uncommon enough to stay a spike rather than the default, common enough that
+it happens constantly across a whole run. That is a good frequency for a
+dramatic rule.
+
+## Why now, specifically
+
+This was a weaker idea a day ago. Fleeing was close to free and close to
+useless — you ran, and got hit anyway.
+
+It is not any more. **A fleeing agent now takes −5 accuracy per consecutive
+action it spends running, up to −20**, and cover is another −20. So flight is
+a real defence with a real price (actions not spent fighting back), and
+standing is a real commitment. Fight-or-flight is the decision that makes the
+evasion work we just shipped *mean* something — without it, nothing ever
+chooses to run except the nearly-dead.
+
+## The shape I would build
+
+Not a new behaviour state. `"flee"` and `"fight"` both already exist; what is
+missing is the TRIGGER and the CHOICE.
+
+**Trigger:** two or more attackers targeting you (`huntTarget`/`fightTarget`),
+inside the existing `FLEE_DETECT_RADIUS`, evaluated on your own action tick.
+
+**The choice** should read off things that are already true and already
+visible, in the sim's existing idiom:
+
+| leans FIGHT | leans FLIGHT |
+|---|---|
+| high `aggression`/`boldness` disposition | high `sociability` |
+| herd-mates nearby (the mob-fight path already counts these) | alone |
+| healthy | hurt |
+| cornered — nowhere to step away to | open ground behind you |
+| defending an egg (`applyEggDefense` already forces this) | — |
+
+**Commitment matters more than the decision.** The failure mode is thrash:
+flip to flee, take a step, flip to fight, flip back — and the sprint evasion
+we just built actively rewards *not* thrashing, since the streak resets the
+moment you do anything else. So whichever it picks, it should hold for a
+handful of actions unless something big changes (an attacker dies, HP
+collapses).
+
+## What it buys, in this project's terms
+
+- **Narratable.** "Three of them came at once, and it turned to face them" is
+  a story. "It kept eating" is not. The chronicle already logs behaviour
+  changes, so this is a beat for free.
+- **Visible cause.** The trigger is a thing you can see on the map — how many
+  arrows point at one creature.
+- **It makes packs mean something defensively.** Pack hunting already has an
+  accuracy bonus for coordinating; nothing on the prey side ever noticed
+  being coordinated against.
+
+## Where I would push back on myself
+
+The obvious version — "2+ attackers, roll fight or flight" — risks becoming
+the dominant answer for prey: always flee, always get −20, never die. Two
+guards against that, both worth deciding:
+
+- The sprint evasion is already capped (−20) and already costs actions.
+- Fleeing into the open is worse than fleeing into cover, which the
+  concealment rule now makes true for free.
+
+## Questions
+
+1. Trigger at **2 attackers**, or 3? 2 is 4.7% of samples, 3 is 0.73%.
+2. Should the choice be **deterministic** from disposition + HP + allies, or
+   a weighted roll? Deterministic is legible and testable; a roll gives
+   variety and stops one species always doing one thing.
+3. How long is the commitment — **4 actions**? Long enough to build the
+   sprint streak, short enough to react.
+4. Should a **predator** ganged up on by prey (the mob-fight case) use the
+   same rule? Right now it flees only when critically hurt, which is the
+   thing that makes mobbing feel weightless.
+
+## Answered, and shipped
+
+Verbatim: *"3 attackers unless they're really weak like, more than 8 levels
+below. Choice is weighted roll. 6 actions. Yeah also flee when out numbered."*
+
+| question | answer | constant |
+|---|---|---|
+| trigger count | 3 attackers | `SURROUNDED_ATTACKER_COUNT = 3` |
+| who counts as an attacker | not the badly outmatched | `OUTMATCHED_ATTACKER_LEVEL_GAP = 8` |
+| decision | weighted roll | `applyFightOrFlight` |
+| commitment | 6 actions | `FIGHT_OR_FLIGHT_COMMIT_ACTIONS = 6` |
+| predators too | yes | headcount adds to the flight weight |
+
+The roll's weights, all reading off state that already existed:
+
+```
+fight  = aggression + boldness + (herd allies nearby x 0.4)
+flight = sociability + 0.5 + ((1 - hpFraction) x 1.5)
+                    + ((attackers - 3 + 1) x 0.5)
+```
+
+**One implementation decision worth writing down.** The first version set
+`behavior = "fight"` and then fell through to the normal threat path to
+carry the fight out. That silently undid the whole feature: the normal path
+re-decides on mob size and level gap every single action, so a commitment
+made on one action was overwritten on the next. `applyFightOrFlight` now
+carries out both branches itself and returns `true`, which is what makes the
+6-action commitment real rather than nominal.
+
+The commitment also drops the instant nothing is pointed at you any more —
+holding a flee for five more actions after the last attacker died would be
+running from nothing.
+
+### Measured on a real run
+
+6 seeds x 4000 ticks (`packages/runner/src/validateFightOrFlight.ts`):
+
+| | |
+|---|---|
+| commitments entered | **10** (4 stand / 6 run) |
+| ticks with anyone surrounded | 79 of 24,000 (0.33%) |
+| predator triggers | 1 |
+
+**Finding, flagged not fixed:** this fires *rarely*. The design pass above
+predicted it — 3 attackers was measured at 0.68% of agent-samples, and 3 was
+chosen with that number on the table — but 10 commitments per 24,000 ticks is
+close enough to the "unreachable content" line to be worth a decision rather
+than a shrug. Two seeds produced zero. Options, in order of how much they
+change:
+
+1. **Leave it.** It is a rare dramatic spike, which is what it was designed
+   to be. It just means most runs will not contain one.
+2. **Drop the trigger to 2 attackers.** ~7x more common (4.7% of samples).
+   Cheapest change; risks becoming prey's default answer.
+3. **Count near-misses** — attackers that fought you in the last few ticks,
+   not only ones targeting you at this instant. The current filter is a
+   snapshot, so three attackers alternating never registers as three.
+
+The 40/60 stand/run split is a good sign (a weighted roll that always lands
+the same way is a lookup table), but on N=10 it is not yet evidence.

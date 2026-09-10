@@ -242,7 +242,10 @@ function svgEl<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<strin
 // here to run once over a whole COMBINED build's net delta, not just one
 // node at a time, for `summarizeBuildEffects` below. ----------
 
-const STAT_LABEL: Record<string, string> = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed" };
+// `accuracy`/`evasion` are real StatKeys and resolve through a different,
+// base-3 curve (combat.ts's `accuracyStageMultiplier`) — labelled here so a
+// node granting one reads as English rather than as a raw key.
+const STAT_LABEL: Record<string, string> = { attack: "Attack", defense: "Defense", spAttack: "Sp. Attack", spDefense: "Sp. Defense", speed: "Speed", accuracy: "Accuracy", evasion: "Evasiveness" };
 
 const PASSIVE_LABEL: Record<string, (v: number) => string> = {
   damageReduction: (v) => {
@@ -310,11 +313,14 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("cooldownTicks")) lines.push(`${signed(delta.cooldownTicks)} tick${Math.abs(delta.cooldownTicks) === 1 ? "" : "s"} cooldown.`);
   if (has("defensePenetration")) lines.push(`Ignores ${pct(delta.defensePenetration)} of the target's Defense/Sp. Defense.`);
   if (has("hits")) lines.push(`Strikes ${delta.hits.min === delta.hits.max ? `${delta.hits.min} times` : `${delta.hits.min}–${delta.hits.max} times`} per use.`);
+  if (has("hitsBonus")) lines.push(`${signed(delta.hitsBonus)} strike${Math.abs(delta.hitsBonus) === 1 ? "" : "s"} per use, on top of however many it already makes.`);
   if (has("lockTicks")) lines.push(`Locks the user out of acting ${signed(delta.lockTicks)} extra tick${Math.abs(delta.lockTicks) === 1 ? "" : "s"} after use.`);
   if (has("situationalBonus")) lines.push(`×${delta.situationalBonus.multiplier} damage when the target is ${conditionLabel(delta.situationalBonus.condition)}.`);
+  for (const sb of (delta.situationalBonuses ?? []) as any[]) {
+    lines.push(`×${sb.multiplier} damage when the target is ${conditionLabel(sb.condition)} — stacks with this move's other conditions.`);
+  }
   if (has("selfStateBonus")) lines.push("Scored higher in move-picking when the user itself is at or below half HP.");
-  if (has("statChangeOnHit")) {
-    const sc = delta.statChangeOnHit;
+  for (const sc of [...(delta.statChangeOnHit ? [delta.statChangeOnHit] : []), ...((delta.statChangesOnHit ?? []) as any[])]) {
     const who = sc.target === "self" ? "its own" : "the target's";
     lines.push(
       `${sc.stage > 0 ? "Raises " : "Lowers "}${who} ${STAT_LABEL[sc.stat] ?? sc.stat} by ${Math.abs(sc.stage)} stage${Math.abs(sc.stage) === 1 ? "" : "s"}${sc.ticks ? ` for ${sc.ticks} ticks` : " permanently"}${sc.target === "self" ? " the instant it's used" : " on a landed, non-killing hit"}.`
@@ -323,8 +329,7 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("positionSwap") && delta.positionSwap) lines.push("Swaps places with the target on a landed, non-killing hit.");
   if (has("positionSwapPull")) lines.push(`Hauls the target ${delta.positionSwapPull} extra tile${delta.positionSwapPull === 1 ? "" : "s"} past the swap.`);
   if (has("targetsAlly") && delta.targetsAlly) lines.push("Gains a dedicated support use on a nearby ally, on top of staying a real attack.");
-  if (has("allyEffect")) {
-    const ae = delta.allyEffect;
+  for (const ae of [...(delta.allyEffect ? [delta.allyEffect] : []), ...((delta.allyEffects ?? []) as any[])]) {
     const parts: string[] = [];
     if (ae.healFraction) parts.push(`heals ${pct(ae.healFraction)} of max HP`);
     if (ae.buff) parts.push(`buffs ${STAT_LABEL[ae.buff.stat] ?? ae.buff.stat} +${ae.buff.stage} stage${ae.buff.stage === 1 ? "" : "s"}${ae.buff.ticks ? ` for ${ae.buff.ticks} ticks` : ""}`);
@@ -341,6 +346,7 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("resistanceBreaker")) lines.push(`Partially ignores its own type resist — a resisted hit claws back up toward neutral (×${delta.resistanceBreaker.multiplier}, capped there, never becomes super-effective).`);
   if (has("selfCostPerUse")) lines.push(`Costs the user ${pct(delta.selfCostPerUse.amount)} ${delta.selfCostPerUse.need} every time it's used.`);
   if (has("rallyCall")) lines.push(`On a landed, non-killing hit, marks the target as a priority for every nearby ally for ${delta.rallyCall.ticks} ticks.`);
+  if (has("rallyCallTicks")) lines.push(`${signed(delta.rallyCallTicks)} tick${Math.abs(delta.rallyCallTicks) === 1 ? "" : "s"} on the ally-priority mark a landed hit leaves.`);
   if (has("critCooldownReset") && delta.critCooldownReset) lines.push("A landed critical hit resets this move's own cooldown to 0.");
   if (has("statusSeverity")) lines.push(`×${delta.statusSeverity} status severity (a stronger damage-over-time, not a longer one).`);
   if (has("statusChance")) lines.push(`${signed(Math.round(delta.statusChance * 100))}% status chance.`);
@@ -350,6 +356,9 @@ function describeDelta(delta: Record<string, any>): string[] {
   if (has("drainNeeds")) lines.push(`Steals ${Math.round(delta.drainNeeds.amount * 100)}% ${delta.drainNeeds.need} from the nearest non-herd agent within ${delta.drainNeeds.radius} tiles, and gains it.`);
   if (has("fertilityBoost")) lines.push(`Enriches the soil (+${Math.round(delta.fertilityBoost.amount * 100)}% fertility) ${delta.fertilityBoost.radius === 0 ? "on the user's own tile." : `within ${delta.fertilityBoost.radius} tiles.`}`);
   if (has("matingRadiusBoost")) lines.push(`×${delta.matingRadiusBoost.multiplier} mate-search radius for ${delta.matingRadiusBoost.ticks} ticks.`);
+  if (has("selfHeal")) lines.push(`Heals the user ${Math.round(delta.selfHeal.fraction * 100)}% of its own max HP on use${delta.selfHeal.sunbeamBonus ? `, +${Math.round(delta.selfHeal.sunbeamBonus * 100)}% more near a sunbeam` : ""}.`);
+  if (has("statusImmunityAura")) lines.push(`Grants ${delta.statusImmunityAura.radius === 0 ? "the user" : `the user and every herd-mate within ${delta.statusImmunityAura.radius} tiles`} ${delta.statusImmunityAura.ticks} ticks of immunity to new status effects.`);
+  if (has("spawnsRain") && delta.spawnsRain) lines.push("Pulls a real rain cell down over the user's own position.");
   if (has("gatherBurst")) lines.push(`+${delta.gatherBurst} gathering progress per use — digs crops/springs out faster, or knocks canopy fruit down faster, depending on the move.`);
   if (has("forcedMovement")) {
     const fm = delta.forcedMovement;
@@ -364,6 +373,8 @@ function describeDelta(delta: Record<string, any>): string[] {
   }
   if (has("shape")) lines.push(`Changes its own shape to ${shapeLabel(delta.shape)}.`);
   if (has("range")) lines.push(`Changes its max reach to ${delta.range.max != null ? `${delta.range.max} tiles` : JSON.stringify(delta.range)}.`);
+  if (has("rangeBonus")) lines.push(`${signed(delta.rangeBonus)} tile${Math.abs(delta.rangeBonus) === 1 ? "" : "s"} of max reach.`);
+  if (has("areaBonus")) lines.push(`${signed(delta.areaBonus)} to the size of its area, and it hits everyone caught in that area.`);
   if (has("excludesAllies") && delta.excludesAllies) lines.push("Never affects a herd-mate, even if they'd otherwise be caught in its area.");
   if (has("terrainBurn") && delta.terrainBurn) lines.push("Sets fire to the terrain wherever it lands.");
   return lines;
@@ -378,7 +389,7 @@ const ADDITIVE_FIELDS = [
   "critRateStage", "lifestealFraction", "recoilFraction", "jamCooldownTicks", "positionSwapPull", "gatherBurst",
 ] as const;
 /** OR-merge boolean fields — once any chosen node turns one on, it stays on for the whole build. */
-const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset"] as const;
+const OR_MERGE_FIELDS = ["positionSwap", "targetsAlly", "allyEffectOnAttack", "hitsArea", "excludesAllies", "terrainBurn", "statusSpreads", "critCooldownReset", "spawnsRain"] as const;
 
 /**
  * Merges every chosen node's `delta` into one net combined delta, using the
