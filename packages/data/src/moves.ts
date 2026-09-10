@@ -1469,17 +1469,36 @@ export const MOVES: Record<string, MoveSpec> = {
     ...moveCanon("VINE_WHIP"),
     cooldownTicks: 3,
     range: { min: 0, max: 2 },
-    // v2 (MOVES_DESIGN.md's own template). Direct follow-up: "we don't
-    // have vine whip? i thought we designed it..." — a fair catch. Vine
-    // Whip's paper draft (named nodes like "Snapback Lash") was the
-    // original prototype that PROVED the v2 template, but the actual
-    // shipped v2 trees ended up going to Tackle/Slash/Ember/Body Slam
-    // instead — Vine Whip itself was never built. This is that build,
-    // finally, using the same three-branch-plus-crosslink-triangle shape
-    // (10 nodes/branch + 3 crosslinks = 33), Bulbasaur's own real
-    // signature move (spawned in every run, unlike Body Slam's Snorlax).
-    // Every lever below is already-shipped engine plumbing (see the
-    // primitives checklist) — no new engine work needed for this one.
+    // Template v4 (45 nodes: 12 per branch — an opener, two 4-node lanes
+    // each with their own notable, a deep notable both lanes converge on, a
+    // filler and a capstone — plus three 3-node crosslink bridges). Nine
+    // `prerequisitesAnyOf` (six lane notables, three deep notables), six
+    // fork nodes, every v2 fork preserved. See MOVES_DESIGN.md's "Vine Whip
+    // converted to v4" section for the full writeup.
+    //
+    // Vine Whip is where this file's whole three-branch-plus-crosslink-
+    // triangle shape came from — its paper draft (named nodes like
+    // "Snapback Lash") PROVED the v2 template before Tackle/Slash/Ember
+    // ever shipped one.
+    //
+    // The fantasy, restated because the two neighbours are close: Vine Whip
+    // is a pair of LIMBS a plant grows because it has none. It hits like a
+    // limb, which means it can also hook, coil, hold and haul — the whip
+    // and the grip are the same motion at two different moments, and
+    // whatever it catches has to come to the vine to answer it. Leech Seed
+    // (same species) owns parasitism; Solar Beam owns the grove and the
+    // canopy. This move owns contact and leverage — it is the only Grass
+    // move in the roster that physically touches something and moves it.
+    //
+    // KNOWN DEAD CONTENT, reported not fixed: the base `shape` above is
+    // `line, length 2` and no node in this tree sets `hitsArea`, so that
+    // shape has never resolved a single tile (`resolveShape` is only ever
+    // reached from `resolveAreaHit`). It cannot simply be switched on
+    // either — combat distance is manhattan and this move reaches 2 (3 with
+    // *Snapback Lash*), so a length-2 line WHIFFS on a legal target
+    // standing one tile off the axis, the same finding Rock Throw's v4
+    // notes record. Fixing it means changing the move's footprint, which is
+    // a balance decision, not a cleanup.
     tree: {
       // --- Aggression: "Choking Grip" — the vines don't just strike, they
       // squeeze, drain, and drag the target in close.
@@ -1502,24 +1521,62 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "reaching_vines",
         name: "+10 Accuracy",
         cost: 1,
-        prerequisitesAnyOf: [["tendril_lash"], ["snapback_lash"], ["thorned_bouquet"]],
+        prerequisites: ["tendril_lash"],
         leaning: "aggression",
         delta: { accuracy: 10 },
       },
+      // LANE A NOTABLE ("the lash" — getting through, at arm's length).
       crushing_coil: {
         id: "crushing_coil",
         name: "Crushing Coil",
         cost: 1,
-        prerequisites: ["reaching_vines"],
+        prerequisitesAnyOf: [["reaching_vines"], ["bloom_of_thorns"]],
         leaning: "aggression",
         // The wrap tightens past whatever guard the target's got up.
         delta: { defensePenetration: 0.15 },
+      },
+      past_the_rind: {
+        id: "past_the_rind",
+        name: "Past the Rind",
+        cost: 1,
+        prerequisites: ["crushing_coil"],
+        leaning: "aggression",
+        // Lane A's tail. Grass is the worst-resisted attacking type in this
+        // roster — Fire, Poison, Flying, Bug and Grass itself all shrug it
+        // off, and Bulbasaur's own valley is full of Bug and Poison. That is
+        // Vine Whip's real weakness, so it is the lane's best payoff: a limb
+        // does not argue with your typing, it finds skin. `resistanceBreaker`
+        // is read at combat.ts:120 and only ever fires when effectiveness is
+        // already below 1 (`Math.min(1, effectiveness * multiplier)`), so it
+        // claws a resist back toward neutral and can never push past it.
+        //
+        // NOT `situationalBonus: { condition: "flanking" }`, the obvious
+        // reach-move pick, and wrong for exactly the reason Rock Throw's own
+        // *Aftershock Counter* comment records: flanking reads "the defender
+        // is not currently fighting or hunting ME" (predation.ts's
+        // `situationalMultiplier`), which for something striking from two or
+        // three tiles away is true most of the time. A condition that is
+        // nearly always on is not a condition.
+        delta: { resistanceBreaker: { multiplier: 1.4 } },
+      },
+      set_the_hook: {
+        id: "set_the_hook",
+        name: "Set the Hook",
+        cost: 1,
+        prerequisites: ["choking_grip"],
+        leaning: "aggression",
+        // Lane B's head ("the coil" — what happens once it has hold). A vine
+        // with a grip on something is itself gripped: `lockTicks` locks the
+        // USER, not the defender (combat.ts:308 — `agent.actionLockTicks`),
+        // which is exactly the trade this lane is about. Benefit and cost in
+        // the same node, per principle 4.
+        delta: { power: 5, lockTicks: 1 },
       },
       deeper_hold: {
         id: "deeper_hold",
         name: "Deeper Hold",
         cost: 1,
-        prerequisitesAnyOf: [["crushing_coil"], ["hauled_in"], ["bloom_of_thorns"]],
+        prerequisitesAnyOf: [["set_the_hook"], ["hauled_in"]],
         leaning: "aggression",
         delta: { lifestealFraction: 0.08 },
       },
@@ -1547,7 +1604,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "unbreakable_hold",
         name: "Unbreakable Hold",
         cost: 2,
-        prerequisitesAnyOf: [["throttling_grip"], ["constricting_pull"]],
+        prerequisitesAnyOf: [["past_the_rind"], ["throttling_grip"], ["constricting_pull"]],
         leaning: "aggression",
         // Actually delivers on the name now — the grip itself denies the
         // target's own tempo, not just more power.
@@ -1638,24 +1695,67 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "tangled_growth",
         name: "+5 Power",
         cost: 1,
-        prerequisitesAnyOf: [["thick_vines"], ["snapback_lash"], ["grafted_vines"]],
+        prerequisites: ["thick_vines"],
         leaning: "boldness",
         delta: { power: 5 },
       },
+      // LANE A NOTABLE ("the body" — what standing your ground does to your
+      // own tissue).
       unyielding_stem: {
         id: "unyielding_stem",
         name: "Unyielding Stem",
         cost: 1,
-        prerequisites: ["tangled_growth"],
+        prerequisitesAnyOf: [["tangled_growth"], ["hauled_in"]],
         leaning: "boldness",
         grantsPassive: { kind: "defenseBoost", value: 0.05 },
         delta: {},
       },
+      full_of_rain: {
+        id: "full_of_rain",
+        name: "Full of Rain",
+        cost: 1,
+        prerequisites: ["unyielding_stem"],
+        leaning: "boldness",
+        // Lane A's tail, and the branch's one non-armour idea about the
+        // plant's own body: a rooted thing drinks, and a vine full of water
+        // is stiff. Turgor, not toughness.
+        //
+        // The condition is picked for fit, not convenience (the colour pie's
+        // own test). `rain` resolves at predation.ts's `situationalMultiplier`
+        // against `activeWeatherAt(world, attacker.pos)`, and rain is the
+        // MOST likely weather where this move's own learners live —
+        // `BIOME_WEATHER_AFFINITY` (weather.ts:86) weights grassland rain at
+        // 2.0 and forest at 1.5, against drought 0.5/0.3. Bulbasaur's biomes
+        // are exactly grassland and forest. One other node in the whole
+        // roster uses this condition, so it is not a borrowed kit either.
+        delta: { situationalBonus: { condition: "rain", multiplier: 1.35 } },
+      },
+      it_takes_root: {
+        id: "it_takes_root",
+        name: "It Takes Root",
+        cost: 1,
+        prerequisites: ["deep_roots"],
+        leaning: "boldness",
+        // Lane B's head ("the ground" — what the roots do to and take from
+        // the earth, as opposed to lane A's own tissue). The vines do not
+        // just hold ground, they change it: every lash that lands leaves
+        // cuttings in the dirt under the target. Read at predation.ts:1323 —
+        // `terrainFill` converts the DEFENDER's tile (floor/sand/mud only,
+        // `TERRAIN_FILLABLE`) and then calls `waterSoil`, so the tile gets a
+        // real fertility bump on top of the flora itself.
+        //
+        // It is also the exact mirror of Aggression's *Sapping Reach*, which
+        // CONSUMES a flora tile for double damage: one branch eats the map,
+        // the other plants it, and Bulbasaur's own `preferredTerrain` is
+        // flora. Only `terrainFill` setter in the tree, so no overwrite.
+        delta: { terrainFill: { terrain: "flora" } },
+      },
+      // LANE B NOTABLE.
       deeper_roots: {
         id: "deeper_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["unyielding_stem"], ["hauled_in"], ["living_trellis"]],
+        prerequisitesAnyOf: [["it_takes_root"], ["living_trellis"]],
         leaning: "boldness",
         delta: { cooldownTicks: -1 },
       },
@@ -1684,7 +1784,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "ironbark",
         name: "Ironbark",
         cost: 2,
-        prerequisitesAnyOf: [["verdant_recovery"], ["thornbound"]],
+        prerequisitesAnyOf: [["full_of_rain"], ["verdant_recovery"], ["thornbound"]],
         leaning: "boldness",
         grantsPassive: { kind: "damageReduction", value: 0.07 },
         delta: {},
@@ -1792,23 +1892,41 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "binding_roots",
         name: "-1 Cooldown",
         cost: 1,
-        prerequisitesAnyOf: [["verdant_reach"], ["grafted_vines"], ["thorned_bouquet"]],
+        prerequisites: ["verdant_reach"],
         leaning: "sociability",
         delta: { cooldownTicks: -1 },
       },
+      called_out: {
+        id: "called_out",
+        name: "Called Out",
+        cost: 1,
+        prerequisites: ["nurturing_tendrils"],
+        leaning: "sociability",
+        // Lane B's head ("the herd" — what the vines do to herd-mates and
+        // what herd-mates then do on their own). The reach is the point: a
+        // limb two or three tiles long can touch a thing the herd has not
+        // walked to yet, and a lash that lands is the plainest way to say
+        // "that one." `rallyCall` sets `defender.rallyMarkTicksRemaining`
+        // (predation.ts:1338) and other agents' own targeting prefers a
+        // marked candidate — coordination as the payoff rather than a route
+        // to more damage. Nothing else in this tree marks anything.
+        delta: { rallyCall: { ticks: 20 } },
+      },
+      // LANE B NOTABLE.
       shared_vigor: {
         id: "shared_vigor",
         name: "Shared Vigor",
         cost: 1,
-        prerequisites: ["binding_roots"],
+        prerequisitesAnyOf: [["called_out"], ["living_trellis"]],
         leaning: "sociability",
         delta: { allyEffect: { healFraction: 0.2, buff: { stat: "defense", stage: 1, ticks: 20 } } },
       },
+      // LANE A NOTABLE.
       quickening_growth: {
         id: "quickening_growth",
         name: "Quickening Growth",
         cost: 1,
-        prerequisitesAnyOf: [["shared_vigor"], ["living_trellis"], ["bloom_of_thorns"]],
+        prerequisitesAnyOf: [["binding_roots"], ["bloom_of_thorns"]],
         leaning: "sociability",
         // Direct correction: "Vine whip too... Reduce the amount of time
         // to harvest crops." Vine Whip already qualifies as a canopy
@@ -1821,11 +1939,31 @@ export const MOVES: Record<string, MoveSpec> = {
         // was padded with.
         delta: { gatherBurst: 3 },
       },
+      own_reserves: {
+        id: "own_reserves",
+        name: "Own Reserves",
+        cost: 1,
+        prerequisites: ["quickening_growth"],
+        leaning: "sociability",
+        // Lane A's tail. Bringing down more fruit than the plant itself needs
+        // is not free: `selfCostPerUse` is subtracted straight off the user's
+        // own needs on every use (predation.ts:1457), and `hunger` here is a
+        // satiation meter, so this makes the Bulbasaur hungrier every time it
+        // feeds the herd. Benefit and cost in the same node — and it is the
+        // honest version of this branch's whole fantasy, which is a plant
+        // spending itself on everybody else.
+        //
+        // `gatherBurst` is live for these learners, checked rather than
+        // assumed: the only path a non-`burrow` damage move can feed is
+        // needs.ts's canopy harvest, whose crop is Apple (forest-eligible),
+        // and Bulbasaur's biomes are grassland and forest.
+        delta: { gatherBurst: 2, selfCostPerUse: { need: "hunger", amount: 0.05 } },
+      },
       vine_network: {
         id: "vine_network",
         name: "Vine Network",
         cost: 1,
-        prerequisites: ["quickening_growth"],
+        prerequisites: ["shared_vigor"],
         excludes: ["bracing_growth"],
         leaning: "sociability",
         // Deepens the heal, keeping the defense buff it's already carrying.
@@ -1835,7 +1973,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "bracing_growth",
         name: "Bracing Growth",
         cost: 1,
-        prerequisites: ["quickening_growth"],
+        prerequisites: ["shared_vigor"],
         excludes: ["vine_network"],
         leaning: "sociability",
         // Trades the healing lean for a real Attack buff instead.
@@ -1845,7 +1983,7 @@ export const MOVES: Record<string, MoveSpec> = {
         id: "reaching_growth",
         name: "Reaching Growth",
         cost: 2,
-        prerequisitesAnyOf: [["vine_network"], ["bracing_growth"]],
+        prerequisitesAnyOf: [["own_reserves"], ["vine_network"], ["bracing_growth"]],
         leaning: "sociability",
         // The ally effect now also fires the instant this hits an enemy,
         // on top of its own dedicated idle-tick use — no extra cost.

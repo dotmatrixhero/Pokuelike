@@ -5998,3 +5998,234 @@ them.
 The footprint is now asserted in TILES in `moveTrees.test.ts`, not left
 implicit in a radius constant, because it is a balance number rather than an
 implementation detail.
+
+### Vine Whip converted to v4 (Shipped) — "the limb, the grab, the reach"
+
+39 → 45 nodes, 12 per branch, 9 `anyOf`, 6 fork nodes, 3 real bridges. Checker
+findings for this tree: **3 → 0**. Vine Whip is the tree that PROVED the v2
+template in the first place — the three-branch-plus-crosslink-triangle shape
+everything else in this file inherited started here — so it is fitting that it
+was one of the last three still standing at 39.
+
+**The fantasy, written before any node:**
+
+> Vine Whip is not a projectile and not a spell. It is a pair of limbs a plant
+> grows because it has none: two lengths of green muscle come out of the bulb
+> and go where the body is not going to walk. It hits like a limb, which means
+> it can also hook, coil, hold and haul — the whip and the grip are the same
+> motion at two different moments. What is dangerous about it is the distance:
+> whatever it catches has to come to the vine to answer it. What it costs is
+> that a vine with a grip on something is itself gripped, and the far end of
+> the reach is the soft end.
+
+The two neighbours it has to stay clear of are its own species-mates.
+**Leech Seed owns parasitism** — no wound, theft over time, a victim that keeps
+working for you after you have wandered off. **Solar Beam owns the grove and
+the canopy** — light, sun, the slow bloom. Vine Whip owns **contact and
+leverage**: it is the only Grass move in the roster that physically touches
+something and moves it.
+
+#### Lanes, and how they differ in kind
+
+| branch | lane A | lane B | deep notable | capstone |
+|---|---|---|---|---|
+| **Choking Grip** (agg) | **the lash** — landing at all, at arm's length: accuracy, `defensePenetration`, then *Past the Rind*'s `resistanceBreaker` | **the coil** — what happens after contact: *Set the Hook*'s `lockTicks`, the drain, ending in the preserved squeeze/drag fork | *Unbreakable Hold* — `jamCooldownTicks` | ***Endless Lashing*** |
+| **Root and Bind** (bold) | **the body** — the plant's own tissue: `defenseBoost`, and *Full of Rain*'s turgor | **the ground** — the earth under it: *It Takes Root*'s `terrainFill`, then the regen/thorns fork drawing on it | *Ironbark* | ***Bramble Ward*** |
+| **Shared Growth** (soc) | **the feed** — what the vines bring the herd out of the world: `gatherBurst`, paid for out of the plant's own hunger | **the herd** — what the vines do to herd-mates and what herd-mates then decide: *Called Out*'s mark, the ally heal, and its fork | *Reaching Growth* — the ally effect rides a hostile hit | ***Verdant Grove*** |
+
+Sociability's split is the sharpest: lane A takes food out of the *map* for
+the herd and lane B works on herd-mates' *bodies and attention* — one hand
+picks, the other holds. Boldness's is the one that needed the most work: the
+branch was a straight armour ladder (immovable → defenseBoost → regen/thorns →
+damageReduction → defenseBoost+thorns), five passive nodes in a row and two
+colour-pie flavours. It now has a lane that is about the plant's own turgor and
+a lane that is about the soil, and the two new nodes there are both `delta`s,
+not passives.
+
+#### The six new nodes, and why each one is not filler
+
+Every one of them is a lever this tree did not have, and each was checked at
+its call site before it was written.
+
+- ***Past the Rind*** (agg lane A tail) — `resistanceBreaker: 1.4`. Grass is
+  the worst-resisted attacking type in this roster and Bulbasaur's own valley
+  is full of Bug and Poison, so the move's real weakness is the lane's best
+  payoff: a limb does not argue with your typing, it finds skin. combat.ts:120
+  only fires it when effectiveness is already below 1 and clamps with
+  `Math.min(1, …)`, so it claws a resist back toward neutral and can never push
+  past it. Measured live, level 20 against a Bug/Flying defender: **0.5x / 8
+  damage on the base move, 0.7x / 23 on the full build**, with the control (a
+  Water defender, where grass is 2x) reading **2 before and 2 after**.
+- ***Set the Hook*** (agg lane B head) — `power: 5, lockTicks: 1`. A vine with
+  a grip on something is itself gripped. `lockTicks` locks the **user**
+  (combat.ts:308 — `agent.actionLockTicks`), which is the trade this lane is
+  about, and the benefit lives in the same node per principle 4. Verified:
+  `actionLockTicks` reads **1** after a use of the built spec, **undefined**
+  after the base move.
+- ***Full of Rain*** (bold lane A tail) — `situationalBonus: { rain, 1.35 }`.
+  A rooted thing drinks; a vine full of water is stiff. The condition is the
+  flavour here rather than a tax, and it is picked for fit: weather.ts:86's
+  `BIOME_WEATHER_AFFINITY` weights **grassland rain at 2.0 and forest at 1.5**
+  against drought 0.5/0.3, and grassland+forest are exactly Bulbasaur's biomes.
+  One other node in the whole roster uses this condition. Measured live with
+  the fight rng held identical across both runs so only the weather differed:
+  **26 damage dry, 34 in rain**.
+- ***It Takes Root*** (bold lane B head) — `terrainFill: { terrain: "flora" }`.
+  The vines do not just hold ground, they change it. predation.ts:1323
+  converts the defender's tile (floor/sand/mud only) and then calls
+  `waterSoil`, so the tile gets a real fertility bump on top of the flora. It
+  is the exact mirror of Aggression's own *Sapping Reach*, which CONSUMES a
+  flora tile for double damage — one branch eats the map, the other plants it,
+  and flora is this species' own `preferredTerrain`. Measured live: the
+  defender's tile came out **flora at fertility 1.00**, the control's stayed
+  **floor**.
+- ***Own Reserves*** (soc lane A tail) — `gatherBurst: 2` plus
+  `selfCostPerUse: { hunger, 0.05 }`. Bringing down more fruit than the plant
+  needs is not free: predation.ts:1457 takes the cost straight off the user's
+  own needs every use, and hunger is a satiation meter, so this Bulbasaur goes
+  hungrier every time it feeds the herd — the honest version of a branch whose
+  whole fantasy is spending yourself on everybody else. `gatherBurst` is live
+  for these learners rather than assumed: the only path a non-`burrow` damage
+  move can feed is needs.ts's canopy harvest, whose crop is forest-eligible,
+  and Bulbasaur's biomes are grassland and forest. Measured live: attacker
+  hunger **1.000 → 0.950** on one use, control **1.000**.
+- ***Called Out*** (soc lane B head) — `rallyCall: { ticks: 20 }`. The reach is
+  the point: a limb two or three tiles long can touch a thing the herd has not
+  walked to yet, and a lash that lands is the plainest way to say "that one."
+  The payoff is coordination rather than damage — other agents' own targeting
+  independently prefers a marked candidate. Measured live: defender
+  `rallyMarkTicksRemaining` **20**, control **undefined**.
+
+#### Levers checked at the call site and rejected
+
+- **`hitsArea`.** Vine Whip's base spec carries `shape: { kind: "line", length:
+  2 }` and **no node in the tree has ever set `hitsArea`, so that shape has
+  never resolved a single tile** — `resolveShape` is only ever reached from
+  `resolveAreaHit`. That is real dead content in a shipped base spec, and it is
+  reported here rather than fixed, because the fix is a footprint change and
+  footprints are a balance decision. It cannot be fixed by simply adding
+  `hitsArea` either, for the reason Rock Throw's own v4 notes already record: a
+  footprint narrower than the move's range envelope WHIFFS outright on a legal
+  target. Combat distance is manhattan and this move's range is 2 (3 with
+  *Snapback Lash*), so a length-2 line misses a target standing at (1,1) — the
+  sweep would land on empty grass while a legal target stood one tile off the
+  axis. The only footprints that cover the envelope are a burst radius 2 (13
+  tiles) or a cone length 3 — Rock Slide's move and Solar Beam's respectively,
+  and neither is two vines.
+- **`excludesAllies`.** Its only call site is `resolveAreaHit`'s target filter,
+  so on a single-target move it can never fire. It becomes available the day
+  `hitsArea` does, and the "no friendly fire" flavour still has no user
+  anywhere in the roster.
+- **`situationalBonus: { condition: "flanking" }`**, the obvious pick for a
+  reach lane, rejected for exactly the reason Rock Throw's *Aftershock Counter*
+  comment records: flanking reads "the defender is not currently fighting or
+  hunting ME", which for something striking from two or three tiles away is
+  true most of the time. A condition that is nearly always on is not a
+  condition.
+- **`fertilityBoost` / `statusImmunityAura` / `selfHeal`.** All three require
+  the `utilityMove` flag to ever be read (utilityMoves.ts). Vine Whip is a
+  damage move; they would have been three dead nodes.
+- **`positionSwapPull` as a Sociability filler.** It is documented as
+  "meaningless without `positionSwap` also set by some node in the chosen set",
+  and the only node that sets `positionSwap` is the Boldness↔Sociability
+  bridge — so a pure-Sociability build would have bought nothing.
+
+#### Every fork preserved, and the bridges re-landed
+
+All three `excludes` forks survive with their exact mechanics: *Throttling
+Grip* | *Constricting Pull* (squeeze versus drag), *Verdant Recovery* |
+*Thornbound* (draw from the ground versus arm it), *Vine Network* | *Bracing
+Growth* (heal the herd versus sharpen it). Fork count stays at 6. The only
+structural change to them is that the Sociability fork moved from the tail of
+the feed lane onto the tail of the herd lane, where its own content — two
+different `allyEffect`s — actually lives.
+
+Under v2 the crosslink shortcuts landed on plain fillers. Under v4 they land on
+one lane notable per branch they connect, which meant re-aiming all three:
+
+| bridge notable | lands on | lands on |
+|---|---|---|
+| *Hauled In* (agg↔bold) | *Deeper Hold* (agg lane B) | *Unyielding Stem* (bold lane A) |
+| *Living Trellis* (bold↔soc) | *Deeper Roots* (bold lane B) | *Shared Vigor* (soc lane B) |
+| *Bloom of Thorns* (soc↔agg) | *Crushing Coil* (agg lane A) | *Quickening Growth* (soc lane A) |
+
+**That first row is load-bearing and nearly went the other way.** The obvious
+wiring put *Hauled In* on the aggression lane A notable, which quietly broke a
+`forcedMovement` OVERWRITE that has been safe since v2: *Constricting Pull*'s
+drag and the bridge's own *Snapback Lash*/*Reeling Lash* drag are only
+co-takeable-safe because the bridge is an ANCESTOR of the fork. Landing the
+bridge on the other lane severed that ancestry and made them two independent
+setters of the same overwrite field. Caught by the checker before it shipped,
+which is the whole reason that rule exists.
+
+#### Passive discipline: nothing moved, deliberately
+
+The bulbasaur line is the roster's worst case for `thorns` at **65%**, with no
+engine cap anywhere. So this conversion adds **zero** passive nodes and changes
+**zero** passive values:
+
+| kind | before | after |
+|---|---|---|
+| `thorns` | 0.20 | 0.20 |
+| `damageReduction` | 0.13 | 0.13 |
+| `defenseBoost` | 0.16 | 0.16 |
+| `regenFlat` | 3.00 | 3.00 |
+| `healAura` | 0.015 | 0.015 |
+| `immovable` | 1 | 1 |
+
+`passive-exposure.ts` before and after the change is **byte-identical across
+all 100 species**. All six new nodes are `delta`s, which is the standing
+preference: a delta is bounded by the move, a passive is not.
+
+Healing reads 8.5%/tick against the 10% per-move ceiling, damage reduction 13%
+against 20%, thorns 20% against 50%.
+
+#### Balance, with the roster as control
+
+| metric | before | after | roster median |
+|---|---|---|---|
+| nodes | 39 | **45** | 45 |
+| distinct levers | 24 | **30** | 28 |
+| colour-pie flavours | 8 | **11** | 11 |
+| tempo multiplier | 2.00x | **2.00x** (cap 2.00x) | 2.00x |
+| power multiplier | 1.89x | **2.00x** | 2.20x |
+| cheapest capstone | 11 pts | **9 pts** | 10 pts |
+| checker problems | 3 | **0** | — |
+
+Flavours per branch went 4 / 3 / 4 → **4 / 5 / 6**. Levers per branch (bridges
+excluded) are 10 / 10 / 11.
+
+**No cooldown headroom was spent, because there is none.** Base 3 gives
+`cdFloor = ceil(4/3) − 1 = 1` and a max cut of −2, and the shipped tree already
+spends exactly −2 across *Deeper Roots* and *Binding Roots*. Tempo was at its
+cap before this change and is at its cap after it.
+
+**The lifesteal ceiling was left alone and is flagged, not touched.** A full
+Aggression build reads **38% lifesteal** — the highest in the roster, against a
+~10% median — across four nodes that all predate this conversion (*Choking
+Grip*, *Deeper Hold*, *Throttling Grip*, *Endless Lashing*). Nothing here
+deepens it, and nothing here should decide unilaterally whether 38% is
+intended.
+
+#### Verified by running it, not by reading it
+
+A harness drove the real engine: a real world, a real mob-fight, one real
+landed hit, each new lever against a control. Everything in the six-node list
+above carries its measured number. Two things only a real run showed:
+
+- **A full build's flora tile does not land where the target was struck.** On a
+  build that also owns the Boldness↔Sociability bridge, `positionSwap` swaps
+  attacker and defender and then `positionSwapPull` shoves the defender three
+  further tiles — all of which resolves BEFORE `terrainFill` in
+  `resolveHitAgainstTarget`. So the vines throw the thing clear and something
+  grows where it lands, several tiles from where it was hit. That reads well
+  and is left as is; it is recorded because it was not obvious from the source.
+- **42 of 45 nodes are buyable in one legal purchase.** The other three are the
+  losing sides of the three forks, which is exactly right.
+
+`pnpm -r test` is green at 1,312 engine + 275 data tests. **No test needed
+changing**, which was not expected of the oldest tree in the file: the two
+tests that mention `vine_whip` (`leveling.test.ts`, `moveCap.test.ts`) both
+build their own synthetic spec and never touch the shipped tree, and
+`moveTrees.test.ts`'s vine-whip coverage is generic-across-the-roster rather
+than path-specific. No assertion's meaning changed.
