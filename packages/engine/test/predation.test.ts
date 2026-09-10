@@ -1237,11 +1237,10 @@ describe("unshaken: fully negates the next hit, once, then recharges (Agent.unsh
 describe("multi-hit wired into real combat (resolveHit)", () => {
   it("strikes exactly hits.min===max times, each its own 'fought' event, until the hit count is used up or the target dies", () => {
     // `accuracy: -1` (the can't-miss convention) so this isolates the HIT
-    // COUNT, which is what it exists to check. Accuracy is rolled per hit
-    // now, and distance costs 5 accuracy per tile, so an ordinary
-    // 100-accuracy melee flurry lands each hit 95% of the time and this read
-    // 2 of 3 on the suite's fixed seed — a real behaviour change, not a
-    // broken loop. Testing both at once would have made it flake forever.
+    // COUNT, which is what it exists to check. Accuracy is rolled PER HIT
+    // now, so a partial-accuracy flurry lands a variable number of times by
+    // design — testing count and accuracy through one assertion would make
+    // this flake on any future accuracy change.
     const FLURRY_MOVE: MoveSpec = { ...TEST_MOVE, id: "flurry-move", hits: { min: 3, max: 3 }, accuracy: -1 };
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const target = prey({ x: 5, y: 5 }, { hp: 100, maxHp: 100 }); // survives all 3 FALLBACK_DAMAGE (1 each) hits

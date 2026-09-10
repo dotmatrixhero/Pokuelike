@@ -85,20 +85,23 @@ export function accuracyStageMultiplier(accuracyStage: number, evasionStage: num
  * accuracy, which reads backwards — distance should cost a sniper the same
  * points it costs everyone else.
  *
- * Straight `distance x 5`, the literal reading and the only one where both
- * halves of the ask agree: "5 for every tile" AND "at 5 tiles away you are
- * 25 less accuracy". A first free tile would make 5 tiles cost 20, not 25.
+ * The FIRST tile is free, and every tile past it costs 8. Adjacent melee is
+ * therefore untouched — which matters, because it is the baseline every move
+ * in the roster was tuned at, and a flat per-tile rate had quietly made a
+ * 100-accuracy melee swing a 95% one.
  *
- * That does mean ADJACENT costs 5 — a melee swing at a neighbouring tile is
- * a 100-accuracy move landing 95% of the time. A real change to every move
- * in the roster, not just the ranged ones; called out here rather than
- * smuggled in, and zeroing it is a one-line change below.
+ * The free tile costs nothing at the range most of the roster actually
+ * fights at, and 5 per tile past it keeps a long shot a real gamble without
+ * making the ranged builds that spent points on reach unusable.
+ *
+ *   distance  1    2    3    4    5    6    7
+ *   penalty   0   -5  -10  -15  -20  -25  -30
  */
 export const ACCURACY_LOST_PER_TILE = 5;
 
-/** The flat accuracy penalty for firing from `distance` tiles away. */
+/** The flat accuracy penalty for firing from `distance` tiles away — the first tile is free. */
 export function distanceAccuracyPenalty(distance: number): number {
-  return Math.max(0, Math.floor(distance)) * ACCURACY_LOST_PER_TILE;
+  return Math.max(0, Math.floor(distance) - 1) * ACCURACY_LOST_PER_TILE;
 }
 
 export function rollAccuracy(
@@ -107,8 +110,8 @@ export function rollAccuracy(
   evasionStage = 0,
   rng: () => number = Math.random,
   extraMultiplier = 1,
-  /** Tiles between attacker and target — costs `ACCURACY_LOST_PER_TILE` each. Defaults to 0 so every bare-engine caller is unaffected. */
-  distance = 0
+  /** Tiles between attacker and target — the first is free, each one past it costs `ACCURACY_LOST_PER_TILE`. Defaults to melee, which is free. */
+  distance = 1
 ): boolean {
   if (move.accuracy < 0) return true;
   // The distance penalty comes off the base accuracy BEFORE the stage and
