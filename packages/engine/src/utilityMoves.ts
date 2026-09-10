@@ -38,7 +38,22 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
   if (candidates.length === 0) return false;
   if (rng() >= UTILITY_MOVE_USE_CHANCE) return false;
 
-  for (const move of candidates) {
+  // Rotate the starting point instead of always trying the movepool in
+  // order. This loop returns on the first move that fires, so a fixed order
+  // meant an agent knowing two utility moves only ever used the earlier one:
+  // measured, an Oddish that knows Growth AND Grassy Terrain used Grassy
+  // Terrain ZERO times in 1,500 ticks. Same defect the in-combat half had,
+  // where it was fixed by scoring.
+  //
+  // A rotation rather than a score, deliberately: out of combat these moves
+  // do incomparable things — enrich soil, spawn weather, widen a mate
+  // search — and inventing a common currency to rank them would be a balance
+  // decision dressed up as a bug fix. Rotating is neutral and gives every
+  // known move its turn.
+  const start = Math.floor(rng() * candidates.length);
+  const ordered = candidates.map((_, i) => candidates[(start + i) % candidates.length]);
+
+  for (const move of ordered) {
     if (move.drainNeeds) {
       const targets = agentsWithin(world, agent, move.drainNeeds.radius).filter((other) => other.herdId === undefined || other.herdId !== agent.herdId);
       const target = nearest(agent, targets);
