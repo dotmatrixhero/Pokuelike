@@ -8527,6 +8527,37 @@ runner script above is the real proof of the combat mechanism.
   not built. Only the player's own items grant `terrainEffect` moves
   right now; no species' learnset carries one.
 
+### Revised almost immediately: no weakening, and club drops Body Slam
+
+Two direct corrections in the very next message: *"Club should not be
+body slam... Maybe pound?"* and *"If you have a tool, the move it
+grants, it should not be weakened. Just make it a normal vanilla
+move."*
+
+The second one overrules MOVES_AND_TOOLS.md's own numeric rule outright
+— that section of the doc is struck through and rewritten in place, not
+deleted, so the reversal is on the record. `crafting.ts`'s `toolMove`
+helper (the power/cooldown tax) is gone entirely; every grant is now the
+literal base `MoveSpec` a real Pokémon knows — `BARE_HANDS_MOVES` is
+full-power Tackle, the flint knife grants full Scratch, the machete's
+Slash grant is full Slash. The slice rule (which move, how much of its
+effect) is left standing as the entire balance lever, per the doc's own
+now-updated reasoning: a partial, worse copy of the same move on top of
+the slice restriction was protecting the same thing twice.
+
+Club's grant changed from Body Slam to **Pound** — a new, deliberately
+minimal entry in `moves.ts` (`moveCanon("POUND")`, no skill tree; that's
+the separate template-v4 conversion pass's work, not this one's, and
+nothing here needs a tree since the player never levels). Body Slam read
+as a full-body creature move; Pound is the "hit it with the thing in
+your hand" swing a human club actually is.
+
+Re-verified after both changes: full suite green (1435 engine / 387
+data tests), and `validatePlayerCombat.ts` re-run shows the same shape
+— 5/5 real tree fells, 3/5 real hits landed — now at full Tackle power
+(damage went from -3/-4/-0.5 hp to -3/-5/-0.5 hp on the three landed
+hits, consistent with 40 power instead of 26).
+
 ## HUD decluttering: Eat and Offer move into the Pack menu
 
 Direct ask, mid-session: *"We're getting too many buttons I think. Let's

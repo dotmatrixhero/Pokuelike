@@ -346,21 +346,25 @@ tool granted moves. That will truly unlock gameplay as we know it." A held
 item now grants real combat moves onto `Agent.moves`, so a player `attack`
 goes through the exact same `pickBestMove`/`resolveHit` pipeline any wild
 agent's own attack does — the sim does not know a human swung a knife
-rather than a Sandshrew's claw. Bare hands (a real, weakened Tackle — mid-
-ask correction, "Tackle\*", not the first-drafted Scratch), flint knife
-(Scratch), and club (Body Slam) all follow the doc's numeric rule: ~65%
-power, ~1.75x cooldown of the creature version, so a human can never
-out-tool a partner into irrelevance. Two new items, axe and machete,
-exercise the doc's other ask — MOVES_AND_TOOLS.md's generalised terrain
-effect (`MoveSpec.terrainEffect`): an axe fells a tree (yields deadwood),
-a machete clears brush (plus a weakened Slash) — the slice rule at its
-clearest, gated by `terrainEffect.from` so neither tool does the other's
-job. Verified two ways: 21 unit tests (engine + data), and a live runner
-script against REAL scenario data — `validatePlayerCombat.ts` — 5/5 seeds
-felled a real tree for real deadwood, 3/5 landed a real hit on a real
-wild Pokémon (the other 2 lost the chase within budget, same
+rather than a Sandshrew's claw. Bare hands (a real Tackle — mid-ask
+correction, "Tackle\*", not the first-drafted Scratch), flint knife
+(Scratch), and club (**Pound**, not the first-drafted Body Slam — second
+correction: "Club should not be body slam... Maybe pound?") all grant the
+move **at full, unweakened strength** — the doc's original "60-70% power"
+numeric rule was overruled outright, direct ask: "it should not be
+weakened. Just make it a normal vanilla move." The slice rule (which move,
+how much of its effect) is the entire balance lever now, not a power tax
+on top of it. Two new items, axe and machete, exercise the doc's other
+ask — MOVES_AND_TOOLS.md's generalised terrain effect
+(`MoveSpec.terrainEffect`): an axe fells a tree (yields deadwood), a
+machete clears brush (plus a real, full-power Slash) — the slice rule at
+its clearest, gated by `terrainEffect.from` so neither tool does the
+other's job. Verified two ways: 21 unit tests (engine + data), and a live
+runner script against REAL scenario data — `validatePlayerCombat.ts` —
+5/5 seeds felled a real tree for real deadwood, 3/5 landed a real hit on
+a real wild Pokémon (the other 2 lost the chase within budget, same
 moving-target difficulty `validateBond.ts` already documents, not a
-regression). Full build, the numeric-rule table, and the live numbers are
+regression). Full build, both corrections, and the live numbers are
 in TODO.md's "Tool-granted moves" section.
 
 ### M6 — Bond

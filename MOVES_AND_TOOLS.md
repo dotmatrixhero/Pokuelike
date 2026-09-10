@@ -355,13 +355,13 @@ defense curl type thing."*
 
 | Held | Grants | Slices | How the tool version is worse |
 |---|---|---|---|
-| *(bare hands)* | **Punch · Kick · Yell** | Pound · Low Kick · Growl | The baseline. All weak, all range 1 |
+| *(bare hands)* | **Tackle** | Tackle | Built simpler than the original Punch/Kick/Yell sketch — direct correction, "Tackle\*": an empty-handed human still tackles. Punch/Kick/Yell as their own distinct moves is unbuilt future work |
 | **Flint knife** | **Scratch** | Scratch | Fast and light, but it's a short blade — no reach |
 | **Obsidian knife** | **Scratch** *(high crit)* | Scratch | Sharper edge, same reach |
 | **Machete** | **Cut · Slash** | Cut · Slash | Cut **clears foliage only** — it can't fell a tree. Slash is slower than a claw |
 | **Axe** | **Cut · Chop** | Cut · Karate Chop | Cut **fells only** — it's the wrong tool for brush. Slow to swing |
 | **Pick** | **Rock Smash · Dig** | Rock Smash · Dig | Dig **tunnels only** — none of Dig's dodge-underground trick |
-| **Club** | **Swing** | Slam | Heavy, slow, no secondary effect |
+| **Club** | **Pound** | Pound | Direct correction, mid-build: "Club should not be body slam... Maybe pound?" — a plain swing, not a full-body slam |
 | **Spear** | **Thrust** *(reach 2)* | Horn Attack | The only reach you get. Heavy; high threat signature |
 | **Sling** | **Sling Stone** *(ranged)* | Rock Throw | Weaker than a thrown rock from something strong. Noisy |
 | **Shield** | **Brace** | Defense Curl | Raises defence for a turn — and **costs you the held slot**, so you can't brace and swing |
@@ -391,12 +391,17 @@ partial answers, each occupying the held slot, each with its own weight. The
 complete move stays something only a creature brings, which is pillar 3
 holding structurally rather than by tuning.
 
-### The numeric rule
+### The numeric rule — reversed
 
-A tool-granted move should sit at roughly **60–70% of the creature version's
-power** with **1.5–2× the cooldown**. If a tool ever matches the innate
-version, the slice rule has failed and the partner has lost a reason to
-exist.
+~~A tool-granted move should sit at roughly 60–70% of the creature version's
+power with 1.5–2× the cooldown.~~ **Overruled, direct ask:** *"If you have a
+tool, the move it grants, it should not be weakened. Just make it a normal
+vanilla move."* A held item now grants the exact same base move a real
+Pokémon knows — no power or cooldown tax. The slice rule above (which move,
+and how much of its effect) is the entire balance lever; a partial, worse
+copy of the same move on top of it was double-counting the same protection.
+If this ever reads as *too* strong in a real run, that is a finding to
+bring back here, not something to quietly retune.
 
 ### Shield is the interesting one
 

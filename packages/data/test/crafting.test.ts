@@ -87,32 +87,34 @@ describe("crafting tables (ROADMAP M5)", () => {
 });
 
 describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
-  it("bare hands is a real, weakened Tackle — direct correction mid-ask, 'Tackle*'", () => {
+  it("bare hands is a real, full-strength Tackle — direct correction mid-ask, 'Tackle*'", () => {
     expect(BARE_HANDS_MOVES).toHaveLength(1);
     const move = BARE_HANDS_MOVES[0]!;
     expect(move.id).toBe("tackle");
-    // The numeric rule: roughly 60-70% power, 1.5-2x cooldown vs the real thing.
-    expect(move.power).toBeLessThan(MOVES.tackle!.power);
-    expect(move.power / MOVES.tackle!.power).toBeGreaterThanOrEqual(0.6);
-    expect(move.power / MOVES.tackle!.power).toBeLessThanOrEqual(0.7);
-    expect(move.cooldownTicks).toBeGreaterThan(MOVES.tackle!.cooldownTicks);
+    // The numeric rule got overruled mid-build: "it should not be weakened.
+    // Just make it a normal vanilla move." Full parity with the real thing.
+    expect(move.power).toBe(MOVES.tackle!.power);
+    expect(move.cooldownTicks).toBe(MOVES.tackle!.cooldownTicks);
   });
 
-  it("flint knife grants a weakened Scratch, club a weakened Body Slam — never the full creature-strength version", () => {
+  it("flint knife grants a real Scratch, club a real Pound — vanilla, not a weakened copy", () => {
     for (const [itemKey, baseId] of [
       ["flintKnife", "scratch"],
-      ["club", "body_slam"],
+      ["club", "pound"],
     ] as const) {
       const granted = ITEMS[itemKey]!.grantsMoves!;
       expect(granted.map((m) => m.id)).toContain(baseId);
       const move = granted.find((m) => m.id === baseId)!;
       const base = MOVES[baseId]!;
-      expect(move.power).toBeLessThan(base.power);
-      expect(move.cooldownTicks).toBeGreaterThan(base.cooldownTicks);
+      expect(move.power).toBe(base.power);
+      expect(move.cooldownTicks).toBe(base.cooldownTicks);
     }
+    // Direct correction, mid-build: "Club should not be body slam... Maybe
+    // pound?" — Body Slam is gone from the club's grant entirely.
+    expect(ITEMS.club!.grantsMoves!.some((m) => m.id === "body_slam")).toBe(false);
   });
 
-  it("axe fells trees only; machete clears brush and grants a weakened Slash — the slice rule, and no tool gets all of Cut", () => {
+  it("axe fells trees only; machete clears brush and grants a real, vanilla Slash — the slice rule, and no tool gets all of Cut", () => {
     const axeFell = ITEMS.axe!.grantsMoves!.find((m) => m.terrainEffect)!;
     expect(axeFell.terrainEffect!.from).toEqual(["tree"]);
     expect(axeFell.terrainEffect!.to).toBe("floor");
@@ -125,7 +127,8 @@ describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
     expect(macheteClear.terrainEffect!.yields).toBeUndefined();
     expect(macheteClear.terrainEffect!.from).not.toContain("tree");
     const macheteSlash = ITEMS.machete!.grantsMoves!.find((m) => m.id === "slash")!;
-    expect(macheteSlash.power).toBeLessThan(MOVES.slash!.power);
+    expect(macheteSlash.power).toBe(MOVES.slash!.power);
+    expect(macheteSlash.cooldownTicks).toBe(MOVES.slash!.cooldownTicks);
   });
 
   it("axe and machete are eventually reachable from nothing but bare-hand materials (learned later, like the flint knife)", () => {

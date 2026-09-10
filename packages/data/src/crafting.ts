@@ -21,19 +21,18 @@ import { MOVES } from "./moves.js";
  */
 
 /**
- * MOVES_AND_TOOLS.md's numeric rule: a tool-granted move sits at roughly
- * 60-70% of the creature version's power, at 1.5-2x its cooldown — "if a
- * tool ever matches the innate version, the slice rule has failed and the
- * partner has lost a reason to exist." Reuses the exact same base MoveSpec
- * a real Pokémon knows (`./moves.js`'s `MOVES`) rather than inventing a
- * parallel, hand-tuned roster — so a `player.ts` attack goes through the
- * ordinary `pickBestMove`/`resolveHit` pipeline completely unmodified; the
- * sim genuinely does not know a human swung a knife rather than a
- * Sandshrew's claw.
+ * MOVES_AND_TOOLS.md's numeric rule ("a tool-granted move sits at roughly
+ * 60-70% of the creature version's power") is EXPLICITLY OVERRULED —
+ * direct ask: *"If you have a tool, the move it grants, it should not be
+ * weakened. Just make it a normal vanilla move."* A held item grants the
+ * exact same base `MoveSpec` a real Pokémon knows (`./moves.js`'s
+ * `MOVES`), unmodified — the balance lever is the slice rule alone
+ * (*which* move, and how much of its effect, per the worked table below),
+ * not an artificial power/cooldown tax on top of it. Also why a
+ * `player.ts` attack goes through the ordinary `pickBestMove`/`resolveHit`
+ * pipeline completely unmodified either way — the sim genuinely does not
+ * know a human swung a knife rather than a Sandshrew's claw.
  */
-function toolMove(base: MoveSpec, powerMult = 0.65, cooldownMult = 1.75): MoveSpec {
-  return { ...base, power: Math.round(base.power * powerMult), cooldownTicks: Math.round(base.cooldownTicks * cooldownMult) };
-}
 
 /**
  * A terrain-only move (fell a tree, clear brush) — MOVES_AND_TOOLS.md's
@@ -57,7 +56,7 @@ function terrainMove(id: string, name: string, terrainEffect: NonNullable<MoveSp
  * tackles. `player.ts`'s `syncPlayerMoves` always includes this, on top of
  * whatever the held item grants.
  */
-export const BARE_HANDS_MOVES: MoveSpec[] = [toolMove(MOVES.tackle!)];
+export const BARE_HANDS_MOVES: MoveSpec[] = [MOVES.tackle!];
 
 export const ITEMS: Record<string, ItemDef> = {
   fiber: { key: "fiber", name: "Fiber", weight: 1 },
@@ -66,10 +65,12 @@ export const ITEMS: Record<string, ItemDef> = {
   knappedFlint: { key: "knappedFlint", name: "Knapped flint", weight: 1 },
   torch: { key: "torch", name: "Torch", weight: 2, slot: "held", light: true, threat: 0.3 },
   // MOVES_AND_TOOLS.md's worked table: knife -> Scratch (the damage slice).
-  flintKnife: { key: "flintKnife", name: "Flint knife", weight: 2, slot: "held", threat: 0.3, grantsMoves: [toolMove(MOVES.scratch!)] },
-  // Club -> Swing/Slam. Body Slam is this roster's closest real move to
-  // "heavy, slow, no secondary effect" at the base (unleveled) level.
-  club: { key: "club", name: "Club", weight: 3, slot: "held", threat: 0.5, grantsMoves: [toolMove(MOVES.body_slam!)] },
+  flintKnife: { key: "flintKnife", name: "Flint knife", weight: 2, slot: "held", threat: 0.3, grantsMoves: [MOVES.scratch!] },
+  // Club -> Pound. Direct correction: "Club should not be body slam...
+  // Maybe pound?" — Body Slam reads as a full-body creature move; Pound is
+  // the plain "hit it with the thing in your hand" swing a human club
+  // actually is. `moves.ts`'s `pound` entry was added for exactly this.
+  club: { key: "club", name: "Club", weight: 3, slot: "held", threat: 0.5, grantsMoves: [MOVES.pound!] },
   // Axe -> Cut, fell-only slice (MOVES_AND_TOOLS.md's knife/machete/axe
   // split: "no tool gets all three"). Deliberately no second, damage-slice
   // grant here (the doc's table also gives axe a Karate Chop-flavoured
@@ -93,7 +94,7 @@ export const ITEMS: Record<string, ItemDef> = {
     weight: 3,
     slot: "held",
     threat: 0.35,
-    grantsMoves: [terrainMove("clear", "Clear", { from: ["bush", "flora", "seedling"], to: "floor" }, 6), toolMove(MOVES.slash!)],
+    grantsMoves: [terrainMove("clear", "Clear", { from: ["bush", "flora", "seedling"], to: "floor" }, 6), MOVES.slash!],
   },
   poultice: { key: "poultice", name: "Poultice", weight: 1 },
   foragePouch: { key: "foragePouch", name: "Forage pouch", weight: 1, capacity: 8 },
