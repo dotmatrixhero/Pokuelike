@@ -42,7 +42,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -1471,6 +1471,10 @@ export function tickAgentAction(
   if ((agent.actionLockTicks ?? 0) > 0) return;
 
   if (applyCarrying(world, agent, rules, log)) return;
+  // Same tier as the rescue carry directly above, and directly after it:
+  // both are "I am already holding a herd-mate and mid-errand", and
+  // `applyCarrying` hands ferries straight through (see its own guard).
+  if (applyFerrying(world, agent, log)) return;
   // `thirstIsUrgent` gates only predation.ts's "give up hunting and wander
   // off" relocate mechanic — flee/fight/hunt-a-visible-target all still take
   // priority as before, and a hungry predator can still start/continue
@@ -1529,6 +1533,9 @@ export function tickAgentAction(
   // carrying/looting/support/dispersal.
   if (rules && applyTerritorialGuard(world, agent, rules, log, rng, ctx)) return;
   if (maybeStartCarrying(world, agent, log)) return;
+  // After the rescue carry gets first refusal: a fainted herd-mate needs
+  // picking up more urgently than a conscious one needs a lift.
+  if (maybeStartFerrying(world, agent, log)) return;
   if (applyLooting(world, agent, log)) return;
   // Real confirmed death case: a zero-cooldown ally-buff move (reachable via
   // the skill tree — e.g. Tackle respecced into `steadfast_guard`) plus an

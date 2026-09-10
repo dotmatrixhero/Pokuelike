@@ -1054,6 +1054,7 @@
     if (shape.kind === "point") return "a point-blank hit";
     if (shape.kind === "line") return "a " + shape.length + "-tile line";
     if (shape.kind === "cone") return "a " + shape.length + "-tile cone (width " + shape.width + ")";
+    if (shape.kind === "wave") return "a " + shape.length + "-tile wave, " + (shape.width * 2 + 1) + " tiles wide";
     if (shape.kind === "ring") return "a ring at radius " + shape.radius;
     if (shape.kind === "burst") return "a burst of radius " + shape.radius;
     return shape.kind;
@@ -1848,6 +1849,12 @@
           tiles.push({ x: forward.x * depth + perp.x * s, y: forward.y * depth + perp.y * s });
         }
       }
+    } else if (shape.kind === "wave") {
+      for (var wd = 1; wd <= shape.length; wd++) {
+        for (var ws = -shape.width; ws <= shape.width; ws++) {
+          tiles.push({ x: forward.x * wd + perp.x * ws, y: forward.y * wd + perp.y * ws });
+        }
+      }
     } else if (shape.kind === "ring") {
       for (var dx = -shape.radius; dx <= shape.radius; dx++) {
         for (var dy = -shape.radius; dy <= shape.radius; dy++) {
@@ -1870,7 +1877,11 @@
 
     var rangeMax = move.range ? move.range.max : 1;
     var shapeReach =
-      move.shape.kind === "point" ? 0 : move.shape.kind === "line" || move.shape.kind === "cone" ? move.shape.length : move.shape.radius;
+      move.shape.kind === "point"
+        ? 0
+        : move.shape.kind === "line" || move.shape.kind === "cone" || move.shape.kind === "wave"
+          ? move.shape.length
+          : move.shape.radius;
     var gridRadius = Math.max(rangeMax, shapeReach, 1);
     gridRadius = Math.min(gridRadius, 8); // keep the preview small even for Solar Beam's 7-tile reach
 

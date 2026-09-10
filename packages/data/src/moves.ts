@@ -5998,8 +5998,8 @@ export const MOVES: Record<string, MoveSpec> = {
         leaning: "boldness",
         // Ironic and earned: the water-mover that can't be swept away by
         // its own current.
-        grantsPassive: { kind: "immovable", value: 1 },
         delta: {},
+        grantsPassive: { kind: "immovable", value: 1 },
       },
       channel_grip: {
         id: "channel_grip",
@@ -6337,13 +6337,444 @@ export const MOVES: Record<string, MoveSpec> = {
   surf: {
     id: "surf",
     name: "Surf",
-    // Washes over everyone nearby, not just the primary target — mainline's
-    // classic "hits every adjacent foe" spread move.
-    shape: { kind: "ring", radius: 2 },
+    // v2. THE FANTASY, in the user's own words: "Surf should be.. A large
+    // wave. Like a moving rectangle of water that does aoe on impact.. It
+    // can be aimed. It also allows the unit to carry allies over water and
+    // if it's a non water Pokemon it can freely travel around water easily."
+    //
+    // The `ring` this replaces was broken, and that is why the rework was
+    // asked for. `resolveShape` builds a ring as a HOLLOW shell at exactly
+    // its radius, resolved around the ATTACKER — so at radius 2, measured
+    // directly through the real function from (5,5), the offsets (1,0),
+    // (0,1) and (1,1) are all MISSES. Surf hit 16 tiles and not one of them
+    // was adjacent: a wall of water that washed straight over the thing
+    // standing in front of you and hit whatever was behind it instead.
+    //
+    // The `wave` shape (engine/moves.ts) is a facing-oriented rectangle
+    // starting one tile ahead: 3 deep, 3 across, 9 tiles, and it aims. It
+    // covers distance 1, which is the specific hole the ring left.
+    shape: { kind: "wave", length: 3, width: 1 },
     ...moveCanon("SURF"),
     cooldownTicks: 6,
-    range: { min: 0, max: 2 },
+    range: { min: 0, max: 3 },
     hitsArea: true,
+    // The other two thirds of the ask. See `MoveSpec.watercraft`: knowing
+    // Surf lets the user cross deep water whatever its type, and lets it
+    // ferry a land-bound herd-mate across (support.ts's `maybeStartFerrying`).
+    watercraft: true,
+    // THE TREE (v4 template: 12 own nodes per branch + three 3-node bridges).
+    // Each branch answers a different half of the same fantasy — a rider on
+    // a moving wall of water:
+    // - Aggression ("The Break"): the wave as a weapon. Its permanent fork
+    //   is two SHAPES of the same wave, which is the one lever this move has
+    //   that nothing else in the roster does.
+    // - Boldness ("The Hull"): the rider as a vessel. Rides the hit out.
+    // - Sociability ("The Ferry"): the pod. `watercraft` already lets the
+    //   base move carry a herd-mate across water; this branch is what makes
+    //   the crossing worth something to the herd once it lands.
+    tree: {
+      // --- Aggression: The Break ---
+      rising_swell: {
+        id: "rising_swell",
+        name: "Rising Swell",
+        cost: 1,
+        leaning: "aggression",
+        delta: { power: 15 },
+      },
+      swell_conditioning: {
+        id: "swell_conditioning",
+        prerequisites: ["rising_swell"],
+        name: "-1 Cooldown",
+        cost: 1,
+        leaning: "aggression",
+        delta: { cooldownTicks: -1 },
+      },
+      deep_draw: {
+        id: "deep_draw",
+        prerequisites: ["swell_conditioning"],
+        name: "Deep Draw",
+        cost: 1,
+        leaning: "aggression",
+        delta: { defensePenetration: 0.3 },
+      },
+      breaking_crest: {
+        id: "breaking_crest",
+        prerequisitesAnyOf: [["deep_draw"], ["even_keel"]],
+        name: "+1 Wave Length",
+        cost: 1,
+        leaning: "aggression",
+        // `areaBonus` on a wave adds LENGTH, not width (engine's
+        // `growShape`) — the wave rolls a tile further, still 3 across the
+        // whole way: 9 tiles to 12.
+        delta: { areaBonus: 1 },
+      },
+      long_reach: {
+        id: "long_reach",
+        prerequisites: ["breaking_crest"],
+        name: "+1 Range",
+        cost: 1,
+        leaning: "aggression",
+        delta: { rangeBonus: 1 },
+      },
+      break_footing: {
+        id: "break_footing",
+        prerequisites: ["rising_swell"],
+        name: "+5 Accuracy",
+        cost: 1,
+        leaning: "aggression",
+        delta: { accuracy: 5 },
+      },
+      crest_holds: {
+        id: "crest_holds",
+        prerequisitesAnyOf: [["break_footing"], ["open_crossing"]],
+        name: "Crest Holds",
+        cost: 1,
+        leaning: "aggression",
+        delta: { critCooldownReset: true },
+      },
+      shore_break: {
+        id: "shore_break",
+        prerequisites: ["crest_holds"],
+        excludes: ["trough_break"],
+        name: "Shore Break",
+        cost: 1,
+        leaning: "aggression",
+        // Shallow and broad: 2 deep, 5 across, 10 tiles. A wave that arrives
+        // all at once along a whole shoreline.
+        delta: { shape: { kind: "wave", length: 2, width: 2 } },
+      },
+      trough_break: {
+        id: "trough_break",
+        prerequisites: ["crest_holds"],
+        excludes: ["shore_break"],
+        name: "Trough Break",
+        cost: 1,
+        leaning: "aggression",
+        // The opposite trade: 5 deep, 1 across, 5 tiles — a channelled surge
+        // down a single lane. Permanent against Shore Break because a move
+        // has one footprint: "Maybe that excludes you from taking other
+        // shape modes."
+        delta: { shape: { kind: "wave", length: 5, width: 0 } },
+      },
+      undertow_drag: {
+        id: "undertow_drag",
+        prerequisitesAnyOf: [["long_reach"], ["shore_break"], ["trough_break"]],
+        name: "Undertow",
+        cost: 1,
+        leaning: "aggression",
+        delta: { positionSwap: true, positionSwapPull: 1 },
+      },
+      break_precision: {
+        id: "break_precision",
+        prerequisites: ["undertow_drag"],
+        name: "+10 Accuracy",
+        cost: 1,
+        leaning: "aggression",
+        delta: { accuracy: 10 },
+      },
+      tidal_break: {
+        id: "tidal_break",
+        prerequisites: ["break_precision"],
+        name: "Tidal Break",
+        cost: 1,
+        leaning: "aggression",
+        delta: { power: 15, critRateStage: 1 },
+      },
+
+      // --- Boldness: The Hull ---
+      set_the_keel: {
+        id: "set_the_keel",
+        name: "Set the Keel",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "damageReductionFlat", value: 1.5 },
+      },
+      keel_footing: {
+        id: "keel_footing",
+        prerequisites: ["set_the_keel"],
+        name: "+5 Accuracy",
+        cost: 1,
+        leaning: "boldness",
+        delta: { accuracy: 5 },
+      },
+      hull_conditioning: {
+        id: "hull_conditioning",
+        prerequisites: ["keel_footing"],
+        name: "-1 Cooldown",
+        cost: 1,
+        leaning: "boldness",
+        delta: { cooldownTicks: -1 },
+      },
+      steady_the_board: {
+        id: "steady_the_board",
+        prerequisitesAnyOf: [["hull_conditioning"], ["even_keel"]],
+        name: "Steady the Board",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "immovable", value: 1 },
+      },
+      wider_beam: {
+        id: "wider_beam",
+        prerequisites: ["steady_the_board"],
+        name: "+1 Wave Length",
+        cost: 1,
+        leaning: "boldness",
+        delta: { areaBonus: 1 },
+      },
+      planted_stance: {
+        id: "planted_stance",
+        prerequisites: ["set_the_keel"],
+        name: "Braced Stance",
+        cost: 1,
+        leaning: "boldness",
+        // Plants both feet for the swing: real power, paid for with a tick
+        // of action lock. The lock is the cost and the power is the offset —
+        // never a node that is only a downside.
+        delta: { power: 15, lockTicks: 1 },
+      },
+      standing_wave: {
+        id: "standing_wave",
+        prerequisitesAnyOf: [["planted_stance"], ["shared_draft"]],
+        name: "Standing Wave",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "thorns", value: 0.25 },
+      },
+      sea_wall: {
+        id: "sea_wall",
+        prerequisites: ["standing_wave"],
+        excludes: ["white_water"],
+        name: "Breakwater",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "damageReduction", value: 0.08 },
+      },
+      white_water: {
+        id: "white_water",
+        prerequisites: ["standing_wave"],
+        excludes: ["sea_wall"],
+        name: "White Water",
+        cost: 1,
+        leaning: "boldness",
+        // Take the hit, or never be where the hit lands: the churn hides
+        // which way the rider is coming in from.
+        delta: { situationalBonuses: [{ condition: "flanking", multiplier: 1.4 }] },
+      },
+      deep_hull: {
+        id: "deep_hull",
+        prerequisitesAnyOf: [["wider_beam"], ["sea_wall"], ["white_water"]],
+        name: "Deep Hull",
+        cost: 1,
+        leaning: "boldness",
+        delta: { jamCooldownTicks: 1 },
+      },
+      hull_resolve: {
+        id: "hull_resolve",
+        prerequisites: ["deep_hull"],
+        name: "+5 Accuracy",
+        cost: 1,
+        leaning: "boldness",
+        delta: { accuracy: 5 },
+      },
+      unbroken_swell: {
+        id: "unbroken_swell",
+        prerequisites: ["hull_resolve"],
+        name: "Unbroken Swell",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassives: [
+          { kind: "defenseBoost", value: 0.1 },
+          { kind: "regen", value: 0.04 },
+        ],
+      },
+
+      // --- Sociability: The Ferry ---
+      pod_wake: {
+        id: "pod_wake",
+        name: "Pod Wake",
+        cost: 1,
+        leaning: "sociability",
+        delta: { targetsAlly: true, allyEffect: { healFraction: 0.15 }, excludesAllies: true },
+      },
+      ferry_footing: {
+        id: "ferry_footing",
+        prerequisites: ["pod_wake"],
+        name: "+5 Accuracy",
+        cost: 1,
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      ferry_conditioning: {
+        id: "ferry_conditioning",
+        prerequisites: ["ferry_footing"],
+        name: "-1 Cooldown",
+        cost: 1,
+        leaning: "sociability",
+        delta: { cooldownTicks: -1 },
+      },
+      open_water_call: {
+        id: "open_water_call",
+        prerequisitesAnyOf: [["ferry_conditioning"], ["open_crossing"]],
+        name: "Open Water Call",
+        cost: 1,
+        leaning: "sociability",
+        delta: { rallyCall: { ticks: 20 } },
+      },
+      carry_further: {
+        id: "carry_further",
+        prerequisites: ["open_water_call"],
+        name: "+1 Range",
+        cost: 1,
+        leaning: "sociability",
+        delta: { rangeBonus: 1 },
+      },
+      deeper_wash: {
+        id: "deeper_wash",
+        prerequisites: ["pod_wake"],
+        name: "Fuller Wash",
+        cost: 1,
+        leaning: "sociability",
+        delta: { allyEffect: { healFraction: 0.22 } },
+      },
+      still_water: {
+        id: "still_water",
+        prerequisitesAnyOf: [["deeper_wash"], ["shared_draft"]],
+        name: "Still Water",
+        cost: 1,
+        leaning: "sociability",
+        delta: {},
+        grantsPassive: { kind: "calmingPresence", value: 1 },
+      },
+      pull_them_clear: {
+        id: "pull_them_clear",
+        prerequisites: ["still_water"],
+        excludes: ["drive_them_back"],
+        name: "Pull Them Clear",
+        cost: 1,
+        leaning: "sociability",
+        delta: { forcedMovement: { mover: "attacker", direction: "closer", tiles: 1, timing: "beforeHit" } },
+      },
+      drive_them_back: {
+        id: "drive_them_back",
+        prerequisites: ["still_water"],
+        excludes: ["pull_them_clear"],
+        name: "Drive Them Back",
+        cost: 1,
+        leaning: "sociability",
+        delta: { forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } },
+      },
+      crossing_instinct: {
+        id: "crossing_instinct",
+        prerequisitesAnyOf: [["carry_further"], ["pull_them_clear"], ["drive_them_back"]],
+        name: "Pod Instinct",
+        cost: 1,
+        leaning: "sociability",
+        delta: { lifestealFraction: 0.08 },
+      },
+      crossing_precision: {
+        id: "crossing_precision",
+        prerequisites: ["crossing_instinct"],
+        name: "+5 Accuracy",
+        cost: 1,
+        leaning: "sociability",
+        delta: { accuracy: 5 },
+      },
+      far_shore: {
+        id: "far_shore",
+        prerequisites: ["crossing_precision"],
+        name: "The Crossing",
+        cost: 1,
+        leaning: "sociability",
+        delta: {},
+        grantsPassive: { kind: "aquaticHaste", value: 0.75 },
+      },
+
+      // --- Bridges (crosslink -> filler -> notable, each notable an
+      // alternate route into BOTH branches its crosslink joins; the filler
+      // deepens the crosslink's own lever rather than reaching for an
+      // unrelated stat) ---
+      swell_and_brace: {
+        id: "swell_and_brace",
+        prerequisites: ["rising_swell", "set_the_keel"],
+        name: "Swell and Brace",
+        cost: 1,
+        leaning: "boldness",
+        delta: { critRateStage: 1, accuracy: 5 },
+      },
+      brace_draft: {
+        id: "brace_draft",
+        prerequisites: ["swell_and_brace"],
+        name: "Brace Draft",
+        cost: 1,
+        leaning: "aggression",
+        delta: { critRateStage: 1 },
+      },
+      even_keel: {
+        id: "even_keel",
+        prerequisites: ["brace_draft"],
+        name: "Even Keel",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "damageReductionFlat", value: 1 },
+      },
+      keel_and_pod: {
+        id: "keel_and_pod",
+        prerequisites: ["set_the_keel", "pod_wake"],
+        name: "Keel and Pod",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "regenFlat", value: 1.5 },
+      },
+      shared_footing: {
+        id: "shared_footing",
+        prerequisites: ["keel_and_pod"],
+        name: "Shared Footing",
+        cost: 1,
+        leaning: "boldness",
+        delta: {},
+        grantsPassive: { kind: "regenFlat", value: 0.75 },
+      },
+      shared_draft: {
+        id: "shared_draft",
+        prerequisites: ["shared_footing"],
+        name: "Shared Draft",
+        cost: 1,
+        leaning: "sociability",
+        delta: {},
+        grantsPassive: { kind: "damageReduction", value: 0.06 },
+      },
+      pod_and_swell: {
+        id: "pod_and_swell",
+        prerequisites: ["pod_wake", "rising_swell"],
+        name: "Pod and Swell",
+        cost: 1,
+        leaning: "sociability",
+        delta: { power: 10, accuracy: 5 },
+      },
+      swell_footing: {
+        id: "swell_footing",
+        prerequisites: ["pod_and_swell"],
+        name: "Swell Footing",
+        cost: 1,
+        leaning: "sociability",
+        delta: { power: 10 },
+      },
+      open_crossing: {
+        id: "open_crossing",
+        prerequisites: ["swell_footing"],
+        name: "Open Crossing",
+        cost: 1,
+        leaning: "aggression",
+        delta: { situationalBonuses: [{ condition: "rallyMarked", multiplier: 1.3 }] },
+      },
+    },
   },
   solar_beam: {
     id: "solar_beam",

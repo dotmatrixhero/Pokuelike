@@ -46,7 +46,7 @@ export * from "./vision.js";
 export * from "./tells.js";
 export * from "./travel.js";
 export * from "./inventory.js";
-export { carryCapacityOf, usedCarryWeight } from "./support.js";
+export { carryCapacityOf, usedCarryWeight, maybeStartFerrying, applyFerrying } from "./support.js";
 export * from "./harvest.js";
 export * from "./threat.js";
 export * from "./trust.js";
