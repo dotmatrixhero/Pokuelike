@@ -1469,6 +1469,8 @@ describe("additive delta fields: a build that pays twice gets twice", () => {
     expect(applyMoveTree(move, ["b", "a"]).hits).toEqual({ min: 4, max: 4 });
     expect(applyMoveTree(move, ["a", "b"]).rallyCall).toEqual({ ticks: 50 });
     expect(applyMoveTree(move, ["b", "a"]).rallyCall).toEqual({ ticks: 50 });
+  });
+});
 
 describe("Wing Attack tree: v4 two-lane — the wing, and everything it moves", () => {
   const wingAttack = MOVES.wing_attack;
