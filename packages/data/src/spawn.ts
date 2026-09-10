@@ -3,6 +3,7 @@ import {
   createNeeds,
   randomNature,
   dispositionFromNature,
+  resolveSpawnEvolution,
   MATURITY_AGE,
   MAX_KNOWN_MOVES,
   pickMoveToForget,
@@ -90,7 +91,18 @@ function moveUnlockLevel(speciesId: string, moveId: string): number {
  * while native Pokémon don't have ticks old." Both now age from a real
  * starting point and compete for Elder on equal footing.
  */
-export function spawnAgent(speciesId: string, id: string, pos: Vec2, level = 5, rng: () => number = Math.random): Agent {
+export function spawnAgent(speciesIdRequested: string, id: string, pos: Vec2, level = 5, rng: () => number = Math.random): Agent {
+  // Real bug report: "level 50 weedles and bellsprouts and charmander...
+  // Maybe you are not re-simulating them being prompted to evolve after
+  // the level in which they are initially offered to?" — exactly right.
+  // Everything below this line already assumed a spawn's species was
+  // final; this resolves the real one FIRST (species/stats/moves/etc. all
+  // read `speciesId` afterward) so an immigrant or invented-population
+  // agent spawned well past its own evolution level gets the same real,
+  // per-level chance to have already evolved that organic leveling
+  // (leveling.ts's `grantExp`) applies — see `resolveSpawnEvolution`'s own
+  // doc comment for the mechanism.
+  const speciesId = resolveSpawnEvolution(speciesIdRequested, level, LEVELING_CONTEXT, rng);
   const species = SPECIES[speciesId];
   if (!species) throw new Error(`Unknown species: ${speciesId}`);
 

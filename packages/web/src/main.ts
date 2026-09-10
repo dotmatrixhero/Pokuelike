@@ -220,8 +220,31 @@ let autoCamHomeView: { zoom: number; scrollLeft: number; scrollTop: number } | u
  */
 let autoCamLastScroll: { left: number; top: number } | undefined;
 
-function focusCameraOn(pos: Vec2): void {
-  setZoom(AUTO_CAM_ZOOM);
+/**
+ * `ids`, when given, zooms OUT (never in past `AUTO_CAM_ZOOM`) far enough
+ * to keep every one of them on screen — same "fit the bounding box, with a
+ * margin, clamped both ways" formula `focusOnGroup` already uses for a
+ * herd/species highlight. Direct ask: "sometimes it's hard to see the auto
+ * cam targets like if they're bonded Pokemon but far away from each
+ * other" — `pos` alone (the engagement's own midpoint, see `focusPos`) was
+ * always framed at the same fixed close-in zoom regardless of how far
+ * apart the participants actually were, so two bonded Pokémon on opposite
+ * sides of that midpoint could both sit outside the viewport at once —
+ * worse on mobile's narrower frame. Falls back to the plain fixed zoom
+ * when `ids` is omitted, or when `highlightBounds` finds nothing to
+ * measure (e.g. `focusPos`'s own `fallbackPos` case, no living agent left
+ * to bound).
+ */
+function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>): void {
+  const bounds = ids ? highlightBounds(world, ids) : undefined;
+  if (bounds) {
+    const spanX = bounds.right - bounds.left;
+    const spanY = bounds.bottom - bounds.top;
+    const fit = Math.min(canvasWrap.clientWidth / Math.max(1, spanX), canvasWrap.clientHeight / Math.max(1, spanY)) * 0.8;
+    setZoom(Math.max(ZOOM_MIN, Math.min(AUTO_CAM_ZOOM, fit)));
+  } else {
+    setZoom(AUTO_CAM_ZOOM);
+  }
   const targetLeft = Math.max(0, (pos.x + 0.5) * TILE_SIZE * zoom - canvasWrap.clientWidth / 2);
   const targetTop = Math.max(0, (pos.y + 0.5) * TILE_SIZE * zoom - canvasWrap.clientHeight / 2);
   autoCamLastScroll = { left: targetLeft, top: targetTop };
@@ -233,8 +256,8 @@ const autoCamHost: AutoCameraHost = {
   captureHomeView(): void {
     autoCamHomeView = { zoom, scrollLeft: canvasWrap.scrollLeft, scrollTop: canvasWrap.scrollTop };
   },
-  focusOn(pos: Vec2): void {
-    focusCameraOn(pos);
+  focusOn(pos: Vec2, ids?: ReadonlySet<string>): void {
+    focusCameraOn(pos, ids);
   },
   restoreHomeView(): void {
     const home = autoCamHomeView;

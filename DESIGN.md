@@ -15525,3 +15525,85 @@ tick until the agent kills itself.
 it — not a vacuous test. Real before/after on the same 8 seeds, same
 tool: **24 self-fought events -> 0**. Full engine suite green (1311
 tests, 1 new).
+
+## Fixed: auto-cam zooms out for a spread-out engagement (mobile)
+
+Direct report: "On mobile, sometimes it's hard to see the auto cam targets
+like if they're bonded Pokemon but far away from each other." Root cause:
+`focusCameraOn` always centered on the engagement's midpoint (already
+correct — `focusPos` averages every participant's position) but at a
+FIXED close-in zoom regardless of how far apart they actually were, so two
+bonded Pokémon on opposite sides of that midpoint could both sit outside
+the viewport at once — worse on mobile's narrower frame.
+
+**Fix.** Reused the exact "fit the bounding box, with margin, clamped both
+ways" formula `focusOnGroup` (a herd/species highlight feature) already
+had: `AutoCameraHost.focusOn` now takes the engagement's `ids` alongside
+the midpoint, and zooms OUT (never in past the ordinary fixed zoom) far
+enough to keep every participant on screen.
+
+**Verified live** — Playwright, 390px-wide (mobile) viewport, real
+`tickWorld` run at speed: a spread-out 4-way pack hunt genuinely triggered
+the zoom-out path 13 times, down to 0.99-1.10 (from the fixed 1.5).
+Confirmed via temporary instrumentation, removed before commit. Web build
+clean (no unit tests for this package — visual behavior, verified live
+instead).
+
+## Fixed: a high-level base-form Pokémon that should have evolved, never got the chance to
+
+Direct report: "I'm seeing like level 50 weedles and bellsprouts and
+charmander. That's a bit confusing. They do not have to evolve, but it
+should be relatively rare like 25% chance every level that they choose
+not to. Maybe you are not re-simulating them being prompted to evolve
+after the level in which they are initially offered to?" — exactly right,
+on both counts.
+
+**Root cause.** `leveling.ts`'s `grantExp` only ever checked for a
+level-gated evolution as a side effect of an ORGANIC level-up crossing the
+threshold (`agent.level += 1` then check). An agent spawned directly at a
+level — an immigrant, or a never-visited zone's invented population, both
+now capable of rolling quite high since the zone-level-banding work above
+— never goes through `grantExp` at all, so its evolution was never
+evaluated, not even once. A "weedle" rolled at level 50 by immigration
+just stays a level-50 Weedle forever, no matter how far past its real
+evolution level (7) it started.
+
+**Fix, two parts:**
+1. Evolution is no longer guaranteed the instant it's eligible. New
+   `EVOLUTION_DECLINE_CHANCE = 0.25` — `grantExp`'s existing evolution
+   check now rolls it, and simply continues the level-up loop (species
+   unchanged) on a decline; the SAME check re-evaluates fresh at the next
+   level gained, so a decline never gets "stuck" — it's a real per-level
+   independent roll, not a one-shot coin flip. A streak of declines
+   compounds (`0.25^N` for N eligible levels), reading as genuinely rare,
+   not common.
+2. New `resolveSpawnEvolution(speciesId, level, ctx, rng)` — walks the
+   SAME level-gated evolution chain, applying the SAME per-level roll from
+   each evolution's own threshold up through the spawn level (not a single
+   roll for the whole span), so a directly-spawned high-level base form
+   gets the identical real chance an organically-leveled one would have
+   had. Handles multi-stage chains in one call (e.g. a level-50 Caterpie
+   roll can resolve all the way to Butterfree). Wired into `spawnAgent`
+   (data package) — the single choke point every spawn path (immigration,
+   invented population, scenario fixtures) already goes through — before
+   base stats/moves are resolved, so the corrected species is what
+   actually spawns.
+
+**Verified.** Full engine (1428, 8 new) and data (383) suites green. Real
+before/after, same 8 demo-world seeds, 8000 ticks each (a fixed existing
+test — "evolution swaps species" — had to be given an explicit forcing
+`rng`; it was silently relying on `Math.random` always clearing the new
+25% chance, a real latent flake this change surfaced):
+
+| | before | after |
+|---|---|---|
+| sampled unevolved base-form agents | 48 | 49 |
+| stuck 10+ levels past their own evolution threshold | 1 (a level-17 Weedle) | 0 |
+
+A modest sample at this tick count (the underlying event is rare by
+design, and this session's own demo-world population stays fairly small
+over a few thousand ticks) — the mechanism itself is unit-tested directly
+(8 new tests covering the decline roll, the re-roll-per-level guarantee,
+and `resolveSpawnEvolution`'s multi-stage/threshold/unknown-species
+behavior), which is the stronger evidence here; the live run is a
+directional sanity check on top of that, not the primary proof.

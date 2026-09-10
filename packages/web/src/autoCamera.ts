@@ -353,8 +353,20 @@ export interface ActiveEngagementInfo {
 export interface AutoCameraHost {
   /** Called once, the moment auto-camera takes the view over from idle (before the first `focusOn`) — the host's chance to snapshot its current zoom/scroll so `restoreHomeView` can put it back. */
   captureHomeView(): void;
-  /** Pan/zoom the canvas onto this world position (tile coords) at auto-camera's fixed close-in zoom. Called only while an engagement is active and the viewer hasn't manually taken over the view (see `noteManualViewChange`). */
-  focusOn(pos: Vec2): void;
+  /**
+   * Pan/zoom the canvas onto this world position (tile coords) — auto-
+   * camera's fixed close-in zoom by default, but the host zooms OUT (never
+   * in past that default) far enough to keep every id in `ids` on screen
+   * when they're spread out — direct ask: "sometimes it's hard to see the
+   * auto cam targets like if they're bonded Pokemon but far away from each
+   * other" (mobile's narrower viewport makes this worse). `ids` is the
+   * full engagement roster `pos` was already averaged from
+   * (`focusPos`) — omit it (a one-shot event with nothing left to bound,
+   * `focusPos`'s own `fallbackPos` case) to keep the plain fixed-zoom
+   * behavior. Called only while an engagement is active and the viewer
+   * hasn't manually taken over the view (see `noteManualViewChange`).
+   */
+  focusOn(pos: Vec2, ids?: ReadonlySet<string>): void;
   /** Return the view (zoom + scroll) to wherever `captureHomeView` found it. Called once, when the queue empties back to fully idle. */
   restoreHomeView(): void;
   /** Read the user's current speed-slider value (a `SPEED_STEPS` entry, not an index). */
@@ -563,7 +575,7 @@ export class AutoCameraController {
    */
   update(world: World, playing: boolean): void {
     this.reconcile(world, playing);
-    if (this.enabled && this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world));
+    if (this.enabled && this.active && !this.viewerTookOver) this.host.focusOn(this.focusPos(this.active, world), this.active.ids);
   }
 
   /** The ids the log should currently be scoped to, or `undefined` for no auto-cam filter — gated on `isEnabled()` since this reflects what the log/status UI should show, unchanged by this file's passive-tracking-while-disabled feature. */

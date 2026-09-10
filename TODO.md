@@ -8675,3 +8675,33 @@ bulky."*
 Live-verified (Playwright): all 6 row buttons render as the intended
 emoji, the corner Pack button opens the same Pack menu as before, no
 console errors. Full suite green (1435 engine / 387 data tests).
+
+## Fixed: auto-cam zooms out for a spread-out engagement (mobile) — see DESIGN.md
+
+- [x] Direct report: "On mobile, sometimes it's hard to see the auto cam
+      targets like if they're bonded Pokemon but far away from each
+      other." Root cause: `focusCameraOn` centered on the right midpoint
+      but always at a fixed close-in zoom regardless of spread.
+      `AutoCameraHost.focusOn` now also takes the engagement's `ids` and
+      zooms out (reusing `focusOnGroup`'s existing fit-to-bounds formula)
+      far enough to keep everyone on screen. Verified live via Playwright
+      on a 390px-wide viewport: a real spread-out pack hunt triggered the
+      zoom-out path down to 0.99-1.10 (from the fixed 1.5).
+
+## Fixed: a high-level base-form Pokémon that should have evolved never got the chance — see DESIGN.md
+
+- [x] Direct report: "I'm seeing like level 50 weedles and bellsprouts
+      and charmander... Maybe you are not re-simulating them being
+      prompted to evolve after the level in which they are initially
+      offered to?" Exactly right — `grantExp`'s evolution check only ever
+      ran as a side effect of an organic level-up; a directly-spawned
+      high-level agent (immigrant, invented population) never got
+      evaluated at all. Fixed: evolution is now a real per-level 25%
+      decline chance (`EVOLUTION_DECLINE_CHANCE`), not guaranteed the
+      instant it's eligible, AND a new `resolveSpawnEvolution` gives a
+      spawned agent the same chain of per-level rolls an organically
+      leveled one would have had, wired into `spawnAgent`. 8 new unit
+      tests (decline/evolve/re-roll/multi-stage/unknown-species). Real
+      before/after, 8 seeds/8000 ticks: 1 agent stuck 10+ levels past its
+      own threshold before the fix (a level-17 Weedle), 0 after. Full
+      engine (1428) and data (383) suites green.
