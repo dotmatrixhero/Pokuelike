@@ -49,6 +49,31 @@ settled.
    is what makes a road feel like a thread rather than a grid, and what
    keeps the cave/frontier tone of Act 1 true for the rest of the world.
 
+7. **Wild/NPC humans get a spawn-time archetype tendency; the player stays
+   purely earned.** Direct ask: "can we make humans spawn with different
+   types... hunter/forager/traveler/merchant/wanderer." This looked like a
+   direct collision with decision 5 above (roles are earned, not a spawn
+   table) — put to the user as a menu, chosen: **"Hybrid: spawn with a
+   tendency, but it's provisional until earned."** Then narrowed further,
+   in the user's own words: "the player character should be fully 'becomes
+   a role as they do stuff' but other humans in the world are spawning in
+   zones..." — so the hybrid only applies to wild/NPC humans; the player
+   has no tendency at all. **Built** (unlike everything else in this
+   section): `Agent.archetype`, real starting gear per archetype from the
+   existing `ITEMS` catalog, real tool-granted moves, per-archetype emoji
+   in the renderer — see DESIGN.md's "Wild human archetypes" entry for the
+   implementation and verification. The "earned confirmation" half of the
+   hybrid is explicitly NOT built — see the open question below.
+
+   This is a narrower, actually-shipped mechanism, not the settlement-role
+   system decision 5 describes (elder/builder/etc. as offices within a
+   generated village) — that's still entirely unbuilt, per the rest of
+   this doc. Wild humans exist today only as an unintentional side effect
+   of "human" being a plain `SPECIES` roster entry with no dedicated
+   spawn/AI system of its own (confirmed by direct investigation, matching
+   the user's own observation: "humans are randomly spawning in the
+   world").
+
 See also **LORE_NOTES.md** — canon research gathered for this design,
 clearly separated into what's real in-game text, what's fan theory and
 what's fan fiction. Most relevant: Legends: Arceus's Hisui is very close to
@@ -612,3 +637,15 @@ What's left:
    treat them**, mechanically? It's the most obvious payoff of the whole
    premise ("you're the first"), and the attitude axis is already the right
    place to hang it — but it's unbuilt and unscoped.
+7. **How does a wild human's archetype tendency (decision 7 above) ever get
+   confirmed/earned?** Real gap found while building the tendency half:
+   wild humans currently run the exact same generic animal behavior tree
+   as every other species — no gather/craft/trade/hunt-as-a-human AI exists
+   to earn a role from. Confirming an archetype today would mean either (a)
+   building real human-specific behavior first (a much bigger lift — this
+   is arguably the "what humans do: the settlement loop" section below,
+   not a small follow-up), or (b) picking some proxy signal now (ticks
+   survived carrying the starting gear? distance wandered while forager-
+   tagged?) that isn't really "earned" in the sense decision 5's inherited-
+   role model means. Recommend waiting for real human behavior rather than
+   inventing a fake signal — but it's the user's call.

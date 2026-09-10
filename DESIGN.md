@@ -15626,3 +15626,87 @@ ${moveName} on ${defender}!"`, same `findMoveUsed` lookup the other two
 cases already use. Verified live (Playwright, real tick run): "Kingler
 used Hammer Arm on Golduck!", "Golduck used Psybeam on Kingler!" — real
 move names, not the old placeholder text. Web build clean.
+
+## Wild human archetypes: spawn tendency, real gear, real tool-moves
+
+Direct ask, in the same message as the clash-log report above: "can we make
+humans spawn with different types... depending on type they can have
+different items on their inventory, lootable when they are fainted. could
+also have items. Should also have sex and that should affect which emoji
+you choose for them. hunter (weapons, can use more moves), forager
+(collects crops...), traveler, merchant, wanderer."
+
+**Design collision, resolved.** `HUMANS_DESIGN.md`'s already-decided item 5
+says roles are inherited/earned, not a spawn table — a direct conflict with
+"spawn with different types." Put to the user as a menu; chosen: **"Hybrid:
+spawn with a tendency, but it's provisional until earned."** Separately
+confirmed the player stays purely-earned (no spawn tendency at all) — only
+wild/NPC humans get a tendency, since "humans are randomly spawning in the
+world" already, unintentionally (see below).
+
+**Real gap found, not assumed.** Grepped for any human-specific AI branch
+outside `player.ts` — none exists. Wild humans run the exact same generic
+animal behavior tree as every other species; there is no gather/craft/trade
+AI to ever "earn" a role from. So the earned-confirmation half of the
+hybrid is NOT built — it would have nothing real to hook into, and faking a
+timer-based promotion would be inventing a signal, not tracking one.
+Flagged as an open question in `HUMANS_DESIGN.md` instead.
+
+**What IS real and built:**
+- `Agent.archetype` — set once at spawn by `assignHumanArchetype`
+  (engine/immigration.ts), never on the player.
+- Real starting gear from the existing `@pokuelike/data` `ITEMS` catalog:
+  hunter → flint knife (held), forager → forage pouch + 2 berries, traveler
+  → camouflage cloak (worn), merchant → raw trade goods (fiber/cordage),
+  wanderer → nothing. All of it lands in `agent.inventory`, so the
+  already-existing corpse-loot mechanic (`support.ts`) makes it lootable on
+  faint for free — no new mechanic needed there, confirmed by reading it
+  before assuming otherwise.
+- Real tool-granted moves: a hunter's flint knife actually grants Scratch,
+  same as the player's would. This needed a genuine plumbing gap closed
+  first (below) — without it, a wild archetype's weapon would sit in
+  inventory doing nothing.
+- Renderer: any human (not just the player) now gets a real emoji keyed by
+  archetype + sex — 🥷 hunter, 👨‍🌾/👩‍🌾 forager, 🚴‍♂️/🚴‍♀️ traveler, 🙋‍♂️/🙋‍♀️
+  merchant, 🧘‍♂️/🧘‍♀️ wanderer (same backing-disc treatment the player's 👱
+  already used).
+
+**The plumbing gap.** `world.items`/`playerBaseMoves` (and `recipes`) were
+only ever set inside the two hand-built player-scenario constructors
+(`scenario.ts`) — the general overworld path (`overworldScenario.ts` →
+`promoteZone`) never set them at all, confirmed by grep before building
+anything. So a wild human spawned via ordinary immigration into any real
+zone had `syncPlayerMoves`-equivalent logic silently no-op — no catalog to
+read from. User explicitly chose to build this properly now rather than
+ship items with inert tool-moves: `ImmigrationContext` gained an optional
+`itemCatalog` field (same injected-context shape `LevelingContext` already
+uses), `@pokuelike/data`'s `IMMIGRATION_CONTEXT` wires it to the real
+`ITEMS`/`RECIPES`/`BARE_HANDS_MOVES`, and `promoteZone` now stamps it onto
+every zone `World` it creates — the same "carry it down once, at
+promotion" treatment `territoryName`/`sanctuaryDistance` already get.
+
+**Verification.** Typecheck clean on all three packages (engine, data,
+web — the latter via the real `vite build`, not just `tsc --noEmit`,
+per this project's own standing lesson about the two diverging). Full
+suites green: engine 1443/1443, data 387/387 — no regressions.
+
+A real 3-seed × 8000-tick `tickMacroWorld` run (this project's standard
+verification suite) found **0 wild humans** in the focused zone across all
+three seeds — not a bug: "human" is 1 of 108 roster species, and ordinary
+immigration only fires a handful of times total across the WHOLE roster
+per run (immigration.ts's own doc comment: ~6 rolls per 3000 ticks). Waiting
+on a natural spawn to verify this empirically was impractical, so built a
+real, permanent runner script instead —
+`packages/runner/src/validateHumanArchetypes.ts` — that calls the exact
+same `spawnAgent`/`assignHumanArchetype` functions the engine calls at both
+real call sites, with the real `IMMIGRATION_CONTEXT`. 200 rolls: all 5
+archetypes appeared (distribution `{merchant: 33, wanderer: 38, traveler:
+43, forager: 47, hunter: 39}` — roughly even, as expected from an
+unweighted roll), every hunter actually gained Scratch from its knife, and
+the player came out completely untouched (no archetype, moves still just
+`[tackle]`). This is real function-level verification, not a code-review
+claim — but it is NOT the same as having watched a wild archetype human on
+screen in a live browser session; that visual check (Playwright against
+the dev server) was not done this round, since forcing a wild human onto
+screen would need a debug-injection hook that doesn't exist yet. Said
+plainly rather than blurred together.

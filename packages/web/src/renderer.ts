@@ -42,6 +42,22 @@ import {
 } from "./palette.js";
 
 export const TILE_SIZE = 20;
+
+/**
+ * A wild human's emoji, keyed by `Agent.archetype` (engine's
+ * `assignHumanArchetype`) and `Agent.sex`. Direct ask's own proposed set —
+ * hunter/forager/traveler/merchant/wanderer — with the plainest gendered
+ * variant available for each; the ninja emoji has no official female
+ * variant, so hunter is unisex. `wanderer` also doubles as the fallback for
+ * a human with no `archetype` set (the player, or a pre-archetype save).
+ */
+const HUMAN_ARCHETYPE_EMOJI: Record<"hunter" | "forager" | "traveler" | "merchant" | "wanderer", { male: string; female: string }> = {
+  hunter: { male: "🥷", female: "🥷" },
+  forager: { male: "👨‍🌾", female: "👩‍🌾" },
+  traveler: { male: "🚴‍♂️", female: "🚴‍♀️" },
+  merchant: { male: "🙋‍♂️", female: "🙋‍♀️" },
+  wanderer: { male: "🧘‍♂️", female: "🧘‍♀️" },
+};
 /**
  * Real sprite art is drawn larger than one tile and bottom-anchored (feet on
  * the tile, head/body overflowing upward into the tile above) rather than
@@ -1254,6 +1270,28 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     // report: "It's still semi transparent." Opaque fill before every emoji.
     ctx.fillStyle = "#fff";
     ctx.fillText("👱", cx, cy);
+  } else if (agent.species === "human") {
+    // A wild/NPC human — direct ask: "make humans spawn with different
+    // types... Should also have sex and that should affect which emoji
+    // you choose for them." Same backing-disc treatment as the player
+    // branch above (no sprite art exists for "human" either), keyed by
+    // `agent.archetype` (immigration.ts's `assignHumanArchetype`) and
+    // `agent.sex`. No official gendered variant for the ninja emoji, so
+    // hunter reads the same either way.
+    const cx = px + TILE_SIZE / 2 + jitterX;
+    const cy = py + TILE_SIZE * 0.45 + jitterY;
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE_SIZE * 0.68, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${TILE_SIZE * 1.15}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(HUMAN_ARCHETYPE_EMOJI[agent.archetype ?? "wanderer"][agent.sex === "female" ? "female" : "male"], cx, cy);
   } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being

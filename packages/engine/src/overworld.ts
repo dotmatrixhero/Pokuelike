@@ -1,7 +1,7 @@
 import type { Agent, HuntRules, Layer, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
 import type { LevelingContext } from "./leveling.js";
-import { rollImmigrantLevel, zoneLevelCenter, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
+import { rollImmigrantLevel, zoneLevelCenter, assignHumanArchetype, type ImmigrationContext, type ImmigrationSpeciesInfo } from "./immigration.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { tickWorld } from "./simulation.js";
 import { findPosInBiome, findWalkableNear, generateWorld } from "./worldgen.js";
@@ -563,6 +563,16 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
     // doc comment). Same "carry it down once, at promotion" treatment as
     // territoryName above, not a per-tick lookup.
     region.world.sanctuaryDistance = distanceToNearestLandmark(mw.grid, row, col, "sanctuary");
+    // Same "carry it down once, at promotion" treatment as territoryName/
+    // sanctuaryDistance above — without this, a wild human immigrating into
+    // any zone other than the two hand-built player scenarios had
+    // world.items/playerBaseMoves unset and syncPlayerMoves silently did
+    // nothing for them.
+    if (ctx.itemCatalog) {
+      region.world.items = ctx.itemCatalog.items;
+      region.world.recipes = ctx.itemCatalog.recipes;
+      region.world.playerBaseMoves = ctx.itemCatalog.playerBaseMoves;
+    }
   }
 
   const aggregates = region.aggregates ?? {};
@@ -605,6 +615,7 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
         mateDrive: 0,
       };
       agent.sex = mw.rng() < 0.5 ? "male" : "female";
+      assignHumanArchetype(agent, ctx, mw.rng);
       agent.herdId = herdId;
       agent.homePos = { ...agent.pos };
       world.agents.push(agent);

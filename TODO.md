@@ -8717,3 +8717,44 @@ finding (order-dependent tests mean some shared state is leaking
 somewhere — possibly `Math.random` used unseeded in a test that doesn't
 pass its own `rng`), just not one worth chasing mid-task; flagging for
 whoever next has reason to look at `simulation.test.ts`.
+
+## Built: wild human archetypes (spawn tendency, gear, tool-moves, emoji) — see DESIGN.md/HUMANS_DESIGN.md
+
+- [x] Direct ask: "can we make humans spawn with different types... hunter
+      (weapons)/forager/traveler/merchant/wanderer, sex should affect
+      emoji, items lootable when fainted." Built the full visible slice:
+      `Agent.archetype`, real starting gear from the existing `ITEMS`
+      catalog, real tool-granted moves (needed closing a real plumbing gap
+      — `world.items`/`playerBaseMoves` were only ever wired into the two
+      player scenarios, never the general overworld path — user chose
+      "build the plumbing too" over shipping inert tool-moves), and
+      per-archetype+sex emoji in the renderer. Verified via a real,
+      permanent runner script (`validateHumanArchetypes.ts`, 200 rolls,
+      asserts all 5 archetypes appear, hunter's knife actually grants
+      Scratch, player stays untouched) since natural immigration is far too
+      rare to wait on (0 wild humans in a real 3x8000-tick run). Full
+      engine (1443) and data (387) suites green, all three packages
+      typecheck/build clean.
+
+## Side notes / open, not done this round
+
+- [ ] **Earned archetype confirmation is NOT built.** Wild humans have no
+      dedicated behavior AI at all (same generic tree as every other
+      species) — nothing to earn a role from yet. See HUMANS_DESIGN.md's
+      open question 7.
+- [ ] **`ItemDef.capacity` (forage pouch's `capacity: 8`) is dead data.**
+      `carryCapacityOf` (support.ts) only ever reads `agent.maxHp` — an
+      inventory item's own `capacity` field is never read anywhere. Found
+      while picking forager's starting gear; not fixed, since it's a
+      pre-existing gap unrelated to this ask.
+- [ ] **No trading mechanic exists.** Merchant's starting "trade goods"
+      (fiber/cordage) are real, lootable items, but there is no actual
+      trade action/UI yet — merchant is cosmetically distinct only, same
+      as forager/traveler today (nobody but the player has gather/equip/
+      craft actions to act on their gear with).
+- [ ] Visual emoji rendering (archetype + sex, renderer.ts) was NOT live-
+      verified in a real browser session this round — forcing a wild
+      archetype human onto screen would need a debug-injection hook that
+      doesn't exist. Confirmed instead via direct function-level tests
+      (real emoji string picked per archetype/sex) and a clean `vite
+      build`. Said plainly rather than claimed as seen.

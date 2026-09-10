@@ -793,6 +793,24 @@ export interface Agent {
   fleeingFromId?: string;
   /** Absent = genderless (doesn't seek a mate). */
   sex?: "male" | "female";
+  /**
+   * A wild/NPC human's spawn-time tendency — never set on the player
+   * (`controlledBy === "player"`), whose role is purely earned through
+   * actual play, per HUMANS_DESIGN.md's "roles are inherited/earned, not a
+   * spawn table" decision. This is deliberately the softer promise: a
+   * roll, not a title — it decides starting gear/loadout and which emoji
+   * the renderer picks, nothing more. Direct ask: "can we make humans
+   * spawn with different types... hunter/forager/traveler/merchant/
+   * wanderer." Set once at spawn (immigration.ts, overworld.ts's
+   * `promoteZone`) by `assignHumanArchetype`, never reassigned.
+   *
+   * "Earned confirmation" (a spawn tendency becoming a real, behavior-
+   * backed role) is NOT built — wild humans currently run the same
+   * generic animal behavior tree as every other species (no gather/craft/
+   * trade AI exists for them yet to earn a role from). Flagged as an open
+   * question in HUMANS_DESIGN.md rather than faked.
+   */
+  archetype?: "hunter" | "forager" | "traveler" | "merchant" | "wanderer";
   /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */
   age?: number;
   /** Current/max HP. Set from `stats.maxHp` at spawn for combat-capable agents. */
