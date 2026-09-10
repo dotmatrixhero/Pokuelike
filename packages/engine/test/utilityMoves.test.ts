@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile, tileAt } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
-import { maybeUseUtilityMove } from "../src/utilityMoves.js";
+import { maybeUseUtilityMove, maybeUseUtilityMoveInCombat } from "../src/utilityMoves.js";
 import { getStatStage } from "../src/status.js";
 import type { Agent } from "../src/types.js";
 import type { MoveSpec } from "../src/moves.js";
@@ -247,5 +247,92 @@ describe("maybeUseUtilityMove", () => {
     const usedGrowth = agent.moveCooldowns?.["growth"] !== undefined;
     const usedRoost = agent.moveCooldowns?.["roost"] !== undefined;
     expect(usedGrowth !== usedRoost).toBe(true); // exactly one, not both
+  });
+});
+
+/**
+ * Widening the in-combat picker. Before this, `maybeUseUtilityMoveInCombat`
+ * applied exactly three effect families — `selfHeal`, self `statChangeOnHit`
+ * and `statusImmunityAura` — while the out-of-combat path applied several
+ * more. That is why a status-move skill tree had only three usable levers:
+ * everything a support move exists to do went dead the moment a fight
+ * started.
+ *
+ * Each test below pairs the new lever with the control that shows it was
+ * genuinely off before: the same move used through the SAME function with
+ * the thing it needs absent.
+ */
+describe("maybeUseUtilityMoveInCombat: the widened lever set", () => {
+  const opponent = () => makeAgent({ id: "opp", pos: { x: 6, y: 5 }, hp: 100, maxHp: 100 });
+
+  it("heals a hurt herd-mate mid-fight, and does not fire with no ally in range (control)", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "mend", range: { min: 0, max: 3 }, allyEffect: { healFraction: 0.5 } })] });
+    const ally = makeAgent({ id: "ally", herdId: "h", species: "bulbasaur", pos: { x: 6, y: 6 }, hp: 10, maxHp: 100 });
+    const foe = opponent();
+    world.agents.push(user, ally, foe);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(ally.hp!).toBeGreaterThan(10);
+
+    // CONTROL: identical, but the ally is elsewhere entirely.
+    const w2 = createWorld(15, 15, 1);
+    const user2 = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "mend", range: { min: 0, max: 3 }, allyEffect: { healFraction: 0.5 } })] });
+    const foe2 = opponent();
+    w2.agents.push(user2, foe2);
+    expect(maybeUseUtilityMoveInCombat(w2, user2, foe2, undefined, alwaysFire)).toBe(false);
+  });
+
+  it("drains a need off the opponent mid-fight", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", herdId: "h", moves: [makeMove({ id: "siphon", drainNeeds: { need: "hunger", amount: 0.3, radius: 3 } })] });
+    const foe = opponent();
+    foe.needs.hunger = 0.9;
+    world.agents.push(user, foe);
+    const before = foe.needs.hunger;
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(foe.needs.hunger).toBeLessThan(before);
+  });
+
+  it("spawns real weather mid-fight", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", moves: [makeMove({ id: "downpour", spawnsRain: true })] });
+    const foe = opponent();
+    world.agents.push(user, foe);
+    expect((world.weatherCells ?? []).length).toBe(0);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect((world.weatherCells ?? []).some((c) => c.type === "rain")).toBe(true);
+  });
+
+  it("picks the most valuable candidate, not whichever sits first in the movepool", () => {
+    const world = createWorld(15, 15, 1);
+    // Movepool order puts the weather move first. Survival must still win.
+    const user = makeAgent({
+      id: "user",
+      hp: 5,
+      maxHp: 100,
+      moves: [makeMove({ id: "downpour", spawnsRain: true }), makeMove({ id: "recover", selfHeal: { fraction: 0.5 } })],
+    });
+    const foe = opponent();
+    world.agents.push(user, foe);
+    expect(maybeUseUtilityMoveInCombat(world, user, foe, undefined, alwaysFire)).toBe(true);
+    expect(user.hp!).toBeGreaterThan(5); // healed
+    expect(user.moveCooldowns?.recover).toBeGreaterThan(0); // and it was recover that fired
+    expect(world.weatherCells ?? []).toHaveLength(0); // downpour did not
+  });
+
+  it("does not spend an action on a ward against something with no status move (control)", () => {
+    const world = createWorld(15, 15, 1);
+    const user = makeAgent({ id: "user", moves: [makeMove({ id: "ward", statusImmunityAura: { ticks: 100, radius: 3 } })] });
+    const harmless = opponent();
+    harmless.moves = [makeMove({ id: "plain", utilityMove: false, statusChance: 0 })];
+    world.agents.push(user, harmless);
+    expect(maybeUseUtilityMoveInCombat(world, user, harmless, undefined, alwaysFire)).toBe(false);
+
+    const venomous = opponent();
+    venomous.moves = [makeMove({ id: "toxic", utilityMove: false, statusChance: 0.5, statusKind: "poison" })];
+    const w2 = createWorld(15, 15, 1);
+    const user2 = makeAgent({ id: "user", moves: [makeMove({ id: "ward", statusImmunityAura: { ticks: 100, radius: 3 } })] });
+    w2.agents.push(user2, venomous);
+    expect(maybeUseUtilityMoveInCombat(w2, user2, venomous, undefined, alwaysFire)).toBe(true);
   });
 });

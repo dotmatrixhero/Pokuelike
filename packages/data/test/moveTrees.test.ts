@@ -1631,12 +1631,26 @@ const DEAD_ON_A_UTILITY_MOVE = [
 ] as const;
 
 /**
- * The ONLY three effect fields `maybeUseUtilityMoveInCombat` (utilityMoves.ts)
- * will spend a fight action on. It decides by effect field, not by move id, so
- * a status tree whose branch reaches none of them can never fire in a fight —
+ * The effect fields `maybeUseUtilityMoveInCombat` (utilityMoves.ts) will
+ * spend a fight action on. It decides by effect field, not by move id, so a
+ * status tree whose branch reaches none of them can never fire in a fight —
  * which is the single most important thing to check about one.
  */
-const COMBAT_USABLE_FIELDS = ["selfHeal", "statChangeOnHit", "statusImmunityAura"] as const;
+const COMBAT_USABLE_FIELDS = [
+  "selfHeal",
+  "statChangeOnHit",
+  "statusImmunityAura",
+  // Widened from three to six. `maybeUseUtilityMoveInCombat` used to apply
+  // only the first three while the out-of-combat path applied several more,
+  // which meant everything a support move exists to do — patch up a
+  // herd-mate, take something off the thing attacking you, change the
+  // weather — went dead the instant a fight started. That was the real
+  // constraint on status-move trees, and it was an engine gap, not a design
+  // one.
+  "allyEffect",
+  "drainNeeds",
+  "spawnsRain",
+] as const;
 
 const passiveTotal = (move: MoveSpec & { tree: Record<string, MoveTreeNode> }, kind: string) =>
   Object.values(move.tree)
