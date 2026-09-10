@@ -3,8 +3,11 @@ import {
   findWalkableNear,
   findPosInBiome,
   createNeeds,
+  setTile,
   tileAt,
   type Agent,
+  type Layer,
+  type TerrainKind,
   type Vec2,
   type World,
 } from "@pokuelike/engine";
@@ -168,6 +171,125 @@ export function createPlayerDemoWorld(seed: number = SCENARIO_SEED): World {
     sex: "female",
   };
   world.agents.push(player);
+  return world;
+}
+
+/** Nearest tile of `terrain` on `layer` by Chebyshev ring search — `findWaterNear` generalised past its surface-only hardcode. Falls back to the origin if none exists. */
+function findTerrainNear(world: World, layer: Layer, x: number, y: number, terrain: TerrainKind): Vec2 {
+  const cx = Math.min(world.width - 1, Math.max(0, Math.round(x)));
+  const cy = Math.min(world.height - 1, Math.max(0, Math.round(y)));
+  for (let r = 0; r <= Math.max(world.width, world.height); r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (tileAt(world, layer, nx, ny)?.terrain === terrain) return { x: nx, y: ny };
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+
+/** BFS step-distance from `from` over walkable tiles of `layer` (8-way). Unreachable tiles are absent. */
+export function walkDistances(world: World, layer: Layer, from: Vec2): Map<string, number> {
+  const dist = new Map<string, number>();
+  const key = (x: number, y: number) => `${x},${y}`;
+  const queue: Vec2[] = [from];
+  dist.set(key(from.x, from.y), 0);
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const d = dist.get(key(cur.x, cur.y))!;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = cur.x + dx, ny = cur.y + dy;
+      const k = key(nx, ny);
+      if (dist.has(k)) continue;
+      const t = tileAt(world, layer, nx, ny);
+      if (!t || !t.walkable || t.terrain === "water") continue;
+      dist.set(k, d + 1);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return dist;
+}
+
+/** How far into the dark the cave player starts from the lit chamber, in walking steps. Far enough that the light is not on screen at spawn; near enough that the first walk is a minute, not an expedition. */
+export const CAVE_SPAWN_MIN_STEPS = 22;
+export const CAVE_SPAWN_MAX_STEPS = 40;
+/** Radius of the lit chamber painted around the underground water pocket. */
+const CAVE_CHAMBER_RADIUS = 5;
+
+/**
+ * ROADMAP.md M1 — Act 1, layer 1: a dark cave with one lit chamber. Not a
+ * worldgen overhaul: `generateWorld` already carves cellular-automata caves
+ * on the underground layer with a guaranteed water pocket and guaranteed
+ * connectivity (see worldgen.test.ts). This hand-places what the opening
+ * needs on top of that and nothing else:
+ *
+ * - **The lit chamber** around the water pocket: `sunbeam` on most floor
+ *   tiles (worldgen only ever places sunbeams on surface, so a cave has none
+ *   without this), with a little food and flora. CAMPAIGN_DESIGN.md: "an
+ *   underground lake... with lots of sunlight and plants. It's peaceful,
+ *   prey only, but herds."
+ * - **One prey herd** at the chamber — Sandshrew, the roster's underground
+ *   burrower (prey, `buildsShelter`).
+ * - **The player in the dark**, `CAVE_SPAWN_MIN_STEPS`..`MAX` walking steps
+ *   from the water by BFS over walkable underground tiles — so the light is
+ *   reachable *by construction*, never by luck of the seed. The acceptance
+ *   test ("spawn in the dark and walk to the light") is a property of how
+ *   the spawn is chosen, and scenario.test.ts asserts it on several seeds.
+ *
+ * The surface and canopy layers are generated as usual but left empty of
+ * agents: M1 is the cave, and surface herds would only spend ticks and
+ * clutter the event log. What the cave still lacks — ground types, a real
+ * fertility economy, deadwood — is M7's problem (ROADMAP.md).
+ */
+export function createCaveScenario(seed: number = SCENARIO_SEED): World {
+  const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed);
+  const L: Layer = "underground";
+  const rng = world.rng;
+
+  const water = findTerrainNear(world, L, SCENARIO_WIDTH / 2, SCENARIO_HEIGHT / 2, "water");
+
+  // The chamber: light and growth in a ring around the water.
+  for (let dy = -CAVE_CHAMBER_RADIUS; dy <= CAVE_CHAMBER_RADIUS; dy++) {
+    for (let dx = -CAVE_CHAMBER_RADIUS; dx <= CAVE_CHAMBER_RADIUS; dx++) {
+      const x = water.x + dx, y = water.y + dy;
+      const t = tileAt(world, L, x, y);
+      if (!t || t.terrain !== "floor") continue;
+      const roll = rng();
+      if (roll < 0.55) setTile(world, L, x, y, "sunbeam", t.elevation);
+      else if (roll < 0.67) setTile(world, L, x, y, "food", t.elevation);
+      else if (roll < 0.77) setTile(world, L, x, y, "flora", t.elevation);
+    }
+  }
+
+  const herd = Array.from({ length: 4 }, (_, i) => ({
+    ...spawnAgent("sandshrew", `sandshrew-${i}`, findWalkableNear(world, L, water.x + (i % 2 ? 2 : -2), water.y + (i < 2 ? -2 : 2)), 5, rng),
+    needs: createNeeds({ thirst: 0.5 + i * 0.1 }),
+    herdId: "sandshrew-herd",
+    sex: (i % 2 === 0 ? "male" : "female") as "male" | "female",
+  }));
+
+  // The player: a walkable tile a real walk away from the light.
+  const dist = walkDistances(world, L, water);
+  const band: Vec2[] = [];
+  let farthest: { pos: Vec2; d: number } | undefined;
+  for (const [k, d] of dist) {
+    const [x, y] = k.split(",").map(Number) as [number, number];
+    if (d >= CAVE_SPAWN_MIN_STEPS && d <= CAVE_SPAWN_MAX_STEPS) band.push({ x, y });
+    if (!farthest || d > farthest.d) farthest = { pos: { x, y }, d };
+  }
+  const spawn = band.length ? band[Math.floor(rng() * band.length)]! : farthest!.pos;
+  const player: Agent = {
+    ...spawnAgent("human", "player", spawn, 5, rng),
+    controlledBy: "player",
+    layer: L,
+    homeLayer: L,
+    sex: "female",
+  };
+
+  world.agents.push(...herd, player);
   return world;
 }
 

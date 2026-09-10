@@ -1,4 +1,4 @@
-import type { Agent, TerrainKind, Tile, World } from "@pokuelike/engine";
+import type { Agent, TerrainKind, Tile, World, Layer } from "@pokuelike/engine";
 import { biomeWeightsAt, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
@@ -487,7 +487,7 @@ const EDGE_NEIGHBORS: readonly { dir: EdgeDirection; dx: number; dy: number }[] 
  */
 function drawBiomeEdgeBlend(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number, ownBiome: string | undefined): void {
   const ownBase = getFloorBaseName(ownBiome);
-  const surface = world.tiles.surface;
+  const surface = world.tiles[activeViewLayer];
   for (const { dir, dx, dy } of EDGE_NEIGHBORS) {
     const nx = x + dx;
     const ny = y + dy;
@@ -616,6 +616,18 @@ function frameDeltaSeconds(): number {
  * surfacing or a Pidgey landing visibly pops in and out. Fine for a first
  * pass; a real per-layer view is future work (see DESIGN.md/TODO.md).
  */
+/**
+ * Which `Layer` this frame draws — ROADMAP.md M1. The renderer was hard-wired
+ * to `surface` at ten sites (tiles, agents, highlights, fire glow, hit-test);
+ * an agent underground "simply isn't drawn" (see `drawAgent`'s doc comment
+ * history). A cave player has to be drawn, so `drawWorld` takes the layer
+ * and every pass reads it from here. Module state rather than a threaded
+ * parameter because six helpers would otherwise gain a pass-through arg for
+ * one value that is constant for the whole frame; `agentAtCanvasPos` reads
+ * the same value so clicks resolve on the layer the eye is looking at.
+ */
+let activeViewLayer: Layer = "surface";
+
 export function drawWorld(
   ctx: CanvasRenderingContext2D,
   world: World,
@@ -642,8 +654,11 @@ export function drawWorld(
    * question: those say "something is happening here", this says "these are
    * the ones you asked about."
    */
-  focusGroupIds?: ReadonlySet<string>
+  focusGroupIds?: ReadonlySet<string>,
+  /** The layer to draw — the player's own in player mode, `surface` otherwise. See `activeViewLayer`. */
+  viewLayer: Layer = "surface"
 ): void {
+  activeViewLayer = viewLayer;
   // Always advance the animation clock, even in ASCII mode (which ignores
   // `dt` entirely) — so switching from ASCII back to tile mode doesn't hand
   // `interpolatedPos` one huge accumulated `dt` and produce a visible warp.
@@ -662,7 +677,7 @@ function drawWorldTiles(
   jigglingAgentIds?: ReadonlySet<string>,
   focusGroupIds?: ReadonlySet<string>
 ): void {
-  const surface = world.tiles.surface;
+  const surface = world.tiles[activeViewLayer];
   // Collected while walking the tile grid below, drawn in a second pass
   // after `drawDayNightTint` — see `drawCropIdentity`'s own doc comment.
   const cropIdentityTiles: { x: number; y: number; tile: Tile }[] = [];
@@ -874,7 +889,7 @@ function drawWorldTiles(
 
   pruneStaleFacings(world);
   for (const agent of world.agents) {
-    if (agent.layer !== "surface") continue;
+    if (agent.layer !== activeViewLayer) continue;
     drawAgent(ctx, agent, agent.id === selectedAgentId, dt, jigglingAgentIds?.has(agent.id) ?? false);
   }
 
@@ -897,7 +912,7 @@ function drawWorldTiles(
 
   if (selectedAgentId) {
     const selected = world.agents.find((a) => a.id === selectedAgentId);
-    if (selected && selected.layer === "surface") {
+    if (selected && selected.layer === activeViewLayer) {
       // Drawn again on top of weather so a storm/etc. doesn't obscure the
       // ring — reads the same interpolated position `drawAgent`'s own pass
       // above just set for this frame (not a fresh interpolation step) so
@@ -918,7 +933,7 @@ function drawWorldTiles(
  * into `palette.ts` rather than imported — keep them in sync by hand).
  */
 function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAgentId: string | undefined): void {
-  const surface = world.tiles.surface;
+  const surface = world.tiles[activeViewLayer];
 
   ctx.fillStyle = "#08090c";
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
@@ -930,7 +945,7 @@ function drawWorldAscii(ctx: CanvasRenderingContext2D, world: World, selectedAge
 
   const agentAt = new Map<string, Agent>();
   for (const agent of world.agents) {
-    if (agent.layer === "surface") agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
+    if (agent.layer === activeViewLayer) agentAt.set(`${agent.pos.x},${agent.pos.y}`, agent);
   }
 
   // Things that stand *on* the ground rather than being their own kind of
@@ -1308,7 +1323,7 @@ export function highlightBounds(world: World, ids: ReadonlySet<string>): Highlig
   let found = false;
   for (const id of ids) {
     const agent = world.agents.find((a) => a.id === id);
-    if (!agent || agent.layer !== "surface") continue;
+    if (!agent || agent.layer !== activeViewLayer) continue;
     const pos = renderPos.get(id) ?? agent.pos;
     minX = Math.min(minX, pos.x);
     minY = Math.min(minY, pos.y);
@@ -1380,7 +1395,7 @@ function drawGroupHighlight(ctx: CanvasRenderingContext2D, world: World, ids: Re
   ctx.lineWidth = 1.75;
   for (const id of ids) {
     const agent = world.agents.find((a) => a.id === id);
-    if (!agent || agent.layer !== "surface" || agent.alive === false) continue;
+    if (!agent || agent.layer !== activeViewLayer || agent.alive === false) continue;
     const pos = renderPos.get(id) ?? agent.pos;
     ctx.beginPath();
     ctx.arc((pos.x + 0.5) * TILE_SIZE, (pos.y + 0.5) * TILE_SIZE, TILE_SIZE * 0.62, 0, Math.PI * 2);
@@ -1427,7 +1442,7 @@ function drawWarmLights(ctx: CanvasRenderingContext2D, world: World): void {
   const sources: { cx: number; cy: number; radiusTiles: number; color: [number, number, number]; strength: number; phase: number }[] = [];
 
   for (const agent of world.agents) {
-    if (agent.layer !== "surface" || agent.alive === false) continue;
+    if (agent.layer !== activeViewLayer || agent.alive === false) continue;
     if (!agent.types?.includes("fire")) continue;
     const pos = renderPos.get(agent.id) ?? agent.pos;
     sources.push({ cx: pos.x + 0.5, cy: pos.y + 0.5, radiusTiles: 2.5, color: TYPE_COLOR.fire, strength: 0.5, phase: hashLightPhase(pos.x, pos.y) + agent.id.length * 37 });
@@ -1493,14 +1508,14 @@ function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
 }
 
 /** Maps a canvas click to the topmost surface-layer agent at that tile, if any. */
-export function agentAtCanvasPos(world: World, canvasX: number, canvasY: number): Agent | undefined {
+export function agentAtCanvasPos(world: World, canvasX: number, canvasY: number, layer: Layer = activeViewLayer): Agent | undefined {
   const tileX = Math.floor(canvasX / TILE_SIZE);
   const tileY = Math.floor(canvasY / TILE_SIZE);
   // Last-drawn-wins order (same order world.agents is iterated for drawing) so
   // a click resolves to whichever agent visually renders on top of the others.
   let found: Agent | undefined;
   for (const agent of world.agents) {
-    if (agent.layer === "surface" && agent.pos.x === tileX && agent.pos.y === tileY) found = agent;
+    if (agent.layer === layer && agent.pos.x === tileX && agent.pos.y === tileY) found = agent;
   }
   return found;
 }

@@ -128,6 +128,29 @@ Build:
 
 **Done when:** you spawn in the dark and walk to the light.
 
+**STATUS: DONE.** `?player=cave`. Live: spawned at (47,31) on `underground`,
+tick held at 0 with no input, the 19-key BFS path replayed and landed on the
+nearest sunbeam at (66,28) exactly, 71 ticks, no page errors. Screenshots
+confirm the chamber draws — water pocket, food and flora, sunbeam floor,
+four Sandshrew beside the player. Six data tests on five seeds assert the
+property, not the instance: player and herd underground, ≥8 sunbeams, a
+sunbeam reachable on foot from spawn at 16–42 steps, spawn tile unlit.
+
+Two things this found:
+- **The renderer was hard-wired to `surface` at ten sites** — tiles,
+  agents, highlights, fire glow, hit-test. An underground agent "simply
+  isn't drawn." Now `drawWorld` takes a `viewLayer` (module state, read by
+  every pass) and the app draws the player's own layer. Prerequisite nobody
+  had listed.
+- **Reachability is by construction, not by luck.** The spawn is chosen by
+  BFS from the water pocket at 22–40 walking steps, so "the light is a real
+  walk away" is a property of the constructor on every seed, and the test
+  pins it on five.
+
+Not darkness yet — everything is fully lit, because FOV is M2. And the cave
+floor draws with surface biome textures, since the tile pass has no
+underground palette; cosmetic, parked.
+
 **Risk — content, and it is real:** underground today is 95.75% floor, and
 `assignGroundTypes`/`waterKind` are surface-only, so the cave has none of the
 fertility economy or water variety the surface has. M1 does not fix that —

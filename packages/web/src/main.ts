@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, type PlayerAction } from "@pokuelike/engine";
-import { createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, type PlayerAction, type Layer } from "@pokuelike/engine";
+import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -336,11 +336,24 @@ function loadWorld(seed: number): void {
  * macro grid is deliberately off here: M0 proves the turn gate against a
  * world already known to be alive, and one new thing at a time is the point.
  */
-function loadPlayerWorld(seed: number): void {
+function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): void {
   macroWorld = undefined;
   playerMode = true;
   setPlaying(false);
-  world = createPlayerDemoWorld(seed);
+  // Same "leaving Overworld mode" dance as the manual toggle below: the
+  // macro map has no meaning in player mode, and left visible it sat as an
+  // empty panel over the top half of the map, squeezing the cave into the
+  // bottom (seen live in the M1 screenshot).
+  macroMapWrapEl.hidden = true;
+  mapModeSwitchEl.hidden = true;
+  minimapWidgetEl.hidden = true;
+  overworldToggleBtn.textContent = "Overworld: Off";
+  overworldToggleBtn.classList.remove("playing");
+  canvasWrap.classList.remove("force-hide");
+  macroMapWrapEl.classList.remove("force-hide");
+  // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
+  // ground for the turn gate and stays reachable for comparison.
+  world = scene === "cave" ? createCaveScenario(seed) : createPlayerDemoWorld(seed);
   log = new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
@@ -359,6 +372,11 @@ function loadPlayerWorld(seed: number): void {
  * the world move between steps than a fast one, same rules as every agent.
  * Then the ordinary post-tick display pipeline, and the camera follows.
  */
+/** The layer the eye is on: the player's own in player mode, else the surface the spectator app has always shown. */
+function viewLayer(): Layer {
+  return (playerMode ? findPlayer(world)?.layer : undefined) ?? "surface";
+}
+
 function playerAct(action: PlayerAction): void {
   const player = findPlayer(world);
   if (!player) return;
@@ -779,7 +797,7 @@ canvas.addEventListener("click", (event) => {
   // unambiguous ("inspect THIS one"), so it no longer gets swallowed by the
   // box's own "focus the whole fight" handling just because it's also
   // sitting inside one.
-  const agent = agentAtCanvasPos(world, x, y);
+  const agent = agentAtCanvasPos(world, x, y, viewLayer());
   if (agent) {
     selectAgent(agent);
     return;
@@ -1246,9 +1264,10 @@ const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) :
 // the old flat single-map default (see `enterOverworldMode`'s own doc
 // comment for the reasoning). The plain `loadWorld` path (no macro grid at
 // all) is still reachable any time via the "Overworld: Off" toggle.
-if (new URLSearchParams(location.search).get("player") === "1") {
-  // ROADMAP.md M0. The plain demo world with a player, no macro grid.
-  loadPlayerWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED);
+const playerParam = new URLSearchParams(location.search).get("player");
+if (playerParam === "1" || playerParam === "cave") {
+  // ROADMAP.md M0 (?player=1, surface) and M1 (?player=cave). No macro grid.
+  loadPlayerWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, playerParam === "cave" ? "cave" : "surface");
 } else {
   enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
 }
@@ -1279,7 +1298,8 @@ function frame(): void {
     engagement?.ids,
     autoCamera.listBattleEngagements().map((e) => e.ids),
     moveEffects.jigglingAgentIds(),
-    focusGroupIds()
+    focusGroupIds(),
+    viewLayer()
   );
   drawEventPopups(ctx, eventPopups.active());
   drawMoveFlashes(ctx, moveEffects.activeFlashes());
