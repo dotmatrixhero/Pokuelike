@@ -369,9 +369,12 @@ Build:
 
 **Done when:** something follows you out of the chamber.
 
-**STATUS: BUILT, NOT DONE — 0 of 5 seeds followed. The numbers are the
-user's to rule on.** Everything in the Build list above exists except the
-dispersal-offer overlay (deferred until a follower happens at all):
+**STATUS: 4 of 5 seeds followed out of the chamber** (`validateBond.ts`,
+after lever 1, levers 2-6, and a numbers pass — "we need to bump our
+numbers to make it easier. 4/5" — see this section's later paragraphs
+and TODO.md for the full history). Target met; the dispersal-offer
+overlay is the one Build item still not started (deferred until a
+follower happened at all, which it now has):
 - **Threat signature** (`threat.ts`) replaces the human's `isPredator`
   stopgap: base 1, crouched ×0.5, just moved ×1.25, club +0.5, torch +0.3,
   cloak ×0.6. Prey flee the player inside their own radius × signature ×
