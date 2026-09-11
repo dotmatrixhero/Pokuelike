@@ -11852,6 +11852,103 @@ and only the boundary ramps. `fieldCanvasAt` carries that reasoning.
 - Verified live on both layers: soft falloff underground (lit chamber ->
   remembered corridor -> unseen) and on the surface.
 
+
+## Fixed: attack that actually connects, radial hemispheres, utility moves
+
+- [x] **Peek showed only HP and Hunger.** The 30px handle sat *inside* the 74px
+      sheet, leaving 44px for four bars. It floats above the sheet now and is
+      translucent (`rgba(23,28,36,.55)`), costing the sheet nothing. Direct ask:
+      "Make handle semitransparent and lift up a little." All four bars fit.
+- [x] **"Attacking does not seem to work."** Two separate faults.
+      1. **Every failure said the same wrong thing.** Out of range, on
+         cooldown and genuinely-empty all returned a bare `false`, and the UI
+         printed **"Nothing there to hit."** — a lie when the creature is
+         visibly three tiles away. Each case now says what actually happened.
+      2. **A tile-targeted swing can never reliably hit a moving target.**
+         `advancePlayerTurn` *queues* the action and ticks the world until the
+         player's own action tick; everything else moves in between. Measured:
+         a chase closed to melee and reported "your swing finds nothing" three
+         times while the Venonat walked on. `PlayerAction.attack` gained
+         `targetId`, resolved against the target's **live** position at swing
+         time, with range re-checked there (the point is to hit a moving
+         thing, not to gain reach).
+- [x] **Chosen behaviour for a fleeing target: chase and strike.** Of the three
+      options raised — say out-of-range / follow and hit when possible / swing
+      at the tile — the middle one, because the engine already works that way
+      for the other half of this same feature: player.ts's own comment on ally
+      commands says "an out-of-range order just walks the partner one step
+      closer next tick". The player getting different rules from their own ally
+      would be the odd thing. Swinging at the tile is what happened before, and
+      is a wasted turn hitting dirt. Out-of-range is still said plainly when
+      there is no path, and the chase gives up after 14 steps ("You lose
+      Venonat.") rather than running forever.
+      Measured: distance 4 → 2 with "You move in on Venonat."; an adjacent
+      swing takes a Venonat 21 → 15 hp with "You strike Venonat!"
+- [x] **A cooldown row in the command menu did nothing at all when tapped** —
+      `if (onCooldown) return;` without closing the menu, so the menu stayed up
+      and swallowed the next click, which reads as the whole attack flow being
+      broken. Found while chasing the report above. It now closes and says
+      "Tackle is not ready yet."
+- [x] **Radial hemispheres.** Direct ask: "THINGS you can do from your current
+      position should be on one section of radial (ex bottom hemisphere), and
+      things you target should be on the other... That way I don't have to
+      precisely target the tile I'm on to drink water when I'm standing on it."
+      Top half aims at the pressed tile (Go / Attack / Command); bottom half is
+      computed from where the player STANDS and is identical whichever tile you
+      press (Gather / Drink / Loot / Butcher / Stairs). Measured on a real
+      press: `moveHere` top, `gather` and `drink` bottom.
+- [x] New engine `selfVerbsFor`. Not expressible as `verbsForTile(agent.pos)`:
+      `drink` there asks whether the PASSED tile is water, so querying your own
+      tile never reported it — you stand *beside* the pond, not in it. Caught
+      by the bottom hemisphere coming back empty. 4 tests.
+- [x] **Utility moves were unreachable by the player, entirely.** They fired
+      only through utilityMoves.ts's ambient 15%-per-tick roll, which wild
+      agents get for free and a player — having no ambient behaviour — never
+      got at all. Extracted `applyUtilityMoveEffects`, added `useUtilityMove`
+      (no random gate: you picked it, it fires) and a `useUtilityMove`
+      PlayerAction; the command menu lists them separately as instant, since
+      every utility effect is centred on the user. 6 tests.
+- [x] Verified live: 12/12 this round, plus touch-drag 7/7 and round-2 14/14
+      still green. Engine **1639** tests, data 475, build clean.
+- [ ] A quarry faster than you still escapes — the chase closed 4 → 2 but never
+      landed. That reads as correct (you cannot outrun something quicker), but
+      it does mean ranged options matter more than the current one-move
+      movepool allows. Worth watching once players have more than Tackle.
+
+## Fixed: terrain moves keep tile targeting (a regression, caught by the user)
+
+Direct note: *"tile target might be necessary for like cut to cut a tree down
+or something later. Or like rock throw to clear paths.."*
+
+- [x] **A real regression, introduced one commit earlier.** `Fell` (axe →
+      tree → deadwood) and `Clear` (machete → bush/flora/seedling) are flagged
+      `utilityMove: true` **and** carry a `terrainEffect`. Routing every
+      `utilityMove` through the new instant "no target needed" path therefore
+      swallowed both: `applyUtilityMoveEffects` has no terrainEffect branch, so
+      the move spent its turn AND its cooldown and changed no tile. Worse than
+      doing nothing — it consumed the move.
+- [x] The split is now on `terrainEffect`, not on `utilityMove`: a move that
+      aims at GROUND keeps the pick-a-move-then-pick-a-tile path. Only
+      `utilityMove && !terrainEffect` is instant.
+- [x] `useUtilityMove` refuses a terrain move outright, so the engine cannot
+      silently waste one even if a future caller gets the routing wrong.
+- [x] **`targetId` never attaches to a terrain move.** Naming a creature that
+      happens to be standing on the tree would swing the axe at the creature
+      instead of the tree — the whole point of a terrain move is the ground.
+      A terrain move also never starts a chase: the tree is not running away,
+      you are simply too far from it, and it says so.
+- [x] `verbsForTile` now offers Attack on your OWN tile when its terrain is
+      workable (tree/bush/flora/seedling/boulder), so you can clear the bush
+      you are standing in — previously `here` suppressed it.
+- [x] Verified live through the real UI, not just unit tests: Fell appears as
+      a tile-targeted row ("tap, then tap a tile"), picking it asks for a tile,
+      the tree becomes floor, **Deadwood lands in the pack**, and the log says
+      "You fell it, and gather deadwood." 6/6.
+- [x] Two regression tests so this cannot rot again: `useUtilityMove` must
+      refuse a terrain move without spending its cooldown, and `attack` with a
+      terrain move must actually change the tile.
+- [x] Full suite green: engine **1647**, data 475, build clean; round-3 12/12
+      and touch-drag 7/7 still pass.
 ## Egg defence: parents now notice in time and guard the nest
 
 Direct report: *"Eggs are being eaten and that's good. But parents are not

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
-import { examineTile, verbsForTile } from "../src/tileQuery.js";
+import { examineTile, selfVerbsFor, verbsForTile } from "../src/tileQuery.js";
 import type { Agent, World } from "../src/types.js";
 
 function makeAgent(id: string, x: number, y: number, extra: Partial<Agent> = {}): Agent {
@@ -162,5 +162,41 @@ describe("verbsForTile", () => {
         expect(verbsForTile(w, me, "surface", { x, y }).length).toBeLessThanOrEqual(6);
       }
     }
+  });
+});
+
+describe("selfVerbsFor", () => {
+  it("offers drink while standing BESIDE water, which verbsForTile on your own tile cannot", () => {
+    const w = world();
+    setTile(w, "surface", 5, 4, "water");
+    const me = makeAgent("me", 4, 4);
+    w.agents.push(me);
+    // The distinction this function exists for.
+    expect(verbsForTile(w, me, "surface", { x: 4, y: 4 })).not.toContain("drink");
+    expect(selfVerbsFor(w, me, "surface")).toContain("drink");
+  });
+
+  it("offers gather and stairs from the tile underfoot", () => {
+    const w = world();
+    setTile(w, "surface", 4, 4, "food");
+    const me = makeAgent("me", 4, 4);
+    w.agents.push(me);
+    expect(selfVerbsFor(w, me, "surface")).toContain("gather");
+    setTile(w, "surface", 4, 4, "stairsDown");
+    expect(selfVerbsFor(w, me, "surface")).toContain("useStairs");
+  });
+
+  it("offers loot and butcher for a corpse one step away, diagonals included", () => {
+    const w = world();
+    const me = makeAgent("me", 4, 4);
+    w.agents.push(me, makeAgent("body", 5, 5, { alive: false }));
+    expect(selfVerbsFor(w, me, "surface")).toEqual(expect.arrayContaining(["loot", "butcher"]));
+  });
+
+  it("offers nothing on bare ground with nothing around", () => {
+    const w = world();
+    const me = makeAgent("me", 9, 9);
+    w.agents.push(me);
+    expect(selfVerbsFor(w, me, "surface")).toEqual([]);
   });
 });

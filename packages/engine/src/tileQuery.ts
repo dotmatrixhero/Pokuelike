@@ -51,6 +51,8 @@ export interface TileReport {
 }
 
 const CONCEALING: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["bush", "shelter"]);
+/** Terrain a `terrainEffect` move can act on today — axe's Fell, machete's Clear (packages/data crafting.ts). */
+const TERRAIN_WORKABLE: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["tree", "bush", "flora", "seedling", "boulder"]);
 
 export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport | undefined {
   const tile = tileAt(world, layer, pos.x, pos.y);
@@ -115,10 +117,51 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   if (adjacent && report.drinkable) verbs.push("drink");
   // A living occupant who is not you is a target. A merely adjacent tile is
   // also swingable — terrain-effect moves (axe on a tree) target ground.
-  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here)) verbs.push("attack");
+  // A living occupant who is not you is a target; so is adjacent ground (a
+  // terrain move — Fell, Clear — swings at the tile). Your OWN tile counts
+  // too when its terrain is something a terrain move could act on, so you can
+  // clear the bush you are standing in.
+  const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
+  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");
   if (report.corpseId && adjacent) verbs.push("loot", "butcher");
   if (here && report.stairs) verbs.push("useStairs");
 
+  return verbs;
+}
+
+/**
+ * What this agent can do from where it is standing, independent of any tile it
+ * might be pointing at.
+ *
+ * Direct ask: "THINGS you can do from your current position should be on one
+ * section of radial... That way I don't have to precisely target the tile I'm
+ * on to drink water when I'm standing on it."
+ *
+ * Not expressible as `verbsForTile(agent.pos)`: `drink` there asks whether the
+ * PASSED tile is water, so querying your own tile never reports it — you are
+ * standing beside the pond, not in it. Same for a corpse one step away. This
+ * asks the question the other way round: given where I am, what is in reach?
+ */
+export function selfVerbsFor(world: World, agent: Agent, layer: Layer): TileVerb[] {
+  const here = examineTile(world, layer, agent.pos);
+  if (!here) return [];
+  const verbs: TileVerb[] = [];
+  if (here.harvestable.length > 0 && here.harvestsLeft > 0) verbs.push("gather");
+
+  // Anything within one step, diagonals included.
+  let waterNear = false;
+  let corpseNear = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const near = examineTile(world, layer, { x: agent.pos.x + dx, y: agent.pos.y + dy });
+      if (!near) continue;
+      if (near.drinkable) waterNear = true;
+      if (near.corpseId) corpseNear = true;
+    }
+  }
+  if (waterNear) verbs.push("drink");
+  if (corpseNear) verbs.push("loot", "butcher");
+  if (here.stairs) verbs.push("useStairs");
   return verbs;
 }
