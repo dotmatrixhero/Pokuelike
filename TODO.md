@@ -9519,3 +9519,38 @@ the biomes. Dissect it and make it good quality"*.
       older rip — not touched here.
 - [ ] Fog-of-war in play mode still has hard tile-square edges; the same
       smoothed-mask trick `drawWaterLayer` uses would fix it.
+
+## Built: plants stop being squashed, and the black bars were a sheet grid line
+
+Direct asks: *"can you make the berries and the decal they are on better?"*,
+*"The black lines are problematic too"*, *"You see the straight lines around the
+tiles with berries on em?"*
+
+- [x] **Every standing object was squashed into a 20x20 box.** Berry plants are
+      21x34 and trees are 32x42/48x57, so all of them were vertically
+      compressed by about a third and read squat. `drawStandingSprite` now fits
+      width to the tile, keeps the source aspect, and anchors the base on the
+      tile's bottom edge (capped at 1.7 tiles tall). Tiles draw top-to-bottom,
+      so the overflow lands on rows already painted.
+- [x] **The fertile patch was a flat saturated green rectangle.** `floor_grass_1`
+      is a solid bright green with a dot pattern, so a berry's soil mound sat on
+      it like a plant in a tray. It now uses the real `grass_deep` ground art,
+      windowed in world space, with a rounder and softer mask.
+- [x] **The black bars were a black top row baked into every `seedling_*.png`** —
+      a 1px sheet grid rule the original rip cropped in. Squashed into 20px it
+      passed for part of the sprite; drawn at true aspect it became a crisp
+      black bar one tile wide floating above every seedling. 47 of them in one
+      frame, now 0.
+- [x] Method worth keeping: the bars were found by monkey-patching
+      `fillText`/`drawImage`/`fillRect` on the scene canvas for ONE frame,
+      dumping the canvas in the same evaluate, and correlating the artifact's
+      pixel coordinates with the draw that produced them. Four guesses from
+      reading the code (highlight boxes, move flashes, a missing emoji glyph,
+      the fertile stamp) were all wrong, and two of them were disproven by
+      disabling the code and re-counting the artifact.
+- [x] `scripts/strip_sheet_gridlines.py` erases solid-black opaque edge rules
+      from ripped tiles. Idempotent; also caught a left-edge rule on
+      `food_cheri.png`. The seedlings' own rip script was never committed, which
+      is why this is a separate maintenance pass rather than a fix in the rip.
+- [ ] Some berry sprites' soil mounds read as hard brown rectangles rather than
+      rounded mounds — likely the same class of rip artifact, not checked.

@@ -190,6 +190,23 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
   drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
 }
 
+/**
+ * An object that STANDS on a tile — a tree, a bush, a berry plant — drawn at
+ * its own aspect ratio, fitted to the tile's width and anchored so its base
+ * sits on the tile's bottom edge.
+ *
+ * Every one of these used to be squashed into a TILE_SIZE square: `tree_1` is
+ * 32x42 and the berry plants are 21x34, so they were being vertically
+ * compressed by a third and rendered squat. They are drawn in top-to-bottom
+ * row order, so the overflow above the tile lands on rows already painted.
+ * Height is capped so a very tall sprite can't cover the tile two rows up.
+ */
+const STANDING_MAX_TILES = 1.7;
+function drawStandingSprite(ctx: CanvasRenderingContext2D, sprite: CanvasImageSource, srcW: number, srcH: number, x: number, y: number): void {
+  const height = Math.min(TILE_SIZE * STANDING_MAX_TILES, (srcH / srcW) * TILE_SIZE);
+  ctx.drawImage(sprite, x * TILE_SIZE, (y + 1) * TILE_SIZE - height, TILE_SIZE, height);
+}
+
 /** Draws tile `(x, y)`'s cell of a multi-tile ground patch, windowed in world space so neighbouring tiles are continuous. */
 function drawPatchCell(ctx: CanvasRenderingContext2D, patch: HTMLImageElement, x: number, y: number): void {
   const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
@@ -337,13 +354,15 @@ function tintedSprite(sprite: HTMLImageElement, key: string, tint: Rgb): HTMLCan
   let cached = tintedSpriteCache.get(cacheKey);
   if (cached) return cached;
   const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
+  // The sprite's own pixel size, not a TILE_SIZE box — `drawStandingSprite`
+  // does the fitting, and pre-squashing here would undo it.
+  canvas.width = sprite.width;
+  canvas.height = sprite.height;
   const tctx = canvas.getContext("2d")!;
-  tctx.drawImage(sprite, 0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.drawImage(sprite, 0, 0);
   tctx.globalCompositeOperation = "source-atop";
   tctx.fillStyle = rgbaToCss(tint, 0.4);
-  tctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.fillRect(0, 0, canvas.width, canvas.height);
   tintedSpriteCache.set(cacheKey, canvas);
   cached = canvas;
   return cached;
@@ -409,7 +428,10 @@ function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, 
   } else if (plantSprite) {
     ctx.save();
     ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
-    ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    // Berry plants are 21x34 — drawn into a TILE_SIZE square they were
+    // squashed by a third and read as squat potted things. Same
+    // stands-on-the-tile treatment trees and bushes get.
+    drawStandingSprite(ctx, plantSprite, plantSprite.width, plantSprite.height, x, y);
     ctx.restore();
   } else if (unripe) {
     ctx.save();
@@ -488,29 +510,32 @@ function isFertileDecalTerrain(terrain: TerrainKind): boolean {
   return terrain === "food" || terrain === "flora" || terrain === "seedling";
 }
 
-const contiguousStampCache = new Map<HTMLImageElement, Map<number, HTMLCanvasElement>>();
-function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: boolean, openLeft: boolean, openRight: boolean): HTMLCanvasElement {
-  const key = (openUp ? 8 : 0) | (openDown ? 4 : 0) | (openLeft ? 2 : 0) | (openRight ? 1 : 0);
-  let perImage = contiguousStampCache.get(img);
-  if (!perImage) {
-    perImage = new Map();
-    contiguousStampCache.set(img, perImage);
+let patchScratch: HTMLCanvasElement | undefined;
+function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: boolean, openLeft: boolean, openRight: boolean, x: number, y: number): HTMLCanvasElement {
+  if (!patchScratch) {
+    patchScratch = document.createElement("canvas");
+    patchScratch.width = TILE_SIZE;
+    patchScratch.height = TILE_SIZE;
   }
-  const cached = perImage.get(key);
-  if (cached) return cached;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
-  const octx = canvas.getContext("2d")!;
-  octx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+  const octx = patchScratch.getContext("2d")!;
+  octx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "source-over";
+  octx.filter = "none";
+  // The source is a multi-tile ground patch now, so it gets the same
+  // world-space windowing every other ground draw uses — a run of fertile
+  // tiles is continuous ground, not the same cell stamped repeatedly. Built
+  // on a shared scratch canvas rather than cached per (image, sides), since
+  // the right cell now depends on the tile.
+  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
+  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
+  octx.drawImage(img, sx, sy, GROUND_CELL, GROUND_CELL, 0, 0, TILE_SIZE, TILE_SIZE);
   octx.globalCompositeOperation = "destination-in";
-  octx.filter = "blur(1.5px)";
-  const r = TILE_SIZE / 3;
-  const left = openLeft ? 0 : 1;
-  const top = openUp ? 0 : 1;
-  const right = TILE_SIZE - (openRight ? 0 : 1);
-  const bottom = TILE_SIZE - (openDown ? 0 : 1);
+  octx.filter = "blur(2.5px)";
+  const r = TILE_SIZE / 2.2;
+  const left = openLeft ? 0 : 2;
+  const top = openUp ? 0 : 2;
+  const right = TILE_SIZE - (openRight ? 0 : 2);
+  const bottom = TILE_SIZE - (openDown ? 0 : 2);
   octx.beginPath();
   octx.roundRect(left, top, right - left, bottom - top, [
     openUp || openLeft ? 0 : r, // top-left
@@ -520,8 +545,7 @@ function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: 
   ]);
   octx.fillStyle = "black";
   octx.fill();
-  perImage.set(key, canvas);
-  return canvas;
+  return patchScratch;
 }
 
 /**
@@ -1136,7 +1160,8 @@ function drawWorldTiles(
             // most a few tinted copies total, reused across every tile that
             // happens to roll the same variant, instead of one cache entry
             // per map tile ever drawn.
-            ctx.drawImage(tintedSprite(sprite, sprite.src, floraTint), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            const tinted = tintedSprite(sprite, sprite.src, floraTint);
+            drawStandingSprite(ctx, tinted, tinted.width, tinted.height, x, y);
           } else {
             // A tiling surface texture far bigger than a tile (mud is
             // 128x128, wall 144x144) gets a tile-sized window drawn 1:1
@@ -1148,7 +1173,7 @@ function drawWorldTiles(
             if (win) {
               ctx.drawImage(sprite, win.sx, win.sy, TILE_SIZE, TILE_SIZE, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
             } else {
-              ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+              drawStandingSprite(ctx, sprite, sprite.width, sprite.height, x, y);
             }
           }
           drawTileVignette(ctx, x, y);
@@ -1194,8 +1219,8 @@ function drawWorldTiles(
           const openLeft = x > 0 && isFertileDecalTerrain(surface[y * world.width + (x - 1)]!.terrain);
           const openRight = x < world.width - 1 && isFertileDecalTerrain(surface[y * world.width + (x + 1)]!.terrain);
           ctx.save();
-          ctx.globalAlpha = 0.15 + fertility * 0.4;
-          ctx.drawImage(contiguousPatchStamp(fertilePatch, openUp, openDown, openLeft, openRight), x * TILE_SIZE, y * TILE_SIZE);
+          ctx.globalAlpha = 0.18 + fertility * 0.42;
+          ctx.drawImage(contiguousPatchStamp(fertilePatch, openUp, openDown, openLeft, openRight, x, y), x * TILE_SIZE, y * TILE_SIZE);
           ctx.restore();
         }
 

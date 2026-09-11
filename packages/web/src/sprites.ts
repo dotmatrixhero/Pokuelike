@@ -318,16 +318,19 @@ export function getScatterDecal(x: number, y: number, biome: string | undefined,
 }
 
 /**
- * A green "fertile ground" patch drawn under food/flora/seedling tiles —
- * direct ask: "can we decal a little green patch under the plants."
- * `floor_grass_1` was one of the two building-sheet crops originally
- * excluded from the general floor pool for clashing with the cave/dirt
- * palette (see getFloorTexture's doc comment) — that mismatch is exactly
- * why it works *here*: growing ground is supposed to read as visibly
- * different from the surrounding cave floor, not blend in with it.
+ * The "fertile ground" patch drawn under food/flora/seedling tiles — direct
+ * ask: "can we decal a little green patch under the plants."
+ *
+ * This is the real `grass_deep` biome ground, not the old `floor_grass_1`
+ * crop. That one was a flat, fully saturated green with a dot pattern, and on
+ * the new ground art it read as a bright green SWATCH — a UI rectangle with
+ * the berry's soil mound sitting on it like a plant in a tray, rather than a
+ * richer patch of earth. `grass_deep` is a real, desaturated ground texture
+ * from the same sheet, so the patch reads as lusher ground and the plant
+ * reads as growing out of it.
  */
 export function getFertilePatch(): HTMLImageElement | null {
-  return loadSprite("tile_floor_grass_1", "/tiles/floor_grass_1.png");
+  return loadSprite("ground_grass_deep", "/tiles/ground/grass_deep.png");
 }
 
 /**
