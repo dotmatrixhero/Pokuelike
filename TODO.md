@@ -9359,3 +9359,41 @@ fire nearby — showed "apple · needs a fire nearby", not craftable).
 
 Full suite: data 400/400 (including the reachability test's own printed
 craft order, which now visibly includes all four dishes at the end).
+
+## Backlog: 9-item playtest wishlist, direct asks verbatim, not yet built
+
+Rapid-fire list, tracked in full so nothing gets lost while working
+through it a slice at a time:
+
+1. "my allies should do what i do, so if i drink they should look for
+   water in the area too. if i gather or eat they should do that too" —
+   ally mirrors the player's own verb.
+2. "they should eat things in their inventory if they have eidble stuff
+   when hungry" — ally self-feeds from carried food.
+3. "change attack for player moves to also be targeted, like allies
+   moves" — player's own attack should use the same pick-a-move-then-
+   click-a-tile flow the command menu already gives bonded partners,
+   not the instant last-faced-direction swing it has now.
+4. "ally doesn't seem to engage much in combat. if i target a unit with a
+   move it should go do that and continue to fight and engage until i
+   like walk away they should follow or something" — a commanded attack
+   order should persist (re-engage the same target repeatedly) instead
+   of resolving once and clearing.
+5. "get rid of fire building as a direct action - make it a crafting
+   thing that sets down a campfire" — remove the instant `lightFire`
+   PlayerAction/'v' key; a craftable campfire item you place instead.
+6. "perhaps instead of campfire building, there's a command button that
+   allows you to set behaviors for each of your allies; patrol, hunt,
+   defend, etc." — standing per-ally behavior modes, not just one-shot
+   commanded moves. Relationship to #5 (same UI slot? both built
+   independently?) not yet clarified.
+7. "have herd hp and status bars like easy to pin so you can see all; at
+   once" — a docked panel showing every current ally's HP/status, not
+   just the one selected agent's.
+8. "can't loot or butcher dead units. need to be able to - maybe you need
+   a knife to do more but that should be a thing." — corpses currently
+   give nothing; want a real loot/butcher action, knife improving yield.
+9. "itd be nice if it was easy to uise keyboard to select inventory
+   items and use them as expected, comman pokemon, select attacks
+   easily, etc." — keyboard-first UX across inventory/command/attack
+   menus.
