@@ -11020,6 +11020,99 @@ the bushes"*.
       in the gradient's strong zone. Looks like foliage catching light, so
       left alone.
 
+## Built: render perf — cached the two static layers
+
+Direct report: *"framerate from all the rendering is suffering lol."*
+
+- [x] **Profiled per pass before changing anything.** At 113ms/frame:
+
+      | pass | ms/frame |
+      |---|---|
+      | ground base (per-tile) | **36.5** |
+      | `drawTileVignette` (per-tile) | **30.1** |
+      | scatter fine | 2.1 |
+      | scatter features | 0.9 |
+      | water layer (already cached) | 0.11 |
+
+      Two passes were 66ms of a 113ms frame, and **both were redrawing
+      identical pixels every frame**.
+- [x] **Ground layer cached** to an offscreen canvas. Its inputs (biome ground
+      patch, elevation field) are functions of position only. Keyed per world
+      and layer by a signature over which tiles are `sand` — deliberately NOT a
+      hash of all terrain, since crops grow and fires burn every tick and that
+      would invalidate it every frame for changes it does not draw.
+- [x] The scatter passes stay OUTSIDE the cache: their contact shadows and
+      golden rim track the sun, and baking them would freeze both at whatever
+      hour the cache was built. They are ~3ms, so there was nothing to win.
+- [x] **Vignette layer cached.** `tileLight` is a pure hash of (x, y), so the
+      whole ambient vignette never changes — one blit now instead of a
+      save/globalAlpha/drawImage/restore per tile, 5400 times a frame, for a
+      0.03-alpha gradient.
+- [x] Frame rate, headless software Chromium (same harness throughout):
+
+      | | before | after |
+      |---|---|---|
+      | paused | 9.2 | **20.1** |
+      | default speed | 7.7 | **17.7** |
+      | max sim speed | 5.6 | 7.9 |
+
+      Max speed barely moves because the SIM dominates there, not rendering.
+- [x] **A bug this nearly shipped, caught only by looking.** The first version
+      of the ground cache ran on frame one, before any ground PNG had decoded,
+      so every tile took the not-loaded fallback and the cache baked a whole
+      map of dark fill — and since the cache key never changed, kept it
+      forever. The map rendered entirely black. The profiler cheerfully
+      reported 22.4 fps, *better* than the honest 20.1, because it had stopped
+      drawing the ground at all. `drawGroundBacking` now flags a pending-art
+      frame and `groundLayerCanvas` refuses to store it.
+- [x] **Viewport cull** (next round). The canvas is the whole world at
+      TILE_SIZE per tile — 1800x1200 for a 90x60 map — and `#canvas-wrap`
+      scrolls it while CSS scales it, so every frame painted all 5400 tiles to
+      show a fraction of them. The browser only COMPOSITES the visible part; it
+      does not skip the paint. main.ts now hands the renderer the visible rect
+      each frame (`setVisibleRect`), and the tile loop, both scatter passes,
+      the fog loop, the agent loop, the full-canvas fills and every cached-layer
+      blit are all bounded by it.
+- [x] Margins are deliberately generous (3 tiles, 6 on top): standing sprites
+      are bottom-anchored and up to 1.7 tiles tall, scatter decals jitter half a
+      tile, and a cactus is four tiles tall — art whose own tile is off-screen
+      can still reach onto the screen.
+- [x] Verified painted, not just faster: sampled the visible region at three
+      scroll positions and counted unpainted pixels — 0.09% to 0.12%, which is
+      sprite outlines, not gaps. Checked the scrolled frame by eye for torn
+      edges, and re-checked play mode since the fog loop is culled too.
+- [ ] Still uncapped: `waterSignature` and `sandSignature` walk all tiles every
+      frame to check the caches. Measured negligible (~0.05ms) but they are the
+      last full-grid work per frame.
+
+### Render perf, cumulative
+
+| | start | + layer caches | + viewport cull |
+|---|---|---|---|
+| paused | 9.2 | 20.1 | **27.2** |
+| default speed | 7.7 | 17.7 | **22.3** |
+| max sim speed | 5.6 | 7.9 | **9.0** |
+
+Headless software Chromium, same harness throughout. Max sim speed gains least
+because the SIM dominates there, not rendering — worth knowing before chasing
+more draw-side wins.
+
+## Changed: top playback speed is 9x, was 32x
+
+Direct ask: *"Let's max the speed at x9 not x32."*
+
+- [x] `SPEED_STEPS` is now `[0.25, 0.5, 1, 2, 4, 6, 8, 9]`, verified live on the
+      slider. Same number of steps, so the slider range and
+      `DEFAULT_SPEED_INDEX` (1x) are untouched.
+- [x] **8 stays on the ladder deliberately**, even though 8 -> 9 is a small last
+      step. `AUTO_CAM_SLOWDOWN_SPEED` is 8, and `setSpeed` resolves a speed with
+      `indexOf` and `return`s silently on -1 — dropping 8 would have quietly
+      disabled auto-camera's slowdown instead of failing loudly. Worth knowing
+      before anyone reshuffles this ladder again: any constant that reaches
+      `setSpeed` has to be a member.
+- [x] Fixed a stale "32x" example in index.html's own comment about the
+      battle-step speed readout.
+
 ## Built: play-mode UX, Slice 0 — stop losing runs, stop fighting the camera
 
 Design doc: `PLAY_UX_DESIGN.md`. Direct ask: *"I need a better ux for play

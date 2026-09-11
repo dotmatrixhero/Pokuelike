@@ -1,6 +1,6 @@
 import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
-import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
@@ -20,7 +20,15 @@ import { drawRegionThumbnail } from "./overworldMap.js";
  * comfortable pace, or blast through to see a longer-run outcome."
  */
 const BASE_TICKS_PER_SEC = 6;
-const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
+/**
+ * Direct ask: "Let's max the speed at x9 not x32."
+ *
+ * 8 stays on the ladder even though 8 -> 9 is a small last step, because
+ * `AUTO_CAM_SLOWDOWN_SPEED` is 8 and `setSpeed` resolves a speed by
+ * `indexOf` and silently no-ops on a miss — dropping 8 would quietly disable
+ * auto-camera's slowdown rather than fail loudly.
+ */
+const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 6, 8, 9] as const;
 const DEFAULT_SPEED_INDEX = 2; // 1x
 
 /**
@@ -2564,6 +2572,16 @@ function frame(): void {
   // events happening around the map") — every other currently-tracked
   // battle, shown dimmer, clickable (see the canvas click handler above).
   refreshRegionBanner();
+  // Tell the renderer what is actually on screen before it draws. The canvas
+  // is the whole world (TILE_SIZE per tile) and `#canvas-wrap` scrolls it
+  // while CSS scales it by `zoom`, so without this every frame paints all of
+  // a 90x60 map to show a fraction of it.
+  setVisibleRect({
+    left: canvasWrap.scrollLeft / zoom,
+    top: canvasWrap.scrollTop / zoom,
+    width: canvasWrap.clientWidth / zoom,
+    height: canvasWrap.clientHeight / zoom,
+  });
   drawWorld(
     ctx,
     world,
