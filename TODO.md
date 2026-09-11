@@ -12254,3 +12254,67 @@ doing, stats etc."*
       Control: `display: none` before looking, `flex` after, `none` again
       after the backdrop tap.
 - [x] Full suite green: engine 1675, data 476, web build clean.
+
+## Fixed: recipes lost on the stairs, and stairs you cannot see
+
+Direct report: *"I'm losing all my recipes when going up and down stairs. Also
+stairs a are really hard to see. Make em have a light radius like sunbeams"*
+
+### Recipes were never on the player — the catalog was on the world
+
+- [x] **Root cause.** `World.recipes`, `World.items` and
+      `World.playerBaseMoves` are per-world catalogs, and only level 1
+      (`createCaveScenario`) ever set them. `buildDeeperLevel` calls
+      `generateWorld`, which does not. So the instant you took the stairs,
+      `player.ts`'s `craft` looked up `world.recipes?.[id]` on a world with no
+      catalog at all and every recipe became unmakeable.
+- [x] The player's own `knownRecipes` travelled with them the whole time and
+      was never the thing that was lost — which is why it looked like the
+      recipes were "gone" rather than the menu being empty.
+- [x] Measured before the fix, on a real generated run: **depth 2 had 0
+      recipes** (`expected 0 to be greater than 5`). Depth 1 had the full set.
+- [x] Fixed in `linkLevels`, not in each level's construction: a level can be
+      built a dozen ways, but it cannot become part of a run without passing
+      through that function. Assigned by reference, not cloned, so the levels
+      cannot drift apart — there is a test asserting object identity.
+- [x] Live through the real Pack menu, down-down-up: **14 craftable rows on
+      every level** (1 → 2 → 3 → 2), and a Torch actually crafted on level 2.
+- [x] 3 tests in `packages/data/test/caveCatalog.test.ts`, written to fail
+      first (3/3 failed before the fix).
+- [x] **Same family as the fog bug.** Both were "state that belongs to the run
+      is stored per-World, and only the first World ever got it." Worth
+      watching for a third: anything set inside `createCaveScenario` and not
+      in `linkLevels` has this shape.
+
+### Stairs are a light source now
+
+- [x] `vision.ts` grew a named `LIGHT_TERRAIN` set — sunbeam, stairsDown,
+      stairsUp, exit. Stairs were the one thing in a cave you HAVE to find and
+      the only landmark with no light of its own, so they were invisible until
+      you walked onto them.
+- [x] The right lever precisely because `isLitTile` is one choke point feeding
+      three things: `LIT_TILE_SIGHT_RADIUS` (visible 14 tiles off through the
+      dark with clear line of sight), `ambientLightAt` (standing beside them
+      is full light, so your own radius opens up), and `drawFog` (rendered
+      undimmed). A palette tweak would have bought none of that.
+- [x] Deliberately NOT extended to `flora.ts`'s `isNearSunbeam` (germination)
+      or `harvest.ts`'s deadwood-near-sunbeam check: those ask "is there real
+      sunlight here", which is a different question from "can you see this".
+      Stairs should not grow plants.
+- [x] `examineTile`'s `lit` field now uses the same predicate, so Look and the
+      renderer cannot disagree.
+- [x] **Measured with its control**: the same tile, at the same distance, in
+      the same dark — `beforeFloor: false, afterStairs: true`. Live in the
+      app, not just a unit test. Screenshots before/after show solid black
+      turning into a lit pocket with the staircase at its centre.
+- [x] 7 tests, including the range cap (past `LIT_TILE_SIGHT_RADIUS` it is
+      still invisible) and line of sight (a wall still blocks it) — a light
+      you can see through walls would be a different bug.
+- [x] Proved they fail without the change: 6 failed / 1 passed.
+- [x] Full suite green: engine **1682**, data **479**, web build clean.
+
+### Open, not fixed
+
+- [ ] The stairs tile's own ART still reads as a flat dark square against the
+      lit floor around it — visible now, but as a hole rather than as steps.
+      Flagging rather than changing it: that is a look-and-feel call.

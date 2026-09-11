@@ -1,6 +1,7 @@
 import type { Agent, Layer, TerrainKind, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { harvestLeft, harvestableAt } from "./harvest.js";
+import { isLightSource } from "./vision.js";
 import type { MaterialId } from "./harvest.js";
 
 /**
@@ -41,7 +42,7 @@ export interface TileReport {
   /** Fouled ground: standing here poisons you (sludge.ts). */
   poisons: boolean;
   drinkable: boolean;
-  /** A sunbeam: the lit tiles a cave run navigates by. */
+  /** A light source: a sunbeam, or — since stairs were invisible until you stood on them — a staircase or the exit. See vision.ts's `LIGHT_TERRAIN`. */
   lit: boolean;
   /** A living agent standing here, if any. */
   occupantId?: string;
@@ -78,7 +79,7 @@ export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport |
     conceals: tile.concealment === true || CONCEALING.has(tile.terrain),
     poisons: tile.terrain === "sludge",
     drinkable: tile.terrain === "water",
-    lit: tile.terrain === "sunbeam",
+    lit: isLightSource(tile.terrain),
     occupantId,
     corpseId,
     stairs: tile.terrain === "stairsDown" ? "down" : tile.terrain === "stairsUp" ? "up" : tile.terrain === "exit" ? "exit" : undefined,

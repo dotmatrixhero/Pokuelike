@@ -1,4 +1,4 @@
-import type { Agent, Layer, Vec2, World } from "./types.js";
+import type { Agent, Layer, TerrainKind, Vec2, World } from "./types.js";
 import { computeVisible, hasLineOfSight } from "./fov.js";
 import { lightLevel } from "./daynight.js";
 import { stormFovPenalty } from "./weather.js";
@@ -40,11 +40,39 @@ export function tileIndex(world: World, x: number, y: number): number {
   return y * world.width + x;
 }
 
-/** A tile is lit if it, or any of its eight neighbours, is a sunbeam. */
+/**
+ * Terrain that gives off its own light underground.
+ *
+ * Sunbeams were the original and only member — the lit trail a cave run
+ * navigates by. Stairs and the exit joined on a direct report: **"stairs are
+ * really hard to see. Make em have a light radius like sunbeams."** They
+ * were the one thing in the cave you HAVE to find and the only landmark with
+ * no light of its own, so they were invisible until you walked onto them.
+ *
+ * Being a light source does two things at once, which is why this is the
+ * right lever rather than a palette tweak: `LIT_TILE_SIGHT_RADIUS` makes the
+ * tile visible from fourteen tiles away through the dark with a clear line of
+ * sight, and `drawFog` renders it undimmed. A staircase now reads across the
+ * room the same way a sunbeam does.
+ *
+ * Deliberately NOT extended to `flora.ts`'s `isNearSunbeam` (germination) or
+ * `harvest.ts`'s deadwood check: those ask "is there real sunlight here",
+ * which is a different question from "can you see this". Stairs should not
+ * grow plants.
+ */
+const LIGHT_TERRAIN: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["sunbeam", "stairsDown", "stairsUp", "exit"]);
+
+/** Whether this tile is itself a light source — see `LIGHT_TERRAIN`. */
+export function isLightSource(terrain: TerrainKind): boolean {
+  return LIGHT_TERRAIN.has(terrain);
+}
+
+/** A tile is lit if it, or any of its eight neighbours, is a light source. */
 export function isLitTile(world: World, layer: Layer, pos: Vec2): boolean {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
-      if (tileAt(world, layer, pos.x + dx, pos.y + dy)?.terrain === "sunbeam") return true;
+      const terrain = tileAt(world, layer, pos.x + dx, pos.y + dy)?.terrain;
+      if (terrain !== undefined && LIGHT_TERRAIN.has(terrain)) return true;
     }
   }
   return false;
