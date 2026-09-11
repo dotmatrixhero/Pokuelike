@@ -48,7 +48,15 @@ describe("createCaveScenario (ROADMAP M1)", () => {
       const reach = sunbeams.map((p) => dist.get(`${p.x},${p.y}`)).filter((d): d is number => d !== undefined);
       expect(reach.length).toBeGreaterThan(0);
       const nearest = Math.min(...reach);
-      expect(nearest).toBeGreaterThanOrEqual(CAVE_SPAWN_MIN_STEPS - 6); // chamber radius + a little
+      // Direct report: "I need more water around the cave... very open, hard
+      // to see" — every water pocket now casts its own small lit halo
+      // (worldgen.ts's `pickUndergroundWaterPockets`), not just the one this
+      // scenario hand-authors around its chosen chamber pocket. `nearest`
+      // is the closest sunbeam ANYWHERE, so an extra pocket's halo landing
+      // a couple of tiles closer to spawn than the chamber alone would is a
+      // real, expected consequence of that — the fudge factor below is
+      // widened accordingly (was -6), not loosened to paper over a break.
+      expect(nearest).toBeGreaterThanOrEqual(CAVE_SPAWN_MIN_STEPS - 9);
       expect(nearest).toBeLessThanOrEqual(CAVE_SPAWN_MAX_STEPS + 2);
 
       // And the player is standing in the dark, not on a lit tile.

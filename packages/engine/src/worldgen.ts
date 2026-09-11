@@ -1743,37 +1743,64 @@ function keepOnlyLargestFloorRegion(grid: Uint8Array, width: number, height: num
 }
 
 /**
- * Radius of the guaranteed underground water pocket — deliberately modest,
+ * Radius of a guaranteed underground water pocket — deliberately modest,
  * a real spring/pool, not a lake swallowing a big share of the one
  * connected cave region every underground creature needs to keep using.
  */
 const UNDERGROUND_WATER_POCKET_RADIUS = 3;
 /**
+ * How many separate pockets a cave gets — direct report: "I need more
+ * water around the cave... very open, hard to see what's going on." One
+ * radius-3 pool on a 90×60 map read as a near-desert; a handful spread
+ * across the cave (same "several small features, not one big one"
+ * reasoning `STONE_OUTCROP_COUNT` already uses) gives real oases to walk
+ * between without turning the cave into a lake.
+ */
+const UNDERGROUND_WATER_POCKET_COUNT = 4;
+/** Manhattan distance kept between pocket centers so all of them don't land bunched in one corner — same role `STONE_OUTCROP_MIN_SPACING` plays. */
+const UNDERGROUND_WATER_POCKET_MIN_SPACING = 10;
+/**
  * Among the real floor cells in the (already-finalized, single-connected)
  * cave region, how large a top slice (by real surface water-density proxy)
  * counts as "wet enough" to be a candidate center — kept well under 1 so
- * the pocket lands somewhere genuinely correlated with real surface water,
+ * pockets land somewhere genuinely correlated with real surface water,
  * not anywhere in the cave at random, while still leaving real seed-to-seed
- * variety in exactly where within that wet region it lands.
+ * variety in exactly where within that wet region each one lands.
  */
 const UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION = 0.15;
+/**
+ * Each water pocket also lights the dry floor around it — direct report:
+ * caves underground have no day/night cycle and, outside the hand-authored
+ * level-1 chamber, no light source ever existed at all (`ambientLightAt`:
+ * a sunbeam tile is the *only* underground light). A cave you can't see
+ * across reads as "very open" precisely because nothing marks it — this
+ * gives every water pocket a small lit halo, the same "walk toward the
+ * light" fantasy vision.ts already calls the whole M1 pitch, now reachable
+ * on every level instead of just the starting one. Chance-based (not a
+ * solid ring) so the halo reads as scattered glow, not a drawn circle.
+ */
+const UNDERGROUND_POCKET_LIGHT_RADIUS = UNDERGROUND_WATER_POCKET_RADIUS + 2;
+const UNDERGROUND_POCKET_LIGHT_CHANCE = 0.4;
 
 /**
- * Picks the real underground cells a guaranteed water pocket occupies —
+ * Picks the real underground cells a handful of guaranteed water pockets
+ * occupy, plus the dry floor cells around them that catch their light —
  * direct ask: "places with deep water... needs to be reflected in the
  * underground as well; the surface also influences how the underground
- * is." Before this, underground generation had zero awareness of Surface
- * at all (`generateUndergroundCaves`' own doc comment: "independent of
- * everything Surface-only above"). The center is picked from real floor
- * cells (never inside solid rock), weighted toward whichever (x, y)
- * columns Surface's own `effectiveWaterDensityAt` already reads as
- * wettest — a real vertical correlation, not two independent rng draws
- * that happen to share a footprint by coincidence. Always returns a
- * non-empty set when the cave has any floor at all — "100% will always
- * spawn at least some [water] underground," per the direct ask, is a hard
- * guarantee here, not a sparse roll the way landmarks are.
+ * is," and the later "I need more water around the cave" report that
+ * turned one pocket into several. The first (and, on a sparse seed,
+ * possibly only) center is picked from real floor cells weighted toward
+ * whichever (x, y) columns Surface's own `effectiveWaterDensityAt` already
+ * reads as wettest — a real vertical correlation, not two independent rng
+ * draws that happen to share a footprint by coincidence — with the rest
+ * shuffled from the same wet-weighted candidate pool and greedily spaced
+ * apart, same shuffle-then-space approach `pickUndergroundStoneOutcrops`
+ * already uses. Always returns at least one non-empty water pocket when
+ * the cave has any floor at all — "100% will always spawn at least some
+ * [water] underground," per the original direct ask, stays a hard
+ * guarantee, not a sparse roll the way landmarks are.
  */
-function pickUndergroundWaterPocket(world: World, width: number, height: number, grid: Uint8Array, rng: () => number): Set<number> {
+function pickUndergroundWaterPockets(world: World, width: number, height: number, grid: Uint8Array, rng: () => number): { water: Set<number>; lit: Set<number>; primary?: Vec2 } {
   const candidates: { i: number; density: number }[] = [];
   for (let i = 0; i < grid.length; i++) {
     if (grid[i]) continue; // wall
@@ -1782,25 +1809,97 @@ function pickUndergroundWaterPocket(world: World, width: number, height: number,
     const density = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, x, y) ?? 0;
     candidates.push({ i, density });
   }
-  if (candidates.length === 0) return new Set();
+  const water = new Set<number>();
+  const lit = new Set<number>();
+  if (candidates.length === 0) return { water, lit };
 
   candidates.sort((a, b) => b.density - a.density);
   const topSlice = candidates.slice(0, Math.max(1, Math.ceil(candidates.length * UNDERGROUND_WATER_CANDIDATE_TOP_FRACTION)));
-  const seedIndex = topSlice[Math.floor(rng() * topSlice.length)]!.i;
-  const center: Vec2 = { x: seedIndex % width, y: Math.floor(seedIndex / width) };
+  // The strongest single candidate always seeds the first pocket (keeps the
+  // pre-existing "correlates with the wettest column" guarantee exact) and
+  // is reported back as `primary` — `@pokuelike/data`'s `createCaveScenario`
+  // builds its hand-authored starting chamber around this exact pocket, so
+  // it needs a deterministic way to find THIS one once several exist
+  // nearby, not just "whichever water tile a plain nearest-to-center search
+  // happens to hit first."
+  const first = topSlice[Math.floor(rng() * topSlice.length)]!;
 
-  const pocket = new Set<number>();
-  forEachTileInJitteredCircle(center, UNDERGROUND_WATER_POCKET_RADIUS, width, height, rng, (x, y) => {
-    const i = y * width + x;
-    if (!grid[i]) pocket.add(i); // never carve water through solid rock
-  });
-  // The jittered circle can, in principle, land entirely on cells the
-  // jitter itself excluded (a real but rare edge case) — the center cell is
-  // always real floor by construction (drawn from `candidates` above), so
-  // falling back to just that one tile keeps the "always non-empty" promise
-  // even in that unlucky case.
-  if (pocket.size === 0) pocket.add(seedIndex);
-  return pocket;
+  const centers: Vec2[] = [];
+  let primary: Vec2 | undefined;
+
+  // Carves one pocket's water (plus its lit halo) at `cand`'s position.
+  // Cells adjacent to a DIFFERENT already-placed pocket's water are
+  // skipped — a real, sampled bug: without this, two pockets carved close
+  // enough could fuse, occasionally walling the earlier one in on every
+  // side with no dry floor left adjacent to it at all (`createCaveScenario`'s
+  // own BFS out of the primary pocket then had nowhere to go, and the
+  // player spawned standing ON the water tile itself).
+  function carve(cand: { i: number; density: number }): void {
+    const x = cand.i % width;
+    const y = Math.floor(cand.i / width);
+    centers.push({ x, y });
+
+    const thisPocket = new Set<number>();
+    const before = water.size;
+    forEachTileInJitteredCircle({ x, y }, UNDERGROUND_WATER_POCKET_RADIUS, width, height, rng, (px, py) => {
+      const i = py * width + px;
+      if (grid[i]) return; // never carve water through solid rock
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = px + dx, ny = py + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const ni = ny * width + nx;
+          if (water.has(ni) && !thisPocket.has(ni)) return;
+        }
+      }
+      water.add(i);
+      thisPocket.add(i);
+    });
+    // The jittered circle can, in principle, land entirely on cells the
+    // jitter itself excluded (a real but rare edge case) — the center cell
+    // is always real floor by construction, so falling back to just that
+    // one tile keeps the "always non-empty" promise even in that unlucky
+    // case. Only matters for the very first pocket, which is the one this
+    // guarantee is actually about.
+    if (water.size === before && centers.length === 1) water.add(cand.i);
+
+    forEachTileInJitteredCircle({ x, y }, UNDERGROUND_POCKET_LIGHT_RADIUS, width, height, rng, (px, py) => {
+      const i = py * width + px;
+      if (!grid[i] && !water.has(i) && rng() < UNDERGROUND_POCKET_LIGHT_CHANCE) lit.add(i);
+    });
+  }
+
+  // Carve the primary pocket FIRST, immediately after picking it — the
+  // exact same rng-stream position the old single-pocket algorithm used
+  // for it, so its shape never differs from what already worked before
+  // any extra pockets existed. The real, sampled bug this guards against:
+  // shuffling the rest of the candidate pool before carving `first` shifts
+  // every jitter draw `first`'s own circle consumes, which occasionally
+  // produced a fully wall-enclosed pocket with no floor escape at all (the
+  // player spawned standing IN the water, `reach.length` 0 in cave.test.ts).
+  carve(first);
+  primary = centers[0];
+
+  // The rest of the candidate pool is shuffled so additional pockets don't
+  // always land in the same density-sorted order relative to each other —
+  // carved only now, after primary, so none of their rng draws can shift
+  // primary's own shape.
+  const rest = topSlice.filter((c) => c !== first);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = rest[i]!;
+    rest[i] = rest[j]!;
+    rest[j] = tmp;
+  }
+  for (const cand of rest) {
+    if (centers.length >= UNDERGROUND_WATER_POCKET_COUNT) break;
+    const x = cand.i % width;
+    const y = Math.floor(cand.i / width);
+    if (centers.some((c) => Math.abs(c.x - x) + Math.abs(c.y - y) < UNDERGROUND_WATER_POCKET_MIN_SPACING)) continue;
+    carve(cand);
+  }
+
+  return { water, lit, primary };
 }
 
 /**
@@ -1908,7 +2007,8 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
 
   keepOnlyLargestFloorRegion(grid, width, height);
 
-  const waterCells = pickUndergroundWaterPocket(world, width, height, grid, rng);
+  const { water: waterCells, lit: litCells, primary } = pickUndergroundWaterPockets(world, width, height, grid, rng);
+  world.primaryUndergroundWaterAt = primary;
   const stoneCells = pickUndergroundStoneOutcrops(width, height, grid, waterCells, rng);
 
   for (let y = 0; y < height; y++) {
@@ -1920,6 +2020,8 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
         setTile(world, "underground", x, y, "water", 0);
       } else if (stoneCells.has(i)) {
         setTile(world, "underground", x, y, "stone");
+      } else if (litCells.has(i)) {
+        setTile(world, "underground", x, y, "sunbeam");
       }
     }
   }

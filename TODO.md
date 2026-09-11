@@ -10116,3 +10116,105 @@ in the pack.
 **Tests**: `gather.test.ts` — re-issuing `gather` mid-gather doesn't reset
 `turnsLeft`, and the gather still completes normally afterward. Full
 engine suite: 1565/1565. `tsc --noEmit` clean across all 4 packages.
+
+## Built: more underground water + light, and a real lit trail toward the exit
+
+Direct ask, verbatim: *"I need more water around the cave. In general the
+starting cave feels very open and hard to see what's going on. Can't find
+the exit. Need some better design to help guide."*
+
+Read the actual generation code before proposing anything (design-mode
+first — no edits until the menu below was answered). Three separate,
+confirmed root causes, all compounding:
+
+1. **Water**: every 90×60 cave level got exactly ONE guaranteed water
+   pocket (radius 3, ~30 tiles) — `pickUndergroundWaterPocket`. That was
+   the entire water supply for the map.
+2. **"Very open, hard to see"**: `ambientLightAt` (vision.ts) — a
+   `sunbeam` tile is the ONLY light source underground (no day/night cycle
+   down there). Sunbeam tiles were placed only on the surface during
+   generation, plus level 1's own hand-authored starting-chamber ring.
+   Levels 2-5 (`buildDeeperLevel`, the plain cave generator) had ZERO
+   light sources anywhere — the entire level sits at the dark sight
+   radius (~4 tiles) start to finish, even though "walk toward the light"
+   is vision.ts's own documented "whole M1 fantasy."
+3. **Can't find the exit**: `attachStairsDown`/`attachExit` place the
+   stairs at the single farthest walkable point from the map's center,
+   with zero hint mechanism of any kind.
+
+Presented a menu (per this project's own "give a menu with a
+recommendation" convention, since this touches worldgen tuning) rather
+than picking for them: **1) how strong should exit-guidance be** — a lit
+trail biased along the real walk, scattered light with no path bias, or
+an explicit compass/hint — chose **the lit trail**; **2) how much more
+water** — 3-4 small pockets vs. fewer bigger ones — chose **3-4 pockets**.
+
+**Built**:
+- `worldgen.ts`: `pickUndergroundWaterPocket` → `pickUndergroundWaterPockets`
+  — up to `UNDERGROUND_WATER_POCKET_COUNT` (4) pockets, greedily spaced
+  apart (same shuffle-then-space idiom `pickUndergroundStoneOutcrops`
+  already used), each with a chance-based lit halo of `sunbeam` tiles
+  around it (`UNDERGROUND_POCKET_LIGHT_RADIUS`/`_CHANCE`) — real ambient
+  light on every level that generates underground caves at all, not just
+  level 1's hand-authored one.
+- `types.ts`/`worldgen.ts`: `World.primaryUndergroundWaterAt` — the exact
+  center of the strongest (wet-density-weighted) pocket, so a consumer
+  that wants "the" main pocket can find that SAME one deterministically
+  once several exist nearby.
+- `scenario.ts`: `attachStairsDown`/`attachExit` now anchor from
+  `world.stairsUpAt` (where the player actually lands on this level) —
+  more correct than the old "recompute a center-ish point independently"
+  — and a new `litTrailToward` places two small lit waypoints at 1/3 and
+  2/3 of the real walk-distance toward the stairs/exit. Real diegetic
+  guidance (reuses the exact "walk toward the light" mechanic, not a
+  compass or a HUD arrow), and it only guards the WALK — it still doesn't
+  point straight at the goal.
+
+**Three real bugs found and fixed along the way, each caught only by live
+verification, not by reading the diff**:
+
+1. Adding `pickUndergroundWaterPockets` broke every `createCaveScenario`
+   test (`reach.length` 0 — no sunbeam reachable from spawn) *before* I'd
+   even gotten to the stairs/trail work. Root cause: my first draft
+   shuffled the remaining candidate pool BEFORE carving the primary
+   pocket's own jittered circle — extra `rng()` calls in between shifted
+   every jitter draw the primary circle's own shape depended on, relative
+   to the untouched-order old single-pocket code, occasionally producing
+   a shape that mattered downstream. Fixed by carving the primary pocket
+   immediately after picking it, exactly matching the old rng-stream
+   position, before any shuffling happens.
+2. That alone wasn't enough — `world.primaryUndergroundWaterAt` (the
+   pocket's own generation CENTER) is several tiles deep into the water,
+   surrounded on every side by more water out to the pocket's own radius.
+   `walkDistances` never steps onto ANY water tile, so a BFS seeded
+   exactly at a pool's center found nothing and stayed a single-point
+   map — `createCaveScenario`'s player spawned standing IN the water
+   (`tile: "water"`, confirmed live via a throwaway diagnostic script).
+   Tried `findWalkableNear` next — also failed silently, because
+   `canEnterWater` only rejects LARGE water bodies; an ordinary small
+   pond is unrestricted for every agent, so it just returned the water
+   tile back unchanged. Fixed with a small new `nearestDryLand` helper in
+   scenario.ts that excludes water outright regardless of body size.
+3. Even after both fixes, one seed (202) missed the "light isn't visible
+   from spawn" tolerance by exactly 1 step (15 vs. the old ≥16 floor).
+   Real, expected: with light scattered around every pocket now (not just
+   the hand-authored chamber), an unrelated pocket's halo can legitimately
+   land a couple of tiles closer to spawn than the chamber alone would —
+   widened `cave.test.ts`'s fudge factor accordingly (documented why, not
+   silently loosened).
+
+**Live-verified in the browser** (seed 88888, `?player=cave`): world stats
+read off `window.__pokuelike.world` directly — 118 water tiles / 124
+sunbeam tiles on level 1 (was ~34 water / 0 sunbeam before), and level 2
+(previously-pitch-black `buildDeeperLevel`) now shows 107 sunbeam tiles
+where it had zero. No console errors across a real walked stretch (148
+ticks), needs decayed normally, spawn still lands in the dark as designed
+(screenshot confirms no sunbeam visible at tick 0).
+
+**Tests**: `worldgen.test.ts` — several separate water components per
+cave (not one), sunbeam tiles present on every seed, connectivity test's
+own local `isWalkable` helper updated for the new `"sunbeam"` walkable
+terrain (same stale-fixture shape hit before with `"stone"`). `cave.test.ts`/
+`caveRun.test.ts` — all passing, including the widened tolerance. Full
+suite: engine 1567/1567, data 400/400. `tsc --noEmit` clean and a real
+`pnpm --filter @pokuelike/web build` clean across all 4 packages.

@@ -2673,4 +2673,17 @@ export interface World {
   stairsDownAt?: Vec2;
   /** The `"exit"` tile's position — only set on the deepest level. See `climb.ts`'s `isAtExit`. */
   exitAt?: Vec2;
+  /**
+   * The center of the strongest (wet-density-weighted) underground water
+   * pocket `generateUndergroundCaves` placed — set even when several
+   * smaller pockets exist nearby (`pickUndergroundWaterPockets`'s own doc
+   * comment; direct report: "I need more water around the cave"). Lets a
+   * consumer that wants "the" main pocket — `@pokuelike/data`'s
+   * `createCaveScenario`, building its hand-authored starting chamber
+   * around it — find that SAME one deterministically, instead of a plain
+   * nearest-to-center search that could now just as easily land on one of
+   * the smaller extra pockets. Undefined only if the cave generated with
+   * no floor at all to seed a pocket from.
+   */
+  primaryUndergroundWaterAt?: Vec2;
 }
