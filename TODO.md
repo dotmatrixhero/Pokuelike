@@ -11466,4 +11466,34 @@ the word and `GRADE["cave"]` comes out and badlands moves instead.
 - A highland-dominant zone is ~77% wall: 783 walkable tiles of 5,400.
 - Pale rectangles still appear where `sand` terrain meets water: the sand
   coverage field is 0/1 per tile and only the bilinear upscale softens it.
-- Fog of war still has hard tile edges.
+- ~~Fog of war still has hard tile edges.~~ Done, see below.
+
+## Fog of war is soft now
+
+Direct ask: *"Fog of war softness would be nice."*
+
+Fifth and last thing in the renderer that resolved a field to one value per
+tile and filled a rectangle with it. Per tile, fog is a hard-edged circle of
+squares around the player and a stepped rectangle around everything
+remembered.
+
+`drawFog` now rasterises fog DEPTH one pixel per tile and bilinearly upscales
+it, so the light falls off over about a tile instead of switching at a tile
+border. Same technique as the elevation shading, the ground textures, the
+biome tints and the mountain mass.
+
+- The three depths used to be three slightly different colours as well —
+  (5,6,10) opaque, (4,6,14) at 0.66, (4,6,16) at 0.32. At those alphas the hue
+  difference is imperceptible and it stopped them from being one interpolable
+  field, so they are one colour at three alphas.
+- **Cached, keyed on the vision sets plus `world.tick`.** Unlike the ground
+  layer this runs every frame, but in player mode the clock only advances when
+  the player acts, so the field rebuilds about once per turn instead of 60
+  times a second.
+- Measured in player mode in the cave: median **16.6 ms, 60 fps**, p95 18.0 ms
+  — no measurable cost. (The before/after here is honest-only on the after
+  number: the "before" dev server had already hot-reloaded the restored code by
+  the time it was measured, so both readings are the new build. The screenshots
+  are the real evidence.)
+- Verified live on both layers: soft falloff underground (lit chamber ->
+  remembered corridor -> unseen) and on the surface.

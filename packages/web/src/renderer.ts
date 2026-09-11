@@ -1438,27 +1438,74 @@ function tileVisible(world: World, vision: Vision | undefined, x: number, y: num
  * tiles the player can see but that no sunbeam lights get a lighter wash
  * too, so the chamber reads as *lit* and the corridor as merely *seen*.
  */
+/**
+ * The three depths of fog, as alpha over one colour.
+ *
+ * They used to be three slightly different colours as well — (5,6,10) opaque,
+ * (4,6,14) at 0.66, (4,6,16) at 0.32. At those alphas the hue difference is
+ * imperceptible and it stopped the three from being one interpolable field,
+ * so they are one colour at three alphas now.
+ */
+const FOG_COLOUR: Rgb = [4, 6, 12];
+const FOG_UNSEEN = 1;
+const FOG_REMEMBERED = 0.66;
+/** Underground only: visible but unlit, so a chamber reads as *lit* and a corridor as merely *seen*. */
+const FOG_UNLIT = 0.32;
+
+const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElement }>();
+
+/**
+ * Fog of war, drawn over the ground and under everything alive (agents, crop
+ * emoji), exactly where `drawDayNightTint` sits: a tile never seen is solid
+ * dark; a tile seen before but not now is drawn dimmed — the memory of the
+ * map, with nothing alive on it (agents and crop identity on unseen tiles are
+ * never drawn at all, see those passes). Underground, tiles the player can see
+ * but that no sunbeam lights get a lighter wash too.
+ *
+ * Drawn as one smoothly interpolated field, not a fill per tile. Per tile it
+ * is a hard-edged circle of squares around the player and a stepped rectangle
+ * around everything remembered — the same quantisation the elevation shading,
+ * the ground textures, the biome tints and the mountain mass all had. Depth is
+ * rasterised one pixel per tile and bilinearly upscaled, so the light falls
+ * off over about a tile instead of switching at a tile border.
+ *
+ * Cached and keyed on the vision sets plus `world.tick`: this runs every
+ * frame, but in player mode the clock only advances when the player acts, so
+ * the field is rebuilt about once per turn rather than 60 times a second.
+ */
 function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | undefined): void {
   if (!vision) return;
   const explored = vision.explored[activeViewLayer];
   const underground = activeViewLayer !== "surface";
-  ctx.save();
-  const view = culledBounds(world);
-  for (let y = view.y0; y < view.y1; y++) {
-    for (let x = view.x0; x < view.x1; x++) {
-      const idx = y * world.width + x;
-      if (vision.visible.has(idx)) {
-        if (!underground || isLitTile(world, activeViewLayer, { x, y })) continue;
-        ctx.fillStyle = "rgba(4, 6, 16, 0.32)";
-      } else if (explored?.has(idx)) {
-        ctx.fillStyle = "rgba(4, 6, 14, 0.66)";
-      } else {
-        ctx.fillStyle = "#05060a";
+
+  let signature = Math.imul(world.tick + 1, 2654435761) ^ Math.imul((explored?.size ?? 0) + 1, 40503);
+  for (const idx of vision.visible) signature = Math.imul(signature ^ idx, 16777619);
+  signature = (signature ^ (underground ? 0x5bf03635 : 0)) >>> 0;
+
+  const cached = fogCache.get(world);
+  if (!cached || cached.signature !== signature) {
+    const width = world.width * TILE_SIZE;
+    const height = world.height * TILE_SIZE;
+    const layer = cached?.layer ?? document.createElement("canvas");
+    layer.width = width;
+    layer.height = height;
+    const lctx = layer.getContext("2d")!;
+    lctx.clearRect(0, 0, width, height);
+    lctx.fillStyle = rgbToCss(FOG_COLOUR);
+    lctx.fillRect(0, 0, width, height);
+    lctx.globalCompositeOperation = "destination-in";
+    lctx.imageSmoothingEnabled = true;
+    lctx.drawImage(fieldCanvas(world, (i) => {
+      if (vision.visible.has(i)) {
+        if (!underground) return 0;
+        const x = i % world.width;
+        return isLitTile(world, activeViewLayer, { x, y: (i - x) / world.width }) ? 0 : Math.round(FOG_UNLIT * 255);
       }
-      ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    }
+      return Math.round((explored?.has(i) ? FOG_REMEMBERED : FOG_UNSEEN) * 255);
+    }), 0, 0, width, height);
+    fogCache.set(world, { signature, layer });
   }
-  ctx.restore();
+  blitVisible(ctx, fogCache.get(world)!.layer, world);
 }
 
 /**
