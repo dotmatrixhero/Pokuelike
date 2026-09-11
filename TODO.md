@@ -10691,3 +10691,44 @@ tiles with berries on em?"*
       drying a water tile, a Sludge hit, or mangrove generation. A fresh world
       at tick 90 has zero mud tiles, so this was checked by painting a patch
       into a live world.
+
+## Built: one ground texture per biome, plus a sparse landmark layer
+
+Direct ask: *"Mine stuff for all our biomes. Our like wetlands or whatever look
+great. The rest are struggling."*
+
+- [x] **`grass` and `grass_deep` were BYTE-IDENTICAL**, so jungle rendered
+      exactly like grassland. Found by diffing the emitted patches against each
+      other, not by looking at them — the seeds were different, the output was
+      not. The rip script now refuses to emit two identical grounds.
+- [x] **`wetland` had no entry at all** in either `BIOME_GROUND` or
+      `BIOME_SCATTER`, so it fell through to the cave floor.
+- [x] Twelve biomes now have twelve distinct grounds, each seeded off a
+      measured tone in the sheet: grass / grass_forest / grass_deep / marsh /
+      dirt / shore / sand / clay / grass_dry / stone / frost / snow.
+- [x] **The seed pixel now actually decides the tone.** `same_tone` re-anchored
+      on the panel's most populous cluster, so a seed aimed at warm highland
+      rock drifted to the panel's cool grey and highland came out identical to
+      tundra. The seed is the anchor now.
+- [x] Two mis-seeded targets caught by eye at the contact-sheet stage, both
+      "low contrast" but not ground: jungle's first seed sampled hedge CANOPY,
+      and mangrove's sampled a cave WALL.
+- [x] New sparse FEATURE layer (`BIOME_FEATURES`, `FEATURE_ONE_IN = 47`):
+      cactus x2, palm, boulder, cattail, fallen log. Separate from the fine
+      scatter because size and density are coupled — a three-tile cactus at
+      one-in-seven reads as a hedge.
+- [x] **Regression I introduced and fixed in the same pass:** routing `sand`
+      TERRAIN through the ground patch put it in the tile loop, which runs
+      AFTER `drawElevationShade` — so every sand tile kept full brightness
+      while its surroundings were shaded, a scatter of pale squares. Moved
+      into the ground pass. Unshaded-bright pixels in a frame: 28690 -> 53.
+- [ ] **The default scenario map only contains 3 biomes** (beach 83%, jungle,
+      forest), which is why everything looked sandy for several rounds. Across
+      40 seeds every biome shows up somewhere, so this is that seed, not the
+      generator — but it does make the default world a poor advertisement for
+      the biome system. Worth picking a richer default seed.
+- [ ] The `#seed-input` control does not appear to change the generated world
+      from a script (set value + input/change events, then Watch) — every seed
+      produced the same 3-biome map. Not chased down; it blocked capturing the
+      other 9 biomes on screen, which were verified by data + contact sheet
+      instead of live render.

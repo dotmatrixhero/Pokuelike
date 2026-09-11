@@ -50,20 +50,27 @@ def panel_origin(i):
 # --- ground patches -------------------------------------------------------
 # (output name, panel index, seed pixel inside the panel that is known ground)
 GROUND = [
-    ("grass", 4, (24, 130)),
-    ("grass_deep", 8, (48, 80)),
-    ("sand", 6, (48, 140)),
-    ("dirt", 3, (80, 120)),
-    # Panel 7's fine even pebble floor, not panel 1's chunky hatched brown and
-    # not panel 7's own cobble -- direct report on the first pick: "Rock floor
-    # looks a little chunky." A floor that is mostly walked on wants to be the
-    # calmest texture available, not the most detailed one.
-    ("cave", 7, (60, 140)),
-    ("stone", 11, (40, 120)),
-    ("snow", 9, (56, 140)),
-    ("field", 13, (24, 290)),
+    # One tone per biome. An earlier pass seeded `grass_deep` from the same
+    # mint-grass cell as `grass` and the two came out BYTE-IDENTICAL, so
+    # jungle rendered exactly like grassland -- caught by diffing the emitted
+    # patches against each other, not by looking at them. Every entry here is
+    # now checked against the others for that.
+    ("grass", 4, (24, 130)),          # pale mint, open plains
+    ("grass_forest", 5, (72, 56)),    # mid green under canopy
+    ("grass_deep", 3, (88, 56)),      # dark olive, jungle floor
+    ("marsh", 10, (88, 120)),         # damp bright olive-green, wetland
+    ("sand", 6, (56, 40)),            # desert sand
+    ("shore", 12, (72, 40)),          # very pale cream, beach
+    ("clay", 1, (8, 8)),              # light red-brown, badlands
+    ("grass_dry", 13, (72, 104)),     # dry gold grass, savanna
+    ("stone", 11, (72, 104)),         # warm grey rock, highland
+    ("frost", 11, (24, 152)),         # cool grey, tundra
+    ("snow", 9, (40, 8)),             # white, snow
+    ("cave", 7, (60, 140)),           # fine pebble, underground
+    ("dirt", 3, (80, 120)),           # plain brown dirt
     ("water", 0, (70, 90)),
 ]
+
 
 PATCH_CELLS = 6  # 6x6 source cells = 96x96 px = ~5x5 game tiles per repeat
 
@@ -105,7 +112,13 @@ def distinct_cells(panel, ok, tol=3.0):
 TONE_SPREAD = 8.0
 
 
-def same_tone(cells):
+def ground_colour(panel, seed):
+    """The ground colour a target's seed pixel names."""
+    sx, sy = seed
+    return np.median(panel[max(0, sy - 3):sy + 3, max(0, sx - 3):sx + 3].reshape(-1, 3), axis=0)
+
+
+def same_tone(cells, anchor=None):
     """Keep only the cells that share the ground's dominant TONE.
 
     Measured on this sheet: the "clean ground" cells of a panel can differ in
@@ -117,10 +130,19 @@ def same_tone(cells):
     `TONE_SPREAD` of the modal tone are detail variation; the rest are dropped.
     """
     means = np.array([c.mean(axis=(0, 1)) for c in cells])
-    # Modal tone: the cell with the most neighbours inside the threshold.
-    counts = [(np.linalg.norm(means - m, axis=1) <= TONE_SPREAD).sum() for m in means]
-    anchor = means[int(np.argmax(counts))]
-    return [c for c, m in zip(cells, means) if np.linalg.norm(m - anchor) <= TONE_SPREAD]
+    if anchor is None:
+        # Modal tone: the cell with the most neighbours inside the threshold.
+        counts = [(np.linalg.norm(means - m, axis=1) <= TONE_SPREAD).sum() for m in means]
+        anchor = means[int(np.argmax(counts))]
+    kept = [c for c, m in zip(cells, means) if np.linalg.norm(m - anchor) <= TONE_SPREAD]
+    # The seed pixel is how a target NAMES the tone it wants, so it anchors the
+    # filter. Letting the modal cluster anchor it instead meant a seed aimed at
+    # warm highland rock drifted to the panel's more populous cool grey, and
+    # highland came out identical to tundra.
+    if not kept:
+        nearest = int(np.argmin(np.linalg.norm(means - anchor, axis=1)))
+        kept = [cells[nearest]]
+    return kept
 
 
 def mosaic(cells, rng, n=PATCH_CELLS):
@@ -261,6 +283,16 @@ DECALS = [
     # with the cutout; the art is side-on and the map is top-down.
     ("flower_red_1", 10, 80, 32, 16, 16, (72, 44)),
     ("tuft_green_1", 10, 32, 96, 16, 16, (24, 88)),
+    # Bigger "feature" decals. These are landmarks, not ground detail, so
+    # renderer.ts scatters them from their own much sparser pool -- a cactus
+    # cluster is three tiles tall and would read as a hedge at the fine
+    # scatter layer's density.
+    ("cactus_1", 6, 80, 48, 32, 48, (56, 40)),
+    ("cactus_2", 6, 16, 0, 32, 64, (56, 40)),
+    ("palm_1", 12, 64, 272, 48, 48, (72, 40)),
+    ("boulder_1", 10, 24, 128, 32, 32, (88, 120)),
+    ("cattail_1", 0, 96, 64, 16, 48, (70, 90)),
+    ("log_1", 8, 48, 112, 48, 16, (48, 80)),
     ("blade_cold_1", 9, 20, 72, 12, 40, (24, 216)),
     ("blade_cold_2", 9, 98, 92, 12, 32, (24, 216)),
 ]
@@ -271,18 +303,30 @@ def main():
     os.makedirs(os.path.join(TILES, "ground"), exist_ok=True)
     os.makedirs(os.path.join(TILES, "decal"), exist_ok=True)
 
+    emitted = {}
     for name, pi, seed in GROUND:
         x0, y0 = panel_origin(pi)
         panel = sheet[y0:y0 + PANEL_H, x0:x0 + PANEL_W]
         ok = clean_cells(panel, seed)
         distinct = distinct_cells(panel, ok)
         assert distinct, f"no clean ground found for {name}"
-        cells = same_tone(distinct)
+        cells = same_tone(distinct, ground_colour(panel, seed))
         rng = np.random.default_rng(1234)
         patch = mosaic(cells, rng)
-        Image.fromarray(np.clip(patch, 0, 255).astype(np.uint8)).save(
-            os.path.join(TILES, "ground", f"{name}.png"))
-        print(f"ground/{name}.png  {int(ok.sum())} clean cells, {len(distinct)} distinct, {len(cells)} same-tone")
+        emitted[name] = np.clip(patch, 0, 255).astype(np.uint8)
+        Image.fromarray(emitted[name]).save(os.path.join(TILES, "ground", f"{name}.png"))
+        print(f"ground/{name}.png  {int(ok.sum())} clean cells, {len(distinct)} distinct, {len(cells)} same-tone  tone={tuple(int(v) for v in patch.mean(axis=(0, 1)))}")
+
+    # Two biomes sharing one texture is a decision; two biomes sharing one
+    # texture BY ACCIDENT is a bug that looks like a decision. `grass_deep`
+    # was once seeded from the same cell as `grass` and shipped
+    # byte-identical, so jungle rendered exactly like grassland and nothing
+    # flagged it. Cheap to check, so it is checked.
+    names = list(emitted)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            if emitted[a].shape == emitted[b].shape and np.abs(emitted[a].astype(int) - emitted[b].astype(int)).mean() < 1.0:
+                raise SystemExit(f"ERROR: ground/{a}.png and ground/{b}.png are the same texture — reseed one of them")
 
     for name, pi, cx, cy, w, h, (gx, gy) in DECALS:
         x0, y0 = panel_origin(pi)

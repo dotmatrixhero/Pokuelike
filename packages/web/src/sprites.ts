@@ -235,21 +235,17 @@ export const GROUND_PATCH_CELLS = 6;
  * being real grass art ripped for it.
  */
 const BIOME_GROUND: Record<string, string> = {
-  grassland: "grass",
-  forest: "grass",
-  jungle: "grass_deep",
-  mangrove: "dirt",
-  badlands: "sand",
+  grassland: "grass",        // pale mint, open plains
+  forest: "grass_forest",    // mid green under canopy
+  jungle: "grass_deep",      // dark mossy floor
+  wetland: "marsh",          // damp olive-green
+  mangrove: "dirt",          // brackish mud, plus its own teal tint
+  beach: "shore",            // very pale cream
   desert: "sand",
-  beach: "sand",
-  // Savanna keeps the same sand base Badlands/Desert/Beach use, separated
-  // from them by its own warm gold `BIOME_TINT` wash and its very different
-  // obstacle profile. The farm panel's gold `field` crop is ripped and
-  // available but reads as an agricultural field (furrow dashes and all),
-  // not open dry plains.
-  savanna: "sand",
-  highland: "stone",
-  tundra: "stone",
+  badlands: "clay",          // warm red-brown
+  savanna: "grass_dry",      // dry gold grass
+  highland: "stone",         // warm grey rock
+  tundra: "frost",           // cool grey, plus its own blue tint
   snow: "snow",
 };
 
@@ -273,6 +269,7 @@ const BIOME_SCATTER: Record<string, readonly string[]> = {
   grassland: ["bloom_1", "bloom_2", "flower_red_1", "tuft_green_1"],
   forest: ["fern_1", "bloom_1", "flower_red_1", "moss_1"],
   jungle: ["fern_1", "reed_1", "tuft_green_1", "moss_1"],
+  wetland: ["reed_1", "lily_1", "moss_1", "tuft_green_1"],
   mangrove: ["reed_1", "lily_1", "lily_2", "moss_1"],
   badlands: ["tuft_dry_1", "tuft_dry_2", "succulent_1"],
   desert: ["tuft_dry_1", "tuft_dry_3", "succulent_1"],
@@ -283,8 +280,34 @@ const BIOME_SCATTER: Record<string, readonly string[]> = {
   snow: ["blade_cold_1", "blade_cold_2"],
 };
 
-/** Cave/underground and any world with no biome data. */
+/**
+ * The sparse FEATURE layer: landmark-sized art (a cactus cluster, a palm, a
+ * boulder, a fallen log) scattered far more thinly than the ground detail
+ * above.
+ *
+ * Separate from `BIOME_SCATTER` because size and density are coupled. These
+ * are two to four tiles tall; at the fine layer's one-in-seven they would read
+ * as a hedge rather than as a landmark, and they would bury the ground the
+ * rest of this pass exists to show.
+ */
+const BIOME_FEATURES: Record<string, readonly string[]> = {
+  grassland: ["boulder_1", "log_1"],
+  forest: ["log_1", "boulder_1"],
+  jungle: ["palm_1", "log_1"],
+  wetland: ["cattail_1", "log_1"],
+  mangrove: ["cattail_1", "palm_1", "log_1"],
+  badlands: ["cactus_1", "boulder_1"],
+  desert: ["cactus_1", "cactus_2", "boulder_1"],
+  beach: ["palm_1", "log_1"],
+  savanna: ["cactus_1", "boulder_1", "log_1"],
+  highland: ["boulder_1"],
+  tundra: ["boulder_1", "log_1"],
+  snow: ["boulder_1", "log_1"],
+};
+
 const SCATTER_DEFAULT: readonly string[] = ["moss_1", "tuft_green_1"];
+/** Cave/underground features. */
+const FEATURE_DEFAULT: readonly string[] = ["boulder_1"];
 
 /** Which ground patch a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (grassland vs. forest) apart from a real texture change without duplicating this lookup. */
 export function getFloorBaseName(biome?: string): string {
@@ -313,18 +336,36 @@ export function getGroundPatch(biome?: string, layer?: string): HTMLImageElement
  * stable across frames and across zoom changes.
  */
 export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
-  const pool = (biome ? BIOME_SCATTER[biome] : undefined) ?? SCATTER_DEFAULT;
+  return pickDecal(BIOME_SCATTER, SCATTER_DEFAULT, x, y, biome, oneIn, 31337, 7919);
+}
+
+/** The sparse landmark layer — see `BIOME_FEATURES`. Same placement rules as the fine scatter, different pool, different hash, much lower density. */
+export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
+  return pickDecal(BIOME_FEATURES, FEATURE_DEFAULT, x, y, biome, oneIn, 15485863, 32452843);
+}
+
+function pickDecal(
+  pools: Record<string, readonly string[]>,
+  fallback: readonly string[],
+  x: number,
+  y: number,
+  biome: string | undefined,
+  oneIn: number,
+  saltX: number,
+  saltY: number
+): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
+  const pool = (biome ? pools[biome] : undefined) ?? fallback;
   if (pool.length === 0) return null;
   // Offset so "which tiles get a decal" doesn't correlate with anything else
   // keyed off (x, y) — same reason getFloorOverlay offset its own hash.
-  const h = hashTile(x + 31337, y + 7919);
+  const h = hashTile(x + saltX, y + saltY);
   if (h % oneIn !== 0) return null;
   const name = pool[Math.floor(h / oneIn) % pool.length]!;
   const image = loadSprite(`decal_${name}`, `/tiles/decal/${name}.png`);
   if (!image) return null;
   // A second, independent hash for placement, so two tiles that rolled the
   // same decal don't also land at the same offset within their tile.
-  const j = hashTile(x + 104729, y + 1299709);
+  const j = hashTile(x + saltX + 104729, y + saltY + 1299709);
   return { image, jitterX: ((j % 16) / 16) - 0.5, jitterY: ((Math.floor(j / 16) % 16) / 16) - 0.5 };
 }
 

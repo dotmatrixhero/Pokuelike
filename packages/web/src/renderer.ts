@@ -6,6 +6,7 @@ import {
   getFloorBaseName,
   getGroundPatch,
   getScatterDecal,
+  getFeatureDecal,
   GROUND_CELL,
   GROUND_PATCH_CELLS,
   getFloraSprite,
@@ -175,7 +176,13 @@ function dominantBiomeAt(world: World, x: number, y: number): string | undefined
  */
 function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number): void {
   const biome = dominantBiomeAt(world, x, y);
-  const patch = getGroundPatch(biome, activeViewLayer);
+  // A "sand" TERRAIN tile is ground, so it is painted here in the ground pass
+  // rather than in the tile loop. Drawn in the loop it landed AFTER
+  // `drawElevationShade`, so every sand tile kept full brightness while the
+  // ground around it was shaded — a scatter of pale squares, which is the
+  // exact artifact this pass exists to remove.
+  const terrain = world.tiles[activeViewLayer][y * world.width + x]!.terrain;
+  const patch = terrain === "sand" ? getGroundPatch("beach", "surface") : getGroundPatch(biome, activeViewLayer);
   if (patch && patch.width >= GROUND_CELL) {
     drawPatchCell(ctx, patch, x, y);
     // Elevation shading is NOT applied here — see `drawElevationShade`.
@@ -284,19 +291,32 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
     }
   }
   drawElevationShade(ctx, world);
+  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA);
+  // Landmarks go down after the fine detail so a boulder sits ON the tufts,
+  // not under them.
+  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1);
+}
+
+type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => { image: HTMLImageElement; jitterX: number; jitterY: number } | null;
+
+/** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
+function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
-      const scatter = getScatterDecal(x, y, dominantBiomeAt(world, x, y), SCATTER_ONE_IN);
-      if (!scatter) continue;
+      const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
+      if (!decal) continue;
       const scale = TILE_SIZE / GROUND_CELL;
-      const w = scatter.image.width * scale;
-      const h = scatter.image.height * scale;
+      const w = decal.image.width * scale;
+      const h = decal.image.height * scale;
       ctx.save();
-      ctx.globalAlpha = SCATTER_ALPHA;
+      ctx.globalAlpha = alpha;
+      // Bottom-anchored like every other standing art: a cactus three tiles
+      // tall should have its base on its own tile, not be centred across the
+      // two tiles above it.
       ctx.drawImage(
-        scatter.image,
-        (x + scatter.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2,
-        (y + scatter.jitterY) * TILE_SIZE + (TILE_SIZE - h) / 2,
+        decal.image,
+        (x + decal.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2,
+        (y + decal.jitterY + 1) * TILE_SIZE - h,
         w,
         h
       );
@@ -307,6 +327,8 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
 
 /** One tile in N gets a scatter decal. Decals are up to two tiles across, so this is sparser than it sounds. */
 const SCATTER_ONE_IN = 7;
+/** One tile in N gets a landmark. Far sparser than the fine scatter — see `BIOME_FEATURES` (sprites.ts). */
+const FEATURE_ONE_IN = 47;
 /** Slightly translucent so a decal reads as part of the ground rather than an object sitting on it — real objects (trees, boulders, crops) are drawn opaque later and need to stay distinguishable from ground detail. */
 const SCATTER_ALPHA = 0.85;
 
@@ -1126,19 +1148,11 @@ function drawWorldTiles(
       // treatment right below instead — neither has a fixed piece of art to
       // swap in — so those always fall through here regardless of art
       // availability.
-      // A "sand" TERRAIN tile draws from the same sand ground patch the sand
-      // biomes use, windowed in world space, instead of its own separate
-      // 32x32 crop. The two crops are close but not identical in tone, so a
-      // patch of sand terrain inside a sand biome showed up as a scatter of
-      // slightly-paler squares — the exact artifact this whole pass is about.
-      // On grass it still reads as sand, because the art is sand.
+      // "sand" terrain is ground, and `drawGroundLayer` already painted it —
+      // see drawGroundBacking's own note on why it cannot be drawn here.
       if (tile.terrain === "sand") {
-        const sandPatch = getGroundPatch("beach", "surface");
-        if (sandPatch && sandPatch.width >= GROUND_CELL) {
-          drawPatchCell(ctx, sandPatch, x, y);
-          drawTileVignette(ctx, x, y);
-          continue;
-        }
+        drawTileVignette(ctx, x, y);
+        continue;
       }
 
       if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
