@@ -51,6 +51,8 @@ export interface TileReport {
 }
 
 const CONCEALING: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["bush", "shelter"]);
+/** Terrain a `terrainEffect` move can act on today — axe's Fell, machete's Clear (packages/data crafting.ts). */
+const TERRAIN_WORKABLE: ReadonlySet<TerrainKind> = new Set<TerrainKind>(["tree", "bush", "flora", "seedling", "boulder"]);
 
 export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport | undefined {
   const tile = tileAt(world, layer, pos.x, pos.y);
@@ -115,7 +117,12 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   if (adjacent && report.drinkable) verbs.push("drink");
   // A living occupant who is not you is a target. A merely adjacent tile is
   // also swingable — terrain-effect moves (axe on a tree) target ground.
-  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here)) verbs.push("attack");
+  // A living occupant who is not you is a target; so is adjacent ground (a
+  // terrain move — Fell, Clear — swings at the tile). Your OWN tile counts
+  // too when its terrain is something a terrain move could act on, so you can
+  // clear the bush you are standing in.
+  const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
+  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");
   if (report.corpseId && adjacent) verbs.push("loot", "butcher");
   if (here && report.stairs) verbs.push("useStairs");

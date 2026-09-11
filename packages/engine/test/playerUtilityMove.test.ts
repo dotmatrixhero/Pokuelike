@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorld } from "../src/world.js";
+import { createWorld, setTile, tileAt } from "../src/world.js";
 import { applyPlayerAction } from "../src/player.js";
 import { EventLog } from "../src/events.js";
 import { mulberry32 } from "../src/rng.js";
@@ -90,5 +90,55 @@ describe("player-driven utility moves", () => {
     const { world, me } = playerWith([drain]);
     expect(applyPlayerAction(world, me, { kind: "useUtilityMove", moveId: "leech" }, new EventLog(), undefined, mulberry32(1))).toBe(false);
     expect(me.moveCooldowns?.leech ?? 0).toBe(0);
+  });
+});
+
+describe("terrain moves stay tile-targeted", () => {
+  /**
+   * Direct note: "tile target might be necessary for like cut to cut a tree
+   * down or something later. Or like rock throw to clear paths."
+   *
+   * The trap this guards: Fell and Clear (packages/data crafting.ts) are
+   * flagged `utilityMove: true` AND carry a `terrainEffect`. Routing every
+   * utilityMove through `useUtilityMove` therefore swallowed them — it has no
+   * terrainEffect branch, so the move spent its turn and its cooldown and
+   * felled nothing.
+   */
+  const fell = (): MoveSpec =>
+    ({
+      id: "fell",
+      name: "Fell",
+      type: "normal",
+      category: "status",
+      power: 0,
+      accuracy: -1,
+      pp: 1,
+      cooldownTicks: 10,
+      shape: { kind: "point" },
+      range: { min: 0, max: 1 },
+      utilityMove: true,
+      terrainEffect: { from: ["tree"], to: "floor", yields: "deadwood" },
+    }) as MoveSpec;
+
+  it("useUtilityMove REFUSES a terrain move, so it cannot be silently wasted", () => {
+    const { world, me } = playerWith([fell()]);
+    const ok = applyPlayerAction(world, me, { kind: "useUtilityMove", moveId: "fell" }, new EventLog(), undefined, mulberry32(1));
+    expect(ok).toBe(false);
+    expect(me.moveCooldowns?.fell ?? 0).toBe(0);
+  });
+
+  it("attack with a terrain move fells the targeted tile", () => {
+    const { world, me } = playerWith([fell()]);
+    setTile(world, "surface", 6, 5, "tree");
+    const ok = applyPlayerAction(
+      world,
+      me,
+      { kind: "attack", dx: 1, dy: 0, moveId: "fell", target: { x: 6, y: 5 } },
+      new EventLog(),
+      undefined,
+      mulberry32(1)
+    );
+    expect(ok).toBe(true);
+    expect(tileAt(world, "surface", 6, 5)!.terrain).toBe("floor");
   });
 });

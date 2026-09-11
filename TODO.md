@@ -11914,3 +11914,38 @@ and only the boundary ramps. `fieldCanvasAt` carries that reasoning.
       landed. That reads as correct (you cannot outrun something quicker), but
       it does mean ranged options matter more than the current one-move
       movepool allows. Worth watching once players have more than Tackle.
+
+## Fixed: terrain moves keep tile targeting (a regression, caught by the user)
+
+Direct note: *"tile target might be necessary for like cut to cut a tree down
+or something later. Or like rock throw to clear paths.."*
+
+- [x] **A real regression, introduced one commit earlier.** `Fell` (axe →
+      tree → deadwood) and `Clear` (machete → bush/flora/seedling) are flagged
+      `utilityMove: true` **and** carry a `terrainEffect`. Routing every
+      `utilityMove` through the new instant "no target needed" path therefore
+      swallowed both: `applyUtilityMoveEffects` has no terrainEffect branch, so
+      the move spent its turn AND its cooldown and changed no tile. Worse than
+      doing nothing — it consumed the move.
+- [x] The split is now on `terrainEffect`, not on `utilityMove`: a move that
+      aims at GROUND keeps the pick-a-move-then-pick-a-tile path. Only
+      `utilityMove && !terrainEffect` is instant.
+- [x] `useUtilityMove` refuses a terrain move outright, so the engine cannot
+      silently waste one even if a future caller gets the routing wrong.
+- [x] **`targetId` never attaches to a terrain move.** Naming a creature that
+      happens to be standing on the tree would swing the axe at the creature
+      instead of the tree — the whole point of a terrain move is the ground.
+      A terrain move also never starts a chase: the tree is not running away,
+      you are simply too far from it, and it says so.
+- [x] `verbsForTile` now offers Attack on your OWN tile when its terrain is
+      workable (tree/bush/flora/seedling/boulder), so you can clear the bush
+      you are standing in — previously `here` suppressed it.
+- [x] Verified live through the real UI, not just unit tests: Fell appears as
+      a tile-targeted row ("tap, then tap a tile"), picking it asks for a tile,
+      the tree becomes floor, **Deadwood lands in the pack**, and the log says
+      "You fell it, and gather deadwood." 6/6.
+- [x] Two regression tests so this cannot rot again: `useUtilityMove` must
+      refuse a terrain move without spending its cooldown, and `attack` with a
+      terrain move must actually change the tile.
+- [x] Full suite green: engine **1647**, data 475, build clean; round-3 12/12
+      and touch-drag 7/7 still pass.

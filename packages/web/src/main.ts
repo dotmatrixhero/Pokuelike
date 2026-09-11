@@ -740,13 +740,24 @@ function commitMove(agentId: string | undefined, moveId: string, target: Vec2): 
   if (withinMoveRange(move, distance)) {
     // Name the occupant when there is one: the action sits queued while the
     // world ticks, so a tile alone would miss anything that steps away.
-    const standing = world.agents.find(
-      (a) => a.id !== me.id && a.alive !== false && !a.isEgg && a.layer === me.layer && a.pos.x === target.x && a.pos.y === target.y
-    );
+    // EXCEPT for a terrain move — Fell, Clear — which is aimed at the ground
+    // by definition. Naming a creature standing on the tree would swing the
+    // axe at it instead of the tree.
+    const standing = move.terrainEffect
+      ? undefined
+      : world.agents.find(
+          (a) => a.id !== me.id && a.alive !== false && !a.isEgg && a.layer === me.layer && a.pos.x === target.x && a.pos.y === target.y
+        );
     playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target, targetId: standing?.id });
     return;
   }
-  // Out of reach. If something living is standing there, go and get it.
+  // Out of reach. A terrain move has nothing to chase — the tree is not going
+  // anywhere, you are simply too far from it.
+  if (move.terrainEffect) {
+    say(`${move.name} does not reach that far.`);
+    return;
+  }
+  // If something living is standing there, go and get it.
   const foe = world.agents.find(
     (a) => a.id !== me.id && a.alive !== false && !a.isEgg && a.layer === me.layer && a.pos.x === target.x && a.pos.y === target.y
   );
@@ -1725,11 +1736,15 @@ function openCommandMenu(): void {
   };
   commandMenuBodyEl.appendChild(heading("You"));
   const allMine = me.moves ?? [];
-  // Utility moves have no target — every effect is centred on you or the
-  // ground around you — so they fire on the spot rather than asking for a
-  // tile. Direct ask: "I want to be able to use utility moves too."
-  const myUtility = allMine.filter((m) => m.utilityMove);
-  const myMoves = allMine.filter((m) => !m.utilityMove);
+  // A move with a `terrainEffect` is aimed at GROUND — Fell at a tree, Clear
+  // at a bush — so it keeps the pick-a-move-then-pick-a-tile path even though
+  // it is also flagged `utilityMove`. Routing it through the instant path
+  // below burned the turn and the cooldown and felled nothing, because
+  // `applyUtilityMoveEffects` has no terrainEffect branch. Direct note: "tile
+  // target might be necessary for like cut to cut a tree down or something
+  // later. Or like rock throw to clear paths."
+  const myUtility = allMine.filter((m) => m.utilityMove && !m.terrainEffect);
+  const myMoves = allMine.filter((m) => !m.utilityMove || m.terrainEffect);
   if (allMine.length === 0) commandMenuBodyEl.appendChild(row("No moves.", undefined, () => {}));
   for (const move of myUtility) {
     const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;

@@ -157,7 +157,11 @@ function applyUtilityMoveEffects(world: World, agent: Agent, move: MoveSpec, log
  */
 export function useUtilityMove(world: World, agent: Agent, moveId: string, log: EventLog | undefined, rng: () => number): boolean {
   const move = (agent.moves ?? []).find((m) => m.id === moveId && m.utilityMove);
-  if (!move || agent.moveCooldowns?.[move.id]) return false;
+  // A `terrainEffect` move (Fell, Clear) is flagged utilityMove but aims at
+  // GROUND, and nothing below applies terrain effects — letting one through
+  // here spent its turn and cooldown and changed no tile. It belongs on the
+  // tile-targeted `attack` path instead.
+  if (!move || move.terrainEffect || agent.moveCooldowns?.[move.id]) return false;
   return applyUtilityMoveEffects(world, agent, move, log, rng);
 }
 
