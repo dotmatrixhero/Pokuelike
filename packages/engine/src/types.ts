@@ -1979,6 +1979,25 @@ export interface Agent {
    * default.
    */
   digestingTicksRemaining?: number;
+  /**
+   * Turns already spent eating an egg, and which egg — see predation.ts's
+   * `EGG_EAT_TICKS`.
+   *
+   * Eating an egg used to be instant the moment a raider stood next to one,
+   * which meant a defended nest was no safer than an undefended one: measured
+   * on a controlled board, a raider starting within 5 tiles took the egg every
+   * single time even with a parent standing beside it. Direct ask: "making
+   * eating egg take at least 3 turns, with getting hit interrupting it should
+   * help, yeah?"
+   *
+   * So it is a committed act with a window. Progress resets when the raider is
+   * not adjacent, when it switches to a different egg, and — the point of the
+   * whole thing — whenever the raider takes a hit from anything, cleared at
+   * the single damage site in `resolveHitAgainstTarget`. An undefended egg is
+   * still eaten, it just takes three turns.
+   */
+  eggEatTicks?: number;
+  eggEatTargetId?: string;
 
   /**
    * Cached BFS route (pathfinding.ts's `findPath`) for the current

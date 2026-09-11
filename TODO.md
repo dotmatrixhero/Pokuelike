@@ -11916,3 +11916,83 @@ even with a parent standing next to the egg — which is exactly the reported
 "walks up and eats em". Defect 3 is what closes that: nothing contests the
 meal, and a couple of hits do not stop a healthy raider. Left undone on
 purpose (the pick was 1+2); it is the obvious next slice.
+
+## Eating an egg now takes three turns, and a hit interrupts it
+
+Direct ask: *"making eating egg take at least 3 turns, with getting hit
+interrupting it should help, yeah?"* Better than the veto I had proposed: an
+undefended egg is still eaten, it just takes three turns, so raids stay
+winnable and a defender gets a real window.
+
+- `EGG_EAT_TICKS = 3`, tracked on the raider as `Agent.eggEatTicks` /
+  `eggEatTargetId`. Progress resets when the raider is not adjacent, when it
+  switches eggs, and whenever it takes damage.
+- The interrupt is hooked at the **single damage site** in
+  `resolveHitAgainstTarget`, not in the egg-defence branch, so ANY hit breaks
+  the meal — a parent, a herd-mate, a guardian, or something fighting the
+  raider for its own unrelated reasons.
+- Traced live: `eat=1`, `eat=2`, eaten on the third turn. Two new tests cover
+  the three turns and the reset.
+
+### The existing test that failed was RIGHT to fail
+
+`applyEggEating` had a test asserting one call eats the egg. That is exactly
+the behaviour being removed, so the test was updated rather than the code.
+
+## Two retractions, and one blocker that is not an egg bug
+
+### Retraction 1: the 23% -> 32% egg-survival grid was meaningless
+
+`validateEggRaid.ts`'s first version built its agents by hand and never called
+`ensureCombatProfile`, so the "defender" had **no hp, no stats and NO MOVES**.
+It stood beside its egg in `fight` state, logged `eggDefended` every single
+tick, and could not land a blow. A test that cannot pass is not a measurement.
+Fixed; the harness now backfills a real profile.
+
+### Retraction 2: the r=6/7/8 columns never measured defence
+
+Adding a **NO PARENT control row** — which should be eaten every time —
+immediately showed 5/5 SURVIVAL at r=6,7,8. Those columns were not measuring
+defence at all; `EGG_EAT_DETECT_RADIUS` is 5, so a raider starting further out
+never notices the egg and wanders off. The grid now only sweeps r=1..5, where
+the control correctly reads 0/10 everywhere.
+
+This is the second time in this session that a measurement produced a
+confident number with nothing behind it. Both times a control caught it.
+
+### The real blocker: defenders cannot hit a diagonally adjacent raider
+
+With a real combat profile and the control fixed, the grid is **0/400** — every
+defended cell lost. The trace says why:
+
+```
+t3 P(20,19)hp40 mv4 fight>raider | R(21,20)hp48 eat=- seekFood | cheb=1
+t4 P(20,19)hp40 mv4 fight>raider | R(21,20)hp48 eat=1 seekFood | cheb=1
+t5 P(20,19)hp40 mv4 fight>raider | R(21,20)hp48 eat=2 seekFood | cheb=1
+   >> eggEaten
+```
+
+The parent has 40 hp and four moves, is in `fight` state targeting the raider,
+and is **one diagonal step away for three straight turns without landing a
+single blow**. dx=1, dy=1 — manhattan 2.
+
+That is a known, already-documented, repo-wide bug, not an egg bug.
+`PROMPT_chebyshev.md` describes it and `validateDiagonalReach.ts` measures it;
+run on this branch it still reads:
+
+```
+ORTHOGONAL (manhattan 1): attacks resolved = 39/40
+DIAGONAL   (manhattan 2): attacks resolved =  0/40
+```
+
+Movement is 8-way everywhere (`stepToward` tries the true diagonal FIRST), but
+every combat range check measures manhattan, where a diagonal neighbour is 2
+and a melee move's range is 1. So a raider that closes diagonally — which is
+the approach the engine's own movement prefers — is untouchable.
+
+**Until that is fixed, no amount of egg-defence work can matter**, because the
+interrupt needs a hit to land. Honest limit on my own probe: patching just
+`applyEggDefense`'s own distance to chebyshev did NOT change the grid, so the
+attack that should be happening is going through some other path and I have
+not isolated which. The causal claim rests on the trace plus
+`validateDiagonalReach`, not on a fix I have demonstrated.

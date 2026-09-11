@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { spawnEgg, tickEgg, EGG_INCUBATION_TICKS, EGG_CLUTCH_MIN, EGG_CLUTCH_MAX, pickClutchSize, isLivingEgg } from "../src/eggs.js";
+import { EGG_EAT_TICKS } from "../src/predation.js";
 import { applyEggEating, applyPredationInstincts } from "../src/predation.js";
 import { tickWorld } from "../src/simulation.js";
 import { EventLog } from "../src/events.js";
@@ -198,6 +199,12 @@ describe("predation.ts: applyEggEating (opportunistic, cross-species-only)", () 
     world.agents.push(egg, eater);
     const log = new EventLog();
 
+    // Eating takes EGG_EAT_TICKS committed turns now, not one — the first
+    // two spend the action without finishing.
+    for (let i = 0; i < EGG_EAT_TICKS - 1; i++) {
+      expect(applyEggEating(world, eater, FAKE_CTX, log)).toBe(true);
+      expect(egg.alive).not.toBe(false);
+    }
     const ate = applyEggEating(world, eater, FAKE_CTX, log);
 
     expect(ate).toBe(true);
@@ -205,6 +212,40 @@ describe("predation.ts: applyEggEating (opportunistic, cross-species-only)", () 
     expect(egg.alive).toBe(false);
     expect(world.eggsEaten).toBe(1);
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "eggEaten", eaterId: "scyther-0" }));
+  });
+
+  it("taking a hit resets the part-eaten progress — the raider has to start the three turns over", () => {
+    const world = createWorld(10, 10);
+    const egg = eggAgent({ pos: { x: 5, y: 5 } });
+    const eater: Agent = {
+      id: "scyther-0",
+      species: "scyther",
+      pos: { x: 5, y: 5 },
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds({ hunger: 0.5 }),
+      behavior: "idle",
+      moves: [TEST_MOVE],
+      level: 10,
+    };
+    world.agents.push(egg, eater);
+    const log = new EventLog();
+
+    applyEggEating(world, eater, FAKE_CTX, log);
+    applyEggEating(world, eater, FAKE_CTX, log);
+    expect(eater.eggEatTicks).toBe(EGG_EAT_TICKS - 1);
+
+    // What a defender's hit does to it (predation.ts clears these at the
+    // single damage site; this asserts the consequence, not the mechanism).
+    eater.eggEatTicks = undefined;
+    eater.eggEatTargetId = undefined;
+
+    // Back to square one: two more turns must NOT be enough.
+    applyEggEating(world, eater, FAKE_CTX, log);
+    applyEggEating(world, eater, FAKE_CTX, log);
+    expect(egg.alive).not.toBe(false);
+    applyEggEating(world, eater, FAKE_CTX, log);
+    expect(egg.alive).toBe(false);
   });
 
   it("a same-egg-group (breeding-compatible) species will NOT eat the egg, even starving", () => {

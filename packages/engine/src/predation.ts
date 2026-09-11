@@ -650,6 +650,24 @@ const EGG_EAT_HUNGER_THRESHOLD = 0.9;
 const EGG_EAT_DETECT_RADIUS = 5;
 
 /**
+ * How many consecutive turns a raider must spend adjacent to an egg before it
+ * actually gets the meal.
+ *
+ * Eating used to resolve the instant a raider stood next to an egg, which
+ * made a defended nest no safer than an undefended one — measured on a
+ * controlled board, a raider starting within 5 tiles won every single time
+ * even with a parent standing beside the egg, because a couple of hits do not
+ * stop a healthy animal and nothing else contested the meal.
+ *
+ * Three turns is a real window rather than a veto: an undefended egg is still
+ * eaten, just not instantly, and a defender that lands ONE hit in those three
+ * turns drives the raider off (see `Agent.eggEatTicks`, cleared at the single
+ * damage site in `resolveHitAgainstTarget`). Direct ask: "making eating egg
+ * take at least 3 turns, with getting hit interrupting it should help, yeah?"
+ */
+export const EGG_EAT_TICKS = 3;
+
+/**
  * How close a non-egg-group-compatible agent has to get to an egg before a
  * defender treats it as an active threat worth fighting over.
  *
@@ -853,9 +871,29 @@ export function applyEggEating(world: World, agent: Agent, ctx: LevelingContext 
     // doc comment for why this never lands on the egg's own tile.
     logBehaviorChange(log, world, agent, "seekFood");
     agent.behavior = "seekFood";
+    agent.eggEatTicks = undefined;
+    agent.eggEatTargetId = undefined;
     agent.pos = stepToward(world, agent.layer, agent.pos, egg.pos, agent, undefined, true);
     return true;
   }
+
+  // Adjacent, but the meal is not free — see `EGG_EAT_TICKS`. Switching to a
+  // different egg starts over: this is three turns on THIS egg, not three
+  // turns of standing near eggs in general.
+  if (agent.eggEatTargetId !== egg.id) {
+    agent.eggEatTargetId = egg.id;
+    agent.eggEatTicks = 0;
+  }
+  agent.eggEatTicks = (agent.eggEatTicks ?? 0) + 1;
+  if (agent.eggEatTicks < EGG_EAT_TICKS) {
+    // The action WAS spent — the raider is committed to the egg this turn,
+    // which is what gives a defender something to interrupt.
+    logBehaviorChange(log, world, agent, "seekFood");
+    agent.behavior = "seekFood";
+    return true;
+  }
+  agent.eggEatTicks = undefined;
+  agent.eggEatTargetId = undefined;
 
   grantKillExp(world, agent, egg, ctx, log, rng);
   agent.needs.hunger = 1;
@@ -1275,6 +1313,12 @@ function applySingleDamageInstance(
   defender.hp = Math.max(0, (defender.hp ?? defender.maxHp ?? FALLBACK_MAX_HP) - damage);
   // Passive healing only works out of combat — see `Agent.regenSuppressedTicks`.
   suppressPassiveHealing(defender);
+  // Being hit breaks off a part-eaten egg. Hooked at the damage site rather
+  // than in the egg-defence branch so ANY hit interrupts — a parent, a
+  // herd-mate, a guardian, or something that just happens to be fighting this
+  // raider for its own reasons. See `Agent.eggEatTicks`.
+  defender.eggEatTicks = undefined;
+  defender.eggEatTargetId = undefined;
 
   log?.record({
     kind: "fought",
