@@ -2,6 +2,7 @@ import type { Layer, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { LAYER_ORDER } from "./types.js";
 import { CROP_IDS, FOOD_CROPS, type CropId } from "./crops.js";
+import { DECALS, naturalDecalAt, type DecalSlot } from "./decals.js";
 
 /**
  * What a tile yields to a gatherer — ROADMAP.md M5, HANDOFF.md §3.3.
@@ -37,7 +38,13 @@ import { CROP_IDS, FOOD_CROPS, type CropId } from "./crops.js";
  * itemWeight in the data package's crafting.ts fall back to `MATERIALS`
  * for exactly this reason).
  */
-export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | "meat" | "hide" | CropId;
+export type MaterialId =
+  | "lichen" | "deadwood" | "flint" | "food" | "meat" | "hide"
+  // Gathered off a decal — see decals.ts. Each of these exists because the
+  // map already DRAWS the thing it comes from, so picking it up is reading
+  // the picture rather than a hidden proximity rule.
+  | "fiber" | "shroom" | "bone" | "shell" | "scrap"
+  | CropId;
 
 const CROP_MATERIALS = Object.fromEntries(CROP_IDS.map((id) => [id, { name: FOOD_CROPS[id].name, weight: 1 }])) as Record<CropId, { name: string; weight: number }>;
 
@@ -48,6 +55,11 @@ export const MATERIALS: Record<MaterialId, { name: string; weight: number }> = {
   food: { name: "Berries", weight: 1 },
   meat: { name: "Meat", weight: 2 },
   hide: { name: "Hide", weight: 2 },
+  fiber: { name: "Fiber", weight: 1 },
+  shroom: { name: "Mushrooms", weight: 1 },
+  bone: { name: "Bone", weight: 2 },
+  shell: { name: "Shell", weight: 1 },
+  scrap: { name: "Scrap", weight: 2 },
   ...CROP_MATERIALS,
 };
 
@@ -64,7 +76,7 @@ export const MATERIALS: Record<MaterialId, { name: string; weight: number }> = {
  * — checking a bare `itemKey === "food"` would silently stop recognizing
  * anything else in the pack as edible.
  */
-export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", "meat", ...CROP_IDS];
+export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", "meat", "shroom", ...CROP_IDS];
 
 /**
  * The nutrition multiplier for a carried food item with no tile to read
@@ -134,6 +146,25 @@ export function harvestableAt(world: World, layer: Layer, pos: Vec2): MaterialId
       anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || t.terrain === "stone" || (layer === "underground" && t.terrain === "wall"));
     if (rockNearby) out.push("flint");
   }
+  // What is actually DRAWN on this tile. The rules above read the
+  // neighbourhood; these read the picture. Direct ask: "I want the gather
+  // button to allow you gather appropriate materials based on the decals."
+  for (const id of [tile.featureDecal, tile.scatterDecal]) {
+    if (!id) continue;
+    for (const material of DECALS[id].yields) {
+      if (!out.includes(material)) out.push(material);
+    }
+  }
+  return out;
+}
+
+/** The decal slots on this tile that gathering would actually take from — a sign yields nothing, so picking beside one is not "gathering the sign". */
+function gatherableSlots(world: World, layer: Layer, pos: Vec2): DecalSlot[] {
+  const tile = tileAt(world, layer, pos.x, pos.y);
+  if (!tile) return [];
+  const out: DecalSlot[] = [];
+  if (tile.featureDecal && DECALS[tile.featureDecal].yields.length > 0) out.push("feature");
+  if (tile.scatterDecal && DECALS[tile.scatterDecal].yields.length > 0) out.push("scatter");
   return out;
 }
 
@@ -151,15 +182,50 @@ export function takeHarvest(world: World, layer: Layer, pos: Vec2): MaterialId[]
   if (yields.length === 0) return [];
   const tile = tileAt(world, layer, pos.x, pos.y)!;
   tile.harvested = (tile.harvested ?? 0) + 1;
+  // Taking the last of a tile takes the thing you were taking it FROM. A log
+  // you have stripped is gone; the ground under it is not. Regrowing decals
+  // (moss, ferns, mushrooms) also clear here, and `tickHarvestRegrowth` puts
+  // them back when the tile comes back — which is what makes a picked patch
+  // visibly empty for a while instead of a log you can strip forever.
+  if (HARVEST_YIELD_PER_TILE - tile.harvested <= 0) {
+    for (const slot of gatherableSlots(world, layer, pos)) {
+      if (slot === "feature") tile.featureDecal = undefined;
+      else tile.scatterDecal = undefined;
+    }
+  }
   return yields;
 }
 
-/** Every `HARVEST_REGROW_TICKS`, each gathered tile recovers one take. One scan, not per agent — same shape as flora.ts. */
+/**
+ * Every `HARVEST_REGROW_TICKS`, each gathered tile recovers one take. One
+ * scan, not per agent — same shape as flora.ts.
+ *
+ * A tile that comes all the way back also grows its decals back, but only the
+ * ones that regrow (decals.ts's per-decal `regrows`). That is why the hash
+ * that used to BE the decal system is still here as `naturalDecalAt`: it is
+ * the oracle for what belongs on a tile, so a picked fern patch can return
+ * without anything having stored what it was. A felled stump has `regrows:
+ * false` and stays gone.
+ */
 export function tickHarvestRegrowth(world: World): void {
   if (world.tick === 0 || world.tick % HARVEST_REGROW_TICKS !== 0) return;
   for (const layer of LAYER_ORDER) {
-    for (const tile of world.tiles[layer]) {
-      if (tile.harvested) tile.harvested = tile.harvested - 1 || undefined;
+    const tiles = world.tiles[layer];
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i]!;
+      if (!tile.harvested) continue;
+      tile.harvested = tile.harvested - 1 || undefined;
+      if (tile.harvested) continue;
+      const x = i % world.width;
+      const y = Math.floor(i / world.width);
+      if (!tile.scatterDecal) {
+        const natural = naturalDecalAt(world, layer, x, y, "scatter");
+        if (natural && DECALS[natural].regrows) tile.scatterDecal = natural;
+      }
+      if (!tile.featureDecal) {
+        const natural = naturalDecalAt(world, layer, x, y, "feature");
+        if (natural && DECALS[natural].regrows) tile.featureDecal = natural;
+      }
     }
   }
 }

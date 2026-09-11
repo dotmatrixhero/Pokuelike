@@ -1,7 +1,7 @@
 # Decals as data
 
-Status: **design, nothing built.** Written in response to two asks, mid-pass,
-while the biome ripping was landing:
+Status: **BUILT — A and B together.** Direct ask: *"A then B together."*
+Written in response to two asks, mid-pass, while the biome ripping was landing:
 
 > "I'm gonna have you keep in mind where you put these decals because I want
 > the gather button to allow you gather appropriate materials based on the
@@ -91,9 +91,74 @@ clears the field.
 - Not recommended. Decals are an overlay, not a ground type. `groundType` and
   the region tag are the precedent: orthogonal tags on a tile, not terrain.
 
-## 4. Recommendation
+## 4. What was built
 
-**A first, then B.** Each stands alone with its own evidence:
+Both, in one pass. The two turned out to compose rather than stack: B needs an
+oracle for "what naturally belongs on this tile" so a picked fern can grow back
+without anything having stored what it was, and A's stateless hash IS that
+oracle. So the hash did not get replaced — it got demoted from "the decal
+system" to `naturalDecalAt`, the function worldgen stamps from and regrowth
+restores from.
+
+- `packages/engine/src/decals.ts` — `DecalId`, the pools, the placement hash,
+  and per-decal facts (`yields`, `regrows`, `footing`, `standing`).
+- `Tile.scatterDecal` / `Tile.featureDecal` — two slots, because the art has
+  two densities and they are not interchangeable.
+- `World.origin` — decal placement hashes on ABSOLUTE coordinates, so
+  neighbouring zones stop repeating each other's scatter; regrowth needs the
+  origin to reproduce the hash long after generation.
+- `scatterDecals(world)` runs last in `generateWorld`, after every terrain
+  overlay has settled the ground a decal has to stand on.
+- `harvestableAt` adds the decal's yields; `takeHarvest` clears the decal on
+  the take that leaves the tile bare; `tickHarvestRegrowth` grows back only the
+  decals whose spec says `regrows`.
+- Five new materials: `fiber`, `shroom`, `bone`, `shell`, `scrap`.
+- The renderer's scatter pass reads the tile instead of hashing.
+
+### Verified
+
+Engine tests (`test/decals.test.ts`, 6) plus a live end-to-end run:
+
+| Check | Result |
+| --- | --- |
+| Player stands on a `stump_oak_1` tile, presses Gather 12x | pack holds **Deadwood x3**, tile's `featureDecal` is **null**, further gathers yield nothing |
+| Player stands on a `tuft_dry_1` tile, gathers | pack UI reads **"Pack 3/33 · Fiber x3"** |
+| Ground decals on water tiles | **0** (was: the renderer had no terrain check at all) |
+| Lily pads on land | **0** |
+| Decals in the canopy | **0** (a first run put 5-7 boulders and logs in the treetops) |
+| Reachability over 40 seeds | every decal appears; rarest is `fence_wood_1` at 9/40 |
+
+### Two bugs this fixed on the way
+
+1. **The renderer's scatter pass had no terrain check.** It ran over every tile
+   in view, so decals drew on water, walls and trees — which is why lily pads
+   were landing on dry ground and grass tufts were floating out to sea.
+2. **Decals were being placed in the canopy.** Invisible before only because
+   nothing looked at the canopy layer with the old hash.
+
+### Balance to look at, not decided
+
+Tiles yielding each material, mean over 5 seeds of 60x60 (all three layers):
+
+| material | tiles |
+| --- | --- |
+| fiber | 179 |
+| bone | 42 |
+| flint | 40 |
+| herbs | 23 |
+| deadwood | 18 |
+| shroom | 18 |
+| scrap | 1 |
+| shell | 0 on these 5 seeds (37/40 over a wider sweep) |
+
+`fiber` is deliberately the abundant one — it is the fine scatter layer, which
+is on roughly one eligible tile in seven. `shroom` is in `FOOD_MATERIAL_IDS`,
+so mushrooms are edible at a neutral 1x nutrition; that is a real food supply
+in forest and jungle that did not exist before. Neither number has been tuned.
+
+## 5. Why A then B, and why they shipped together
+
+Each still stands alone with its own evidence:
 
 - **A** is testable immediately and settles the thing that is actually wrong:
   what you gather matches what you see. Pass/fail is concrete — walk onto a log
@@ -104,34 +169,33 @@ clears the field.
   top of A than from scratch, because A already establishes the decal -> material
   table and the shared module.
 
-Open question for whoever takes this: **does gathering a decal consume it
-permanently, or does it regrow like a food tile?** A stump regrowing in 300
-ticks reads wrong; a mushroom cluster regrowing reads right. That probably means
-the material table needs a per-decal `regrows` flag, not one global rule.
+The open question — **does gathering a decal consume it permanently, or does it
+regrow?** — resolved the way it was posed: a per-decal `regrows` flag, not one
+global rule. A stump regrowing in 300 ticks reads wrong; a mushroom cluster
+regrowing reads right.
 
-## 5. Proposed decal -> material table
+## 6. The decal -> material table, as built
 
-Materials below that do not exist yet are marked. Current `MaterialId` set is in
-`harvest.ts`.
+As built. The five materials marked **new** below now exist in `harvest.ts`.
 
 | Decal | Yields | Note |
 | --- | --- | --- |
-| `log_1`, `log_mossy_1` | `deadwood` | the visible cause the sunbeam rule is standing in for |
+| `log_1`, `log_mossy_1` | `deadwood` | the visible cause the sunbeam rule was standing in for |
 | `stump_oak_1/2`, `stump_cut_1/2`, `stump_ring_1` | `deadwood` | should not regrow |
 | `fence_wood_1` | `deadwood` | worked timber; arguably a better plank source |
-| `boulder_1`, `rock_sea_1` | `flint` | the visible cause the wall-adjacency rule is standing in for |
-| `bones_1..4` | bone (**new**) | the cave's only gatherable; pairs with the crafting tree |
-| `shroom_red_1/2`, `shroom_orange_1` | a mushroom crop (**new**, or map to an existing `CROP_ID`) | regrows |
-| `shell_1` | shell (**new**) | beach-only |
-| `barrel_1..3` | salvage (**new**) | worked junk, not nature |
+| `boulder_1`, `rock_sea_1` | `flint` | the visible cause the wall-adjacency rule was standing in for |
+| `bones_1..4` | `bone` | the cave's only gatherable; does not regrow |
+| `shroom_red_1/2`, `shroom_orange_1` | `shroom` | regrows; edible, neutral 1x nutrition |
+| `shell_1` | `shell` | beach-only |
+| `barrel_1..3` | `scrap` | worked junk, not nature |
 | `sign_danger_1` | nothing | it is a sign; it is there to *say* something |
-| `cactus_1/2`, `succulent_1` | water + fibre (**fibre new**) | already-visible desert water source |
-| `reed_1`, `cattail_1` | fibre (**new**) | |
-| `fern_1`, `moss_1`, `tuft_*`, `blade_cold_*` | fibre / thatch (**new**) | regrows |
-| `bloom_1/2`, `flower_red_1` | an herb crop | regrows |
-| `lily_1/2` | nothing | floats on water; not standable |
+| `cactus_1/2`, `succulent_1` | `fiber` | regrows |
+| `reed_1`, `cattail_1` | `fiber` | regrows |
+| `fern_1`, `moss_1`, `tuft_*`, `blade_cold_*` | `fiber` | regrows; the abundant material |
+| `bloom_1/2`, `flower_red_1` | `herbs` | regrows |
+| `lily_1/2` | nothing | floats; now actually placed ON water, which it was not before |
 
-## 6. Where the decals currently are
+## 7. Where the decals currently are
 
 Pools live in `web/src/sprites.ts`. As of the pass-1/pass-2 rips:
 

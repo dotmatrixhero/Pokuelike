@@ -1,13 +1,11 @@
 import type { Agent, TerrainKind, Tile, Vec2, Vision, World, Layer } from "@pokuelike/engine";
-import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel } from "@pokuelike/engine";
+import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel, tileAt, type DecalSlot } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
   getFloorBaseName,
   getGroundPatch,
-  getScatterDecal,
-  getFeatureDecal,
-  type ScatterDecal,
+  decalArt,
   GROUND_CELL,
   GROUND_PATCH_CELLS,
   getFloraSprite,
@@ -487,10 +485,10 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
   // golden rim track the sun, and baking them would freeze both at whatever
   // hour the cache happened to be built. They cost ~3ms of the ~40ms this
   // whole layer used to take, so there is nothing to gain by freezing them.
-  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA);
+  drawScatterPass(ctx, world, "scatter", SCATTER_ALPHA);
   // Landmarks go down after the fine detail so a boulder sits ON the tufts,
   // not under them.
-  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1);
+  drawScatterPass(ctx, world, "feature", 1);
 }
 
 /**
@@ -551,14 +549,24 @@ function groundLayerCanvas(world: World): HTMLCanvasElement {
   return canvas;
 }
 
-type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number, layer?: string) => ScatterDecal | null;
-
-/** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
-function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
+/**
+ * One scatter pass over the whole grid — see `drawGroundLayer` for why decals
+ * need a pass of their own, and `BIOME_FEATURES` (engine's decals.ts) for why
+ * there are two.
+ *
+ * This reads `Tile.scatterDecal`/`featureDecal` rather than re-deriving a
+ * hash. It used to hash, which meant the renderer and the engine disagreed
+ * about what was on a tile — you could stand on a drawn log and be told there
+ * was no deadwood — and it meant nothing could ever take a decal away.
+ */
+function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, slot: DecalSlot, alpha: number): void {
   const view = culledBounds(world);
   for (let y = view.y0; y < view.y1; y++) {
     for (let x = view.x0; x < view.x1; x++) {
-      const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn, activeViewLayer);
+      const tile = tileAt(world, activeViewLayer, x, y);
+      const id = slot === "scatter" ? tile?.scatterDecal : tile?.featureDecal;
+      if (!id) continue;
+      const decal = decalArt(id, x, y, slot);
       if (!decal) continue;
       const scale = TILE_SIZE / GROUND_CELL;
       const w = decal.image.width * scale;
@@ -585,10 +593,10 @@ function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: Deca
   }
 }
 
-/** One tile in N gets a scatter decal. Decals are up to two tiles across, so this is sparser than it sounds. */
-const SCATTER_ONE_IN = 7;
-/** One tile in N gets a landmark. Far sparser than the fine scatter — see `BIOME_FEATURES` (sprites.ts). */
-const FEATURE_ONE_IN = 47;
+// Decal DENSITY moved to the engine (decals.ts's SCATTER_ONE_IN /
+// FEATURE_ONE_IN) along with placement itself — the renderer no longer
+// decides which tiles get a decal, it draws the ones the world says are
+// there.
 /** Slightly translucent so a decal reads as part of the ground rather than an object sitting on it — real objects (trees, boulders, crops) are drawn opaque later and need to stay distinguishable from ground detail. */
 const SCATTER_ALPHA = 0.85;
 

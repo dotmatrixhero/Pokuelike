@@ -11214,3 +11214,75 @@ decal placement today is a **pure function of (x, y, biome, layer)** in
 storing anything. That is either the cheapest possible hook for gather or the
 wrong foundation for it, depending on whether gathering has to CONSUME the
 decal.
+
+## Decals became tile data, and gather reads them
+
+Direct ask: *"A then B together."* Built; design and evidence in
+`DECALS_AS_DATA.md`.
+
+The two options composed instead of stacking. B (decals as placed tile data)
+needs an oracle for "what naturally belongs on this tile" so a picked fern can
+grow back without anything storing what it was — and A's stateless hash IS that
+oracle. So the hash was not replaced, it was demoted from *being* the decal
+system to `naturalDecalAt`, which worldgen stamps from and regrowth restores
+from.
+
+- [x] `packages/engine/src/decals.ts` — `DecalId`, pools, placement hash, and
+      per-decal facts (`yields`, `regrows`, `footing`, `standing`)
+- [x] `Tile.scatterDecal` / `Tile.featureDecal`, `World.origin`
+- [x] `scatterDecals(world)` runs last in `generateWorld`
+- [x] `harvestableAt` yields them, `takeHarvest` consumes them,
+      `tickHarvestRegrowth` regrows only the ones whose spec says so
+- [x] Five new materials: `fiber`, `shroom`, `bone`, `shell`, `scrap`
+- [x] Renderer reads the tile instead of hashing
+
+### The defect this closed
+
+`harvestableAt` decided yields from invisible proximity heuristics — deadwood
+if a sunbeam was nearby, flint if a wall was within 1 — while the renderer drew
+an actual log on a specific tile and ignored it. You could stand on a drawn log
+and be told there was no deadwood, and stand on bare sand and be handed some.
+
+### Verified live, not just by test
+
+| Check | Result |
+|---|---|
+| Stand on a `stump_oak_1` tile, press Gather 12x | **Deadwood x3** in the pack, tile's decal **gone**, further gathers empty |
+| Stand on a `tuft_dry_1` tile, gather | pack UI reads **"Pack 3/33 · Fiber x3"** |
+| Ground decals on water | **0** |
+| Lilies on land | **0** |
+| Decals in the canopy | **0** |
+| Reachability over 40 seeds | every decal appears; rarest `fence_wood_1` at 9/40 |
+
+Plus 6 engine tests and the full suite (1,617 engine + 475 data) green.
+
+### Two bugs found on the way, both mine to report
+
+1. **The renderer's scatter pass never checked terrain.** It ran over every
+   tile in view, so decals drew on water, walls and trees — which is why lily
+   pads landed on dry ground and grass tufts floated out to sea. Fixed by the
+   `footing` gate (`tileTakesDecal`).
+2. **Decals were placed in the canopy** — 5-7 boulders and fallen logs in the
+   treetops per 60x60 zone. Invisible before only because nothing looked at the
+   canopy with the old hash.
+
+### One test I wrote wrong first
+
+The density test summed scatter and feature across ALL THREE layers and read
+199 vs 218, which looked like the two pools had been crossed. They had not: the
+cave has no fine scatter layer by design, so it contributes features and no
+scatter, and the sum hid a surface ratio that was exactly 6.9x — the 47/7 the
+constants ask for. Fixed to measure per layer, with the cave and canopy as
+their own explicit assertions.
+
+### Balance surfaced, not tuned
+
+Tiles yielding each material, mean over 5 seeds of 60x60, all layers:
+
+| fiber | bone | flint | herbs | deadwood | shroom | scrap | shell |
+|---|---|---|---|---|---|---|---|
+| 179 | 42 | 40 | 23 | 18 | 18 | 1 | 0 (37/40 over a wider sweep) |
+
+`fiber` is abundant on purpose — it is the fine scatter layer. `shroom` is in
+`FOOD_MATERIAL_IDS` at a neutral 1x nutrition, so forests and jungles now carry
+a food supply they did not have. Neither number has been touched.
