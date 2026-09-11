@@ -3,6 +3,9 @@ import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel, tileAt, ty
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
+  getGroundPatchByName,
+  GROUND_NAME_DEFAULT,
+  GROUND_NAME_SAND,
   getFloorBaseName,
   getGroundPatch,
   decalArt,
@@ -209,45 +212,6 @@ function dominantBiomeAt(world: World, x: number, y: number): string | undefined
 }
 
 /**
- * One tile's ground, windowed out of its biome's multi-tile ground patch in
- * WORLD space: tile `(x, y)` draws source cell `(x % 6, y % 6)`, so two
- * neighbouring tiles draw two neighbouring source cells and a run of ground
- * reads as one continuous surface instead of the same sixteen pixels stamped
- * over and over. See sprites.ts's `BIOME_GROUND` for what that does and does
- * not buy (measured: some of the source grounds are genuinely one repeated
- * tile, and for those the win comes from the scatter layer instead).
- */
-function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number): void {
-  const biome = dominantBiomeAt(world, x, y);
-  // A "sand" TERRAIN tile is ground, so it is painted here in the ground pass
-  // rather than in the tile loop. Drawn in the loop it landed AFTER
-  // `drawElevationShade`, so every sand tile kept full brightness while the
-  // ground around it was shaded — a scatter of pale squares, which is the
-  // exact artifact this pass exists to remove.
-  const terrain = world.tiles[activeViewLayer][y * world.width + x]!.terrain;
-  const patch = terrain === "sand" ? getGroundPatch("beach", "surface") : getGroundPatch(biome, activeViewLayer);
-  if (patch && patch.width >= GROUND_CELL) {
-    drawPatchCell(ctx, patch, x, y);
-    // Elevation shading is NOT applied here — see `drawElevationShade`.
-  } else {
-    // The art has not finished loading. Flagged so `groundLayerCanvas` does
-    // NOT cache this frame: the first frame runs before any PNG is decoded, so
-    // caching it bakes a whole map of fallback fill and, since the cache key
-    // never changes, keeps it forever. That shipped as an entirely black map
-    // while the profiler happily reported a much better frame rate — it was
-    // faster because it had stopped drawing the ground at all.
-    groundArtPending = true;
-    ctx.fillStyle = rgbToCss(shade(TERRAIN_BG.floor, elevation));
-    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-  }
-
-  // Direct ask: "border edging around different tiles to blend would be
-  // nice" — see drawBiomeEdgeBlend's own doc comment for why this is a
-  // generated gradient blend rather than real edge art.
-  drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
-}
-
-/**
  * An object that STANDS on a tile — a tree, a bush, a berry plant — drawn at
  * its own aspect ratio, fitted to the tile's width and anchored so its base
  * sits on the tile's bottom edge.
@@ -392,13 +356,6 @@ function spriteCacheKey(sprite: CanvasImageSource, srcW: number, srcH: number): 
   return null;
 }
 
-/** Draws tile `(x, y)`'s cell of a multi-tile ground patch, windowed in world space so neighbouring tiles are continuous. */
-function drawPatchCell(ctx: CanvasRenderingContext2D, patch: HTMLImageElement, x: number, y: number): void {
-  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
-  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
-  ctx.drawImage(patch, sx, sy, GROUND_CELL, GROUND_CELL, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-}
-
 /** Elevation at which ground is neither lit nor shaded. */
 const ELEVATION_MID = 0.5;
 /** How dark the lowest hollows get, and how bright the highest ground. Light is weaker than shade on purpose — a washed-out highlight reads as fog, a slightly darker hollow reads as depth. */
@@ -507,7 +464,7 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
  * hash of ALL terrain: crops grow and fires burn every tick, and that would
  * invalidate this every frame for changes it does not draw.
  */
-/** Set by `drawGroundBacking` whenever it falls back for art that has not loaded — see its `else` branch. */
+/** Set by `drawGroundTextures` when a ground patch has not decoded yet — see its `if (!patch)` branch. */
 let groundArtPending = false;
 
 const groundLayerCache = new WeakMap<World, Partial<Record<Layer, { signature: number; canvas: HTMLCanvasElement }>>>();
@@ -519,6 +476,156 @@ function sandSignature(tiles: readonly Tile[]): number {
     if (tiles[i]!.terrain === "sand") h = Math.imul(h ^ i, 16777619);
   }
   return h >>> 0;
+}
+
+/**
+ * Every ground texture on the map, cross-faded by a SMOOTH biome weight field
+ * instead of one texture picked per tile.
+ *
+ * This is the same fix, and the same technique, as `drawElevationShade`.
+ * Biome weight is a continuous field (`biomeWeightsAt`), and resolving it to a
+ * single winning texture per tile quantises it into flat rectangular plateaus:
+ * measured on a live frame, adjacent bare `floor` tiles with the same
+ * groundType and the same elevation read 122,104,93 against 182,225,161 — a
+ * brown tile hard against a green one. Across a map that is a patchwork of
+ * tile-stepped rectangles. Direct report: "Still got some ugly square
+ * splotches there", then "Splotches 😭".
+ *
+ * There WAS a blend for this, `drawBiomeEdgeBlend`, which stamped one
+ * neighbour's texture over the tile behind a gradient. One tile wide is
+ * simply not enough room to hide a jump that size, and it could only ever
+ * show one of a corner tile's two boundaries. Removed in favour of this.
+ *
+ * How it works: accumulate each texture's weight per tile, order the textures
+ * by total weight, then paint them in that order with an incremental alpha of
+ * `w_k / (w_0 + ... + w_k)`. That composites to exactly `w_k` for every
+ * texture, and because the weights vary smoothly so does the ratio, so the
+ * mask has no tile structure in it at all. The masks are rasterised one pixel
+ * per tile and bilinearly upscaled, exactly as the elevation and water fields
+ * already are.
+ *
+ * Runs once per cached ground layer, not per frame.
+ */
+function drawGroundTextures(ctx: CanvasRenderingContext2D, world: World): void {
+  const n = world.width * world.height;
+  const tiles = world.tiles[activeViewLayer];
+  const weights = new Map<string, Float32Array>();
+  const weightFor = (name: string): Float32Array => {
+    let w = weights.get(name);
+    if (!w) {
+      w = new Float32Array(n);
+      weights.set(name, w);
+    }
+    return w;
+  };
+
+  const underground = activeViewLayer !== "surface";
+  for (let i = 0; i < n; i++) {
+    // A "sand" TERRAIN tile is ground, so it is painted here in the ground
+    // pass rather than in the tile loop. Drawn in the loop it landed AFTER
+    // `drawElevationShade`, so every sand tile kept full brightness while the
+    // ground around it was shaded — a scatter of pale squares, which is the
+    // exact artifact this pass exists to remove.
+    if (underground) {
+      weightFor(GROUND_NAME_DEFAULT)[i] = 1;
+    } else if (tiles[i]!.terrain === "sand") {
+      weightFor(GROUND_NAME_SAND)[i] = 1;
+    } else if (world.biomeSeeds && world.biomeSeeds.length > 0) {
+      const x = i % world.width;
+      const y = (i - x) / world.width;
+      for (const [biome, weight] of Object.entries(biomeWeightsAt(world.biomeSeeds, x, y))) {
+        if (weight > 0) weightFor(getFloorBaseName(biome))[i] += weight;
+      }
+    } else {
+      weightFor(GROUND_NAME_DEFAULT)[i] = 1;
+    }
+  }
+
+  const order = [...weights.entries()]
+    .map(([name, field]) => ({ name, field, total: field.reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.total - a.total);
+
+  const running = new Float32Array(n);
+  for (let k = 0; k < order.length; k++) {
+    const { name, field } = order[k]!;
+    const patch = getGroundPatchByName(name);
+    if (!patch || patch.width < GROUND_CELL) {
+      // The art has not finished loading. Flagged so `groundLayerCanvas` does
+      // NOT cache this frame: the first frame runs before any PNG is decoded,
+      // so caching it bakes a whole map of fallback fill and, since the cache
+      // key never changes, keeps it forever. That shipped as an entirely black
+      // map while the profiler happily reported a much better frame rate — it
+      // was faster because it had stopped drawing the ground at all.
+      groundArtPending = true;
+      continue;
+    }
+    const pattern = ctx.createPattern(worldTilePattern(patch), "repeat");
+    if (!pattern) continue;
+
+    const layer = scratchCanvas(world.width * TILE_SIZE, world.height * TILE_SIZE);
+    const lctx = layer.getContext("2d")!;
+    lctx.clearRect(0, 0, layer.width, layer.height);
+    lctx.imageSmoothingEnabled = false;
+    lctx.fillStyle = pattern;
+    lctx.fillRect(0, 0, layer.width, layer.height);
+
+    if (k > 0) {
+      const mask = fieldCanvas(world, (i) => {
+        const before = running[i]!;
+        const here = field[i]!;
+        return before + here <= 0 ? 0 : Math.round((here / (before + here)) * 255);
+      });
+      lctx.globalCompositeOperation = "destination-in";
+      lctx.imageSmoothingEnabled = true;
+      lctx.drawImage(mask, 0, 0, layer.width, layer.height);
+    }
+    for (let i = 0; i < n; i++) running[i] = running[i]! + field[i]!;
+
+    ctx.drawImage(layer, 0, 0);
+  }
+
+  if (order.length === 0) {
+    groundArtPending = true;
+    ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
+    ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  }
+}
+
+/**
+ * A ground patch scaled to the size it actually tiles at, so it can be laid
+ * down with one `fillRect` instead of a `drawImage` per tile.
+ *
+ * `drawPatchCell` drew source cell `(x % 6, y % 6)` of 16px into a 20px tile.
+ * A repeating pattern of the whole patch scaled 16->20 samples exactly the
+ * same cell at exactly the same place — `(x * 20) % 120 === (x % 6) * 20` —
+ * so this is the same world-space windowing, done once for the map.
+ */
+const patternCache = new WeakMap<HTMLImageElement, HTMLCanvasElement>();
+function worldTilePattern(patch: HTMLImageElement): HTMLCanvasElement {
+  let scaled = patternCache.get(patch);
+  if (!scaled) {
+    const cells = Math.round(patch.width / GROUND_CELL);
+    scaled = document.createElement("canvas");
+    scaled.width = cells * TILE_SIZE;
+    scaled.height = Math.round(patch.height / GROUND_CELL) * TILE_SIZE;
+    const sctx = scaled.getContext("2d")!;
+    sctx.imageSmoothingEnabled = false;
+    sctx.drawImage(patch, 0, 0, scaled.width, scaled.height);
+    patternCache.set(patch, scaled);
+  }
+  return scaled;
+}
+
+/** One pixel per tile, as a canvas ready to be drawn up to map size with smoothing on. `upscaleField`'s sibling, for callers that want to composite the field rather than read its pixels. */
+function fieldCanvas(world: World, alphaAt: (index: number) => number): HTMLCanvasElement {
+  const small = document.createElement("canvas");
+  small.width = world.width;
+  small.height = world.height;
+  const sctx = small.getContext("2d")!;
+  const image = sctx.createImageData(world.width, world.height);
+  for (let i = 0; i < world.width * world.height; i++) image.data[i * 4 + 3] = alphaAt(i);
+  sctx.putImageData(image, 0, 0);
+  return small;
 }
 
 function groundLayerCanvas(world: World): HTMLCanvasElement {
@@ -538,11 +645,8 @@ function groundLayerCanvas(world: World): HTMLCanvasElement {
   const gctx = canvas.getContext("2d")!;
   gctx.imageSmoothingEnabled = false;
   gctx.clearRect(0, 0, canvas.width, canvas.height);
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
-      drawGroundBacking(gctx, world, x, y, world.tiles[activeViewLayer][y * world.width + x]!.elevation);
-    }
-  }
+  drawGroundTextures(gctx, world);
+  drawTintFields(gctx, world);
   drawElevationShade(gctx, world);
   // Only keep it once every tile drew real art; otherwise rebuild next frame.
   if (!groundArtPending) perLayer[activeViewLayer] = { signature, canvas };
@@ -611,19 +715,103 @@ const SCATTER_ALPHA = 0.85;
  * reads as a color CAST over the real floor texture/decals already drawn,
  * not a flat paint-over.
  */
-function drawGroundTypeTint(ctx: CanvasRenderingContext2D, tile: Tile, x: number, y: number): void {
-  const tint = GROUND_TYPE_TINT[tile.groundType ?? "loam"];
-  if (!tint) return;
-  ctx.fillStyle = rgbaToCss(tint, 0.16);
-  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+const GROUND_TYPE_TINT_ALPHA = 0.16;
+const BIOME_TINT_ALPHA = 0.14;
+
+/**
+ * The soil and biome colour casts, as smooth whole-map washes.
+ *
+ * Both used to be a `fillRect` over one tile, which is a flat rectangle of
+ * colour with four hard edges — so every soil-type boundary and every biome
+ * boundary drew its own visible square. That is the third thing in this file
+ * to have made the same mistake, after the elevation shading and the ground
+ * textures themselves, and it gets the same treatment: rasterise the coverage
+ * one pixel per tile and let the bilinear upscale do the blending.
+ *
+ * Soil type is genuinely discrete (a tile is peat or it is not), so its field
+ * is 0/1 and the smoothing only softens the join. Biome weight is continuous
+ * already, so its field is the real weight and a tundra/highland border fades
+ * rather than steps.
+ *
+ * Each family composites into ONE layer before it is applied. Painting each
+ * tint as its own pass at its own alpha looked right and measured wrong: at a
+ * boundary a pixel picks up partial coverage from BOTH sides, so two 0.16
+ * washes stacked to 0.32 and the fix drew a dark seam exactly where it had
+ * just removed a hard one (seam counts went UP, 4242 37 -> 46). Blending the
+ * colours first and applying one alpha at the end keeps the wash even.
+ */
+function drawTintFields(ctx: CanvasRenderingContext2D, world: World): void {
+  const n = world.width * world.height;
+  const tiles = world.tiles[activeViewLayer];
+
+  const soils = new Map<string, Rgb>();
+  for (let i = 0; i < n; i++) {
+    const key = tiles[i]!.groundType ?? "loam";
+    const tint = GROUND_TYPE_TINT[key];
+    if (tint) soils.set(key, tint);
+  }
+  paintTintStack(ctx, world, [...soils].map(([key, tint]) => ({
+    tint,
+    weightAt: (i: number) => ((tiles[i]!.groundType ?? "loam") === key ? 1 : 0),
+  })), GROUND_TYPE_TINT_ALPHA);
+
+  if (activeViewLayer !== "surface" || !world.biomeSeeds || world.biomeSeeds.length === 0) return;
+  const seeds = world.biomeSeeds;
+  paintTintStack(ctx, world, Object.keys(BIOME_TINT).flatMap((biome) => {
+    const tint = BIOME_TINT[biome];
+    return tint ? [{
+      tint,
+      weightAt: (i: number) => {
+        const x = i % world.width;
+        return Math.min(1, biomeWeightsAt(seeds, x, (i - x) / world.width)[biome] ?? 0);
+      },
+    }] : [];
+  }), BIOME_TINT_ALPHA);
 }
 
-/** Same idea as `drawGroundTypeTint` above, keyed by dominant biome instead of soil type — see `BIOME_TINT`'s own doc comment (palette.ts) for which biomes get one and why. */
-function drawBiomeTint(ctx: CanvasRenderingContext2D, biome: string | undefined, x: number, y: number): void {
-  const tint = biome ? BIOME_TINT[biome] : undefined;
-  if (!tint) return;
-  ctx.fillStyle = rgbaToCss(tint, 0.14);
-  ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+function paintTintStack(ctx: CanvasRenderingContext2D, world: World, entries: readonly { tint: Rgb; weightAt: (index: number) => number }[], alpha: number): void {
+  if (entries.length === 0) return;
+  const n = world.width * world.height;
+  const weights = entries.map((e) => {
+    const w = new Float32Array(n);
+    for (let i = 0; i < n; i++) w[i] = e.weightAt(i);
+    return w;
+  });
+  const total = new Float32Array(n);
+  for (const w of weights) for (let i = 0; i < n; i++) total[i] = total[i]! + w[i]!;
+  if (!total.some((v) => v > 0)) return;
+
+  const layer = scratchCanvas(world.width * TILE_SIZE, world.height * TILE_SIZE);
+  const lctx = layer.getContext("2d")!;
+  lctx.clearRect(0, 0, layer.width, layer.height);
+  lctx.imageSmoothingEnabled = true;
+  const running = new Float32Array(n);
+  for (let k = 0; k < entries.length; k++) {
+    const w = weights[k]!;
+    const colour = scratchCanvas(world.width * TILE_SIZE, world.height * TILE_SIZE);
+    const cctx = colour.getContext("2d")!;
+    cctx.clearRect(0, 0, colour.width, colour.height);
+    cctx.fillStyle = rgbToCss(entries[k]!.tint);
+    cctx.fillRect(0, 0, colour.width, colour.height);
+    cctx.globalCompositeOperation = "destination-in";
+    cctx.imageSmoothingEnabled = true;
+    cctx.drawImage(fieldCanvas(world, (i) => {
+      const before = running[i]!;
+      const here = w[i]!;
+      return before + here <= 0 ? 0 : Math.round((here / (before + here)) * 255);
+    }), 0, 0, colour.width, colour.height);
+    for (let i = 0; i < n; i++) running[i] = running[i]! + w[i]!;
+    lctx.globalCompositeOperation = "source-over";
+    lctx.drawImage(colour, 0, 0);
+  }
+  // One opacity for the whole family, gated by how much tint covers each
+  // pixel at all, so a tile with no soil tint stays untouched.
+  lctx.globalCompositeOperation = "destination-in";
+  lctx.drawImage(fieldCanvas(world, (i) => Math.round(Math.min(1, total[i]!) * 255)), 0, 0, layer.width, layer.height);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(layer, 0, 0);
+  ctx.restore();
 }
 
 /**
@@ -836,127 +1024,6 @@ function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: 
   octx.fillStyle = "black";
   octx.fill();
   return patchScratch;
-}
-
-/**
- * Procedural biome-floor edge blend — direct ask: "border edging around
- * different tiles to blend would be nice." Unlike water's shoreline
- * (`drawWaterLayer`), there's no dedicated hand-drawn edge art for a
- * desert-meets-cave or cave-meets-stone seam, so this generates the
- * transition instead of cropping one: a linear alpha gradient, strongest
- * at the tile edge and fading out over roughly 60% of the tile, masks the
- * NEIGHBOR's own floor texture before it's drawn on top of this tile's
- * base — same `destination-in` masking trick `featheredOverlayStamp`
- * already uses, just with a directional gradient instead of a rounded
- * rect. Two adjacent tiles on either side of a biome boundary each blend
- * the other's texture in from their own edge, so the seam becomes a real
- * two-tile-wide gradient rather than a hard cut. Gradients are cached per
- * direction (only 4 ever exist); the masked result is cached per
- * (texture image, direction) since there are only a handful of floor
- * textures total.
- */
-type EdgeDirection = "up" | "down" | "left" | "right";
-const EDGE_BLEND_REACH = 0.6; // fraction of the tile the gradient extends into
-const edgeGradientCache = new Map<EdgeDirection, HTMLCanvasElement>();
-function edgeGradientMask(direction: EdgeDirection): HTMLCanvasElement {
-  const cached = edgeGradientCache.get(direction);
-  if (cached) return cached;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
-  const gctx = canvas.getContext("2d")!;
-  const reach = TILE_SIZE * EDGE_BLEND_REACH;
-  const grad =
-    direction === "left"
-      ? gctx.createLinearGradient(0, 0, reach, 0)
-      : direction === "right"
-        ? gctx.createLinearGradient(TILE_SIZE, 0, TILE_SIZE - reach, 0)
-        : direction === "up"
-          ? gctx.createLinearGradient(0, 0, 0, reach)
-          : gctx.createLinearGradient(0, TILE_SIZE, 0, TILE_SIZE - reach);
-  grad.addColorStop(0, "rgba(0,0,0,1)");
-  grad.addColorStop(1, "rgba(0,0,0,0)");
-  gctx.fillStyle = grad;
-  gctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-  edgeGradientCache.set(direction, canvas);
-  return canvas;
-}
-
-/**
- * The neighbour's ground, masked to a one-directional fade. Not cached per
- * (image, direction) the way it used to be: the neighbour's ground is now a
- * multi-tile patch windowed in world space (see drawGroundBacking), so the
- * right source cell depends on the tile, and caching 6x6x4 stamps per texture
- * to avoid one drawImage on boundary tiles only isn't worth it. Reuses one
- * scratch canvas instead of allocating per call.
- */
-let edgeScratch: HTMLCanvasElement | undefined;
-function edgeBlendStamp(texture: HTMLImageElement, direction: EdgeDirection, x: number, y: number): HTMLCanvasElement {
-  if (!edgeScratch) {
-    edgeScratch = document.createElement("canvas");
-    edgeScratch.width = TILE_SIZE;
-    edgeScratch.height = TILE_SIZE;
-  }
-  const octx = edgeScratch.getContext("2d")!;
-  octx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
-  octx.globalCompositeOperation = "source-over";
-  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
-  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
-  octx.drawImage(texture, sx, sy, GROUND_CELL, GROUND_CELL, 0, 0, TILE_SIZE, TILE_SIZE);
-  octx.globalCompositeOperation = "destination-in";
-  octx.drawImage(edgeGradientMask(direction), 0, 0);
-  return edgeScratch;
-}
-
-const EDGE_NEIGHBORS: readonly { dir: EdgeDirection; dx: number; dy: number }[] = [
-  { dir: "up", dx: 0, dy: -1 },
-  { dir: "down", dx: 0, dy: 1 },
-  { dir: "left", dx: -1, dy: 0 },
-  { dir: "right", dx: 1, dy: 0 },
-];
-
-/**
- * Draws a soft blend of each cardinal neighbor's floor texture onto this
- * tile wherever that neighbor's biome-driven ground art actually differs
- * (`getFloorBaseName`) — see the doc comment above `edgeGradientMask` for
- * why this is generated rather than real edge art. Skips a neighbor that's
- * "water" (its own full-tile opaque surface with a dedicated shoreline
- * system already) or off the map edge. Called from `drawGroundBacking`
- * for every ground tile, so a boulder or plant sitting right on a biome
- * boundary gets the same blended ground under it as plain floor does.
- */
-function drawBiomeEdgeBlend(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number, ownBiome: string | undefined): void {
-  const ownBase = getFloorBaseName(ownBiome);
-  const surface = world.tiles[activeViewLayer];
-  for (const { dir, dx, dy } of EDGE_NEIGHBORS) {
-    const nx = x + dx;
-    const ny = y + dy;
-    if (nx < 0 || ny < 0 || nx >= world.width || ny >= world.height) continue;
-    const neighbor = surface[ny * world.width + nx]!;
-    if (neighbor.terrain === "water") continue;
-    const neighborBiome = dominantBiomeAt(world, nx, ny);
-    if (getFloorBaseName(neighborBiome) === ownBase) continue;
-    const neighborTexture = getGroundPatch(neighborBiome, activeViewLayer);
-    if (!neighborTexture) continue;
-    // Only ONE flowing blend per tile — direct ask, after seeing this
-    // draw all 4 directions independently: "the gradient should flow in
-    // one direction... painted in layers like decals... I'm seeing a lot
-    // of cross gradient murkiness." A corner tile bordering two different
-    // biomes (say highland above, badlands to the right) was drawing BOTH
-    // directional gradients stacked on top of each other — two
-    // semi-transparent layers of two different textures compositing at
-    // the corner reads as a muddy cross, not a clean fade. Taking just
-    // the first differing neighbor in a fixed, stable direction order
-    // gives every tile a single directional fade instead, at the cost of
-    // a true four-biome corner only showing one of its two real
-    // boundaries — a real, deliberate trade for a much cleaner look.
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
-    ctx.drawImage(edgeBlendStamp(neighborTexture, dir, x, y), x * TILE_SIZE, y * TILE_SIZE);
-    ctx.restore();
-    return;
-  }
 }
 
 /**
@@ -1453,9 +1520,8 @@ function drawWorldTiles(
         // painted every tile's base plus the off-grid scatter decals before
         // this loop started (see its doc comment for why it has to be a
         // separate pass). Only the per-tile tints and the faint glyph are
-        // left to do here.
-        drawGroundTypeTint(ctx, tile, x, y);
-        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
+        // left to do here. (The soil and biome tints are NOT per tile any
+        // more — see `drawTintFields`.)
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
         ctx.fillText(".", x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
           continue;
@@ -1473,7 +1539,7 @@ function drawWorldTiles(
       // swap in — so those always fall through here regardless of art
       // availability.
       // "sand" terrain is ground, and `drawGroundLayer` already painted it —
-      // see drawGroundBacking's own note on why it cannot be drawn here.
+      // see drawGroundTextures' own note on why it cannot be drawn here.
       if (tile.terrain === "sand") {
           continue;
       }
@@ -1530,9 +1596,8 @@ function drawWorldTiles(
         // Real ground texture underneath comes from `drawGroundLayer`'s
         // whole-grid pass, not from here — same "black behind transparent
         // corners" fix as boulders/trees/etc. above, since the real
-        // berry-plant art (below) also has transparent corners.
-        drawGroundTypeTint(ctx, tile, x, y);
-        drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
+        // berry-plant art (below) also has transparent corners. The soil and
+        // biome tints are whole-map fields now — see `drawTintFields`.
 
         // A green "fertile ground" patch under the plant itself — direct
         // ask: "can we decal a little green patch under the plants...

@@ -11286,3 +11286,93 @@ Tiles yielding each material, mean over 5 seeds of 60x60, all layers:
 `fiber` is abundant on purpose — it is the fine scatter layer. `shroom` is in
 `FOOD_MATERIAL_IDS` at a neutral 1x nutrition, so forests and jungles now carry
 a food supply they did not have. Neither number has been touched.
+
+## The square splotches: three separate causes, all fixed
+
+Direct reports, in order: *"Still got some ugly square splotches there"* ->
+*"Oof yeah those are rough"* -> *"Splotches 😭"*.
+
+Three different bugs were drawing hard-edged tile rectangles. All three are the
+same underlying mistake -- resolving a field to one value per tile and filling
+a rectangle with it -- and the file had already solved it once, for elevation:
+*"Elevation is a smooth field, but shading it a tile at a time quantises it
+into flat rectangular plateaus."*
+
+### 1. Wall tiles stamped random crops of a boulder sprite
+
+`wall_1.png` is 144x144 and is not a texture: it is ONE boulder, lit on top,
+with transparent corners. `tileWindow` carved it into a 7x7 grid and picked a
+20x20 crop per tile by hash. A mountain field came out as a patchwork of
+arbitrary squares -- dark rim crops beside pale centre crops beside the
+sprite's own corners.
+
+Same class as the mis-cropped trees, and **it survived that fix because my fix
+whitelisted `"wall"` by name**. Walls now use the seamless 16x16 pattern whole.
+
+### 2. Ground textures picked one biome per tile
+
+`dominantBiomeAt` resolved the continuous biome-weight field to a single
+winner, so a grassland/mangrove border put a (122,104,93) brown tile hard
+against a (182,225,161) green one. The one-tile `drawBiomeEdgeBlend` gradient
+could not hide a jump that size, and only ever showed one of a corner tile's
+two boundaries.
+
+Replaced with `drawGroundTextures`: accumulate each texture's weight per tile,
+order by total, paint with an incremental alpha of `w_k / (w_0 + ... + w_k)`.
+That composites to exactly `w_k`, and the masks are rasterised one pixel per
+tile and bilinearly upscaled, so there is no tile structure in them at all.
+`drawGroundBacking`, `drawPatchCell`, `drawBiomeEdgeBlend`, `edgeBlendStamp`
+and `edgeGradientMask` are all gone.
+
+### 3. The soil and biome tints were per-tile `fillRect`s
+
+`drawGroundTypeTint` and `drawBiomeTint` each painted a flat rectangle of
+colour over one tile, so every soil and biome boundary drew its own square.
+Now one smooth wash per family (`drawTintFields`).
+
+**A bug I introduced and caught here:** painting each tint as its own pass at
+its own alpha means a boundary pixel picks up partial coverage from BOTH sides,
+so two 0.16 washes stacked to 0.32 and the fix drew a *dark* seam exactly where
+it had removed a hard one. Blending the colours into one layer first and
+applying a single alpha at the end fixes it.
+
+### 4. The ground patches had visible seams inside themselves
+
+Separate from the above, and only found by measuring: comparing the mean
+pixel-to-pixel difference ACROSS a 16px cell join against the same measure
+inside a cell, `frost` read 9.9 vs 1.8 and `field` 14.0 vs 2.9. `mosaic`'s
+claim that the joins were "seamless by construction" was simply false -- the
+source cells do not tile against themselves (`stone` is a single cell and still
+read 4.7 excess against its own copy).
+
+The flips were suspected first and **cleared by measurement**: removing them
+makes every ground worse, not better. A one-pixel feather at each join fixes
+it (frost 8.1 -> 3.0, grass_dry 5.2 -> 1.3, stone 3.3 -> -0.7) while leaving 14
+of every 16 pixels exactly as drawn. k=2 and k=3 were measured and are worse.
+
+### Performance: faster, not slower
+
+| | before | after |
+|---|---|---|
+| paused median frame | 20.4 ms (49 fps) | **17.2 ms (58 fps)** |
+| world load + first draw | 781 ms | **765 ms** |
+
+The ground layer build traded 5,400 per-tile `drawImage` calls plus up to 5,400
+edge-blend stamps for a handful of full-map pattern fills.
+
+### A measurement that misled me twice, recorded so it does not again
+
+I built a "hard seam" metric: adjacent bare-ground tiles whose mean colour
+differs by more than 45. It produced two false readings before it produced a
+true one.
+
+- First it reported the five worst seams at **exactly tx=64 every single run**.
+  Those were the viewport-culled columns the renderer never draws, read against
+  pure black backdrop.
+- Then, with that fixed, it reported the tint fix as a **regression** (4242
+  went 37 -> 46). It was not: the tint fix visibly removes the pale rectangles.
+  The metric counts a wide smooth gradient as a seam once the two ends exceed
+  its threshold, which is exactly what a correct fade looks like.
+
+Screenshots settled it both times. The metric is useful for finding candidates
+and useless as the arbiter.

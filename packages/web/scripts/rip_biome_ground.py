@@ -150,17 +150,30 @@ def same_tone(cells, anchor=None):
     return kept
 
 
+JOIN_FEATHER = 1
+
+
 def mosaic(cells, rng, n=PATCH_CELLS):
     """Lay the artist's own ground cells out in an n x n arrangement.
 
-    Deliberately NOT cross-faded like a photographic texture quilt would be:
-    blending pixel art invents off-palette colours and softens every edge (the
-    first attempt here did exactly that and the result read as a blurry smear,
-    visibly worse than the source). These cells are tileset tiles -- the artist
-    drew them to butt against each other -- so a hard join is both faithful and
-    invisible. Horizontal/vertical flips multiply the pool without inventing
-    anything, and the arrangement is seamless by construction, since every
-    edge is a cell edge.
+    This used to claim the joins were "seamless by construction, since every
+    edge is a cell edge". They are not, and it is measurable: comparing the
+    mean pixel-to-pixel difference ACROSS a 16px cell boundary against the
+    same measure inside a cell, `frost` came out 9.9 vs 1.8 and `field` 14.0
+    vs 2.9. The source cells simply do not tile against themselves -- `stone`
+    is a single cell and still reads 4.7 excess against its own copy. The
+    flips were suspected first and cleared: removing them makes every ground
+    WORSE, not better.
+
+    So the joins get a one-pixel feather, and only a one-pixel feather. An
+    earlier attempt cross-faded whole cells like a photographic texture quilt;
+    that invents off-palette colours across the entire patch and read as a
+    blurry smear. Touching a single pixel either side of each join takes the
+    excess to roughly zero on almost every ground (frost 8.1 -> 3.0, grass_dry
+    5.2 -> 1.3, stone 3.3 -> -0.7) while leaving 14 of every 16 pixels exactly
+    as the artist drew them. Measured at k=2 and k=3 as well; both are worse.
+
+    The feather wraps, so it also softens the patch's own repeat seam.
     """
     out = np.zeros((n * CELL, n * CELL, 3), float)
     for r in range(n):
@@ -171,6 +184,24 @@ def mosaic(cells, rng, n=PATCH_CELLS):
             if rng.integers(2):
                 cell = cell[::-1, :]
             out[r * CELL:(r + 1) * CELL, c * CELL:(c + 1) * CELL] = cell
+    return feather_joins(out, n)
+
+
+def feather_joins(patch, n, k=JOIN_FEATHER):
+    """Blend a k-pixel band across every cell join, wrapping at the patch edge."""
+    out = patch.copy()
+    for axis in (0, 1):
+        rows = np.moveaxis(out, axis, 0)
+        for j in range(n):
+            b = j * CELL
+            for t in range(1, k + 1):
+                w = (t / (k + 1)) * 0.5
+                lo = (b - t) % rows.shape[0]
+                hi = (b + t - 1) % rows.shape[0]
+                a_lo, a_hi = rows[lo].copy(), rows[hi].copy()
+                rows[lo] = a_lo * (1 - w) + a_hi * w
+                rows[hi] = a_hi * (1 - w) + a_lo * w
+        out = np.moveaxis(rows, 0, axis)
     return out
 
 

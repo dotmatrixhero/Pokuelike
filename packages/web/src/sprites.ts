@@ -287,9 +287,18 @@ export function getFloorBaseName(biome?: string): string {
  * look calm. A cave floor is a cave floor whatever is above it.
  */
 export function getGroundPatch(biome?: string, layer?: string): HTMLImageElement | null {
-  const name = layer && layer !== "surface" ? GROUND_DEFAULT : getFloorBaseName(biome);
+  return getGroundPatchByName(layer && layer !== "surface" ? GROUND_DEFAULT : getFloorBaseName(biome));
+}
+
+/** The patch for a ground name straight off `BIOME_GROUND`'s values — renderer.ts's smooth biome cross-fade works in texture names, not biome names, because several biomes share one texture and blending a texture against itself is wasted work. */
+export function getGroundPatchByName(name: string): HTMLImageElement | null {
   return loadSprite(`ground_${name}`, `/tiles/ground/${name}.png`);
 }
+
+/** The ground name for the underground layer and for a world with no biome data. */
+export const GROUND_NAME_DEFAULT = GROUND_DEFAULT;
+/** The ground name a `sand` TERRAIN tile paints with, whatever biome it sits in. */
+export const GROUND_NAME_SAND = "shore";
 
 /**
  * The image for a decal the engine placed on a tile.
