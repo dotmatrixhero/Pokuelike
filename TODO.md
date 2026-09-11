@@ -12193,3 +12193,54 @@ raider acts ~2.3x as often and simply out-paces the three-turn interrupt
 window. That is a plausible sim outcome, not necessarily a bug — but it means
 the current grid measures a worst-case pairing and cannot say whether egg
 defence works in general. Next step is a speed-matched raider as a control row.
+
+## One-shotting: combat is bimodal, and it's a level-gap problem (OPEN — needs an owner decision)
+
+Direct ask, right after the chebyshev reach change raised the fight rate 24%:
+*"So... Are lots of clashes and hunts resulting in things getting one shot? I do
+want a little back and forth..."*
+
+Measured with `packages/runner/src/measureExchangeLength.ts`, 6 seeds x 6000
+ticks, against a verified pre-chebyshev control (29c3e1c; the 2 remaining
+`chebyshev` hits in that tree are `resourceIndex.ts`/`witness.ts`, unrelated to
+combat reach).
+
+Headline is deliberately parameter-free — of hits landing on a **full-HP**
+defender, how many killed outright:
+
+| source | before (manhattan) | after (chebyshev) |
+|---|---|---|
+| predation | 108/204 = **52.9%** | 88/170 = **51.8%** |
+| herdClash | 27/134 = 20.1% | 42/179 = 23.5% |
+
+- **Yes, badly — but predation only, and chebyshev did NOT cause it.** Predation
+  one-shot rate moved ~1 point. What chebyshev changed is volume: downings
+  417 -> 716 (+72%). Same lethality, much more of it, so the pre-existing
+  problem became visible.
+- **Back-and-forth is nearly absent:** in 88% of deaths the victim never landed
+  a hit on its killer (12.4% mutual, up from 8.4%).
+- **Root cause is the level gap.** On one-shot kills, attacker-minus-defender
+  level is mean **14.3**, median **15**, max **38**. `PREDATOR_LEVEL_BOOST = 6`
+  sets the floor; divergent leveling opens it. Stock mainline damage is linear
+  in attacker level while defender HP scales on its own lower level.
+- **Not a formula problem.** Non-lethal chip damage is well spread (predation:
+  25% of hits do <=10%, 19% <=35%, 15% <=75%). Combat is **bimodal**: outleveled
+  and deleted, or a real fight.
+
+Options (owner's call — do not retune unilaterally):
+1. Clamp the level gap used in the damage calc only (e.g. +/-8). Surgical.
+2. Lower `PREDATOR_LEVEL_BOOST`. Simple, but moves prey survivability globally
+   and task #15 already tuned this once.
+3. Floor damage against a full-HP target (can't drop below ~35% in one blow).
+   Most narratable: things get bloodied and flee instead of vanishing.
+4. Predator targeting prefers prey near its own level, so 15-gap encounters
+   stop being generated.
+
+Recommended: **3 + 4** (3 guarantees an exchange exists, 4 stops the absurd
+mismatches; both are visible on the map, not hidden in a meter). **1** is the
+cheapest single change.
+
+Process note: 7 sweeps were run where 3 would have done — *"i feel like you
+might be running too much sims. 3 runs should be plenty."* The window-size
+sweep was wasted effort: the headline metric is window-independent by
+construction, so it returned an identical 88/170 four times.
