@@ -1,5 +1,5 @@
 import type { Agent, TerrainKind, Tile, Vec2, Vision, World, Layer } from "@pokuelike/engine";
-import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel, tileAt, type DecalSlot } from "@pokuelike/engine";
+import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel, tileAt, visionScope, type DecalSlot } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
@@ -1515,7 +1515,9 @@ const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElemen
  */
 function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | undefined): void {
   if (!vision) return;
-  const explored = vision.explored[activeViewLayer];
+  // Scoped to THIS world, not just the layer — two cave levels are two
+  // worlds that share the layer "underground". See engine Vision's doc comment.
+  const explored = vision.explored[visionScope(world, activeViewLayer)];
   const underground = activeViewLayer !== "surface";
 
   let signature = Math.imul(world.tick + 1, 2654435761) ^ Math.imul((explored?.size ?? 0) + 1, 40503);

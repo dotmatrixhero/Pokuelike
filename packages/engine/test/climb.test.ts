@@ -121,3 +121,100 @@ describe('Direct ask (ROADMAP.md M7): "Done when: you emerge" — isAtExit/recor
     expect(log.events).toContainEqual(expect.objectContaining({ kind: "emerged", agentId: "me", depth: 5 }));
   });
 });
+
+/**
+ * Direct report: "Stairs do not work. Units in party do not follow past
+ * stairs." They didn't — `crossLevel` moved exactly one agent. The second
+ * half of the damage is less obvious and worse: `needs.ts`'s `applyFollowing`
+ * clears `followingId` the moment the leader isn't in the same `world.agents`
+ * array, so the staircase didn't just separate the party, it dissolved it.
+ */
+describe("the party comes with you", () => {
+  function follower(id: string, x: number, y: number): Agent {
+    const a = human(x, y);
+    a.id = id;
+    a.species = "venonat";
+    a.controlledBy = undefined;
+    a.followingId = "me";
+    return a;
+  }
+
+  function twoLevels(): { above: World; below: World; me: Agent } {
+    const above = level(1);
+    const below = level(2);
+    above.below = below;
+    below.above = above;
+    below.stairsUpAt = { x: 3, y: 3 };
+    setTile(above, "underground", 5, 5, "stairsDown");
+    const me = human(5, 5);
+    above.agents.push(me);
+    return { above, below, me };
+  }
+
+  it("carries every bonded follower down, and leaves nobody behind", () => {
+    const { above, below, me } = twoLevels();
+    const pals = [follower("pal-a", 5, 6), follower("pal-b", 4, 5)];
+    above.agents.push(...pals);
+
+    expect(useStairs(above, me, new EventLog())).toBe(below);
+    for (const pal of pals) {
+      expect(below.agents).toContain(pal);
+      expect(above.agents).not.toContain(pal);
+      expect(pal.followingId).toBe("me");
+    }
+  });
+
+  it("lands them on distinct walkable tiles, not stacked on the stairs", () => {
+    const { above, below, me } = twoLevels();
+    const pals = [follower("pal-a", 5, 6), follower("pal-b", 4, 5), follower("pal-c", 6, 5)];
+    above.agents.push(...pals);
+    useStairs(above, me, new EventLog());
+
+    const spots = [me, ...pals].map((a) => `${a.pos.x},${a.pos.y}`);
+    expect(new Set(spots).size).toBe(spots.length);
+    expect(me.pos).toEqual({ x: 3, y: 3 });
+    // Close enough that the party is still a party on arrival.
+    for (const pal of pals) expect(Math.max(Math.abs(pal.pos.x - 3), Math.abs(pal.pos.y - 3))).toBeLessThanOrEqual(2);
+  });
+
+  it("does not drag an unbonded bystander, a corpse, or an egg along", () => {
+    const { above, below, me } = twoLevels();
+    const stranger = follower("stranger", 5, 6);
+    stranger.followingId = undefined;
+    const corpse = follower("corpse", 4, 5);
+    corpse.alive = false;
+    const egg = follower("egg", 6, 5);
+    egg.isEgg = true;
+    above.agents.push(stranger, corpse, egg);
+
+    useStairs(above, me, new EventLog());
+    for (const other of [stranger, corpse, egg]) {
+      expect(above.agents).toContain(other);
+      expect(below.agents).not.toContain(other);
+    }
+  });
+
+  it("records a crossing event per party member, so the log can narrate it", () => {
+    const { above, me } = twoLevels();
+    above.agents.push(follower("pal-a", 5, 6));
+    const log = new EventLog();
+    useStairs(above, me, log);
+    const crossings = log.events.filter((e) => e.kind === "crossedCaveLevel");
+    expect(crossings.map((e) => (e as { agentId: string }).agentId).sort()).toEqual(["me", "pal-a"]);
+  });
+
+  it("brings them back up too", () => {
+    const above = level(1);
+    const below = level(2);
+    above.below = below;
+    below.above = above;
+    above.stairsDownAt = { x: 7, y: 7 };
+    setTile(below, "underground", 2, 2, "stairsUp");
+    const me = human(2, 2);
+    const pal = follower("pal-a", 2, 3);
+    below.agents.push(me, pal);
+
+    expect(useStairs(below, me, new EventLog())).toBe(above);
+    expect(above.agents).toContain(pal);
+  });
+});

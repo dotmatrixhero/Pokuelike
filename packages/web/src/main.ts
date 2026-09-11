@@ -4,7 +4,7 @@ import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, 
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
-import { examineTile, selfVerbsFor, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { examineTile, selfVerbsFor, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
 import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -488,8 +488,23 @@ function resetUiForNewWorld(): void {
   renderInspector(inspectorEl, undefined, world);
   tabManualOverrideForBattleSeq = undefined;
   lastAutoSwitchedBattleSeq = undefined;
-  selectTab("inspector", false);
+  // In play mode the sidebar belongs to the player, not the world. Crossing a
+  // staircase used to kick it to "World overview · Tick 0 · Population 9",
+  // which is a large part of why a level change read as the whole game having
+  // reset — the panel you were reading was replaced by a different one.
+  selectTab(playerMode ? "you" : "inspector", false);
   updateStatusLabels();
+
+  // The player has just been moved into a world nothing has ticked for them
+  // yet — down the stairs, across a zone edge, out of a save file — so
+  // `vision.visible` still describes the world they left. `advancePlayerTurn`
+  // is the only other thing that recomputes it, and no turn is spent on a
+  // world swap. Missed until fog became per-world: the player used to arrive
+  // carrying the previous level's explored set, which hid the fact that
+  // nothing here was actually being looked at. Measured: without this the
+  // canvas renders 100% dark on arrival at level 2.
+  const arriving = findPlayer(world);
+  if (arriving) updatePlayerVision(world, arriving);
 }
 
 /**

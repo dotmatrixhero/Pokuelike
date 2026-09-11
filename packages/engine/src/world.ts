@@ -71,7 +71,20 @@ export function createWorld(width: number, height: number, seed: number = random
   for (const layer of LAYER_ORDER) {
     tiles[layer] = createLayerGrid(width, height);
   }
-  return { width, height, tiles, agents: [], tick: 0, rngSeed: seed, rng: mulberry32(seed) };
+  return { width, height, tiles, agents: [], tick: 0, rngSeed: seed, rng: mulberry32(seed), id: nextWorldId(seed) };
+}
+
+/**
+ * A stable identity per constructed `World` — see `World.id`. Deliberately
+ * derived from the seed plus a process-local counter rather than from
+ * `world.rng`: drawing from the shared generator here would shift every
+ * subsequent roll in the run and break the determinism guarantee in
+ * `createWorld`'s own doc comment, and this string is never a simulation
+ * input, only a key.
+ */
+let worldsCreated = 0;
+function nextWorldId(seed: number): string {
+  return `w${(seed >>> 0).toString(36)}-${worldsCreated++}`;
 }
 
 export function tileAt(world: World, layer: Layer, x: number, y: number): Tile | undefined {

@@ -946,12 +946,24 @@ export interface Activity {
 /**
  * The player's field of view and map memory. Tile indices
  * (`y * world.width + x`) rather than `Vec2`s so the renderer can test
- * membership per tile per frame without allocating. `explored` is per layer
- * and only grows; `visible` is replaced whole each turn.
+ * membership per tile per frame without allocating. `explored` only grows;
+ * `visible` is replaced whole each turn.
+ *
+ * `explored` is keyed by `vision.ts`'s `visionScope` — **world id plus
+ * layer**, not layer alone. Direct report: "is the level 2 exactly the same
+ * as level 1? i feel like the fog of war doesn't reset so all the places ive
+ * been looked the same or something." It was keyed by `Layer` alone, and
+ * every cave level is a separate `World` sharing the layer `"underground"`
+ * (see `World.below`) — so walking down the stairs carried level 1's map
+ * memory onto level 2 wholesale. Measured on seed 7: 96 tiles arrived
+ * pre-explored on a level the player had never set foot on, 65 of them with
+ * matching terrain, which is exactly why it read as the same room again.
+ * The same bug applied to every overworld zone (`crossZoneEdge`), all of
+ * which share the layer `"surface"`.
  */
 export interface Vision {
   visible: Set<number>;
-  explored: Partial<Record<Layer, Set<number>>>;
+  explored: Record<string, Set<number>>;
 }
 
 export interface Agent {
@@ -2828,6 +2840,16 @@ export interface World {
   below?: World;
   /** See `below`'s doc comment. */
   above?: World;
+  /**
+   * Stable per-world identity, assigned by `world.ts`'s `createWorld`. Not a
+   * simulation input — nothing rolls off it — it exists so per-world state
+   * held on an agent that MOVES between worlds (a cave level, an overworld
+   * zone) can be filed under the world it belongs to. Today that means
+   * `Vision.explored`; see its doc comment for the bug that motivated it.
+   * Optional so a hand-built literal `World` in a test still type-checks;
+   * `visionScope` falls back to the bare layer when it is absent.
+   */
+  id?: string;
   /** 1 = the surface-adjacent chamber (`createCaveScenario`'s own layer 1); increases with depth. Absent means this world isn't part of a chained cave run at all. */
   depth?: number;
   /** Where a player arriving from `above` lands — the `"stairsUp"` tile on this level. Absent on level 1 (nothing above it). */

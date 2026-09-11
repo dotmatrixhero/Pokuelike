@@ -93,15 +93,35 @@ export function playerVisibleTiles(world: World, agent: Agent): Vec2[] {
 }
 
 /**
- * Recomputes `agent.vision.visible` and folds it into the per-layer
- * `explored` memory. Called at the end of every player turn (simulation.ts's
- * `advancePlayerTurn`) and once when a scenario places the player, so the
- * first frame is already honest.
+ * The key `Vision.explored` files map memory under: which world, and which
+ * layer of it. A cave level and the level below it are two different `World`s
+ * that both call their one populated layer `"underground"`, and two overworld
+ * zones are two different `World`s that both call theirs `"surface"` — keying
+ * on the layer alone made every one of them share a single fog map. See
+ * `Vision`'s doc comment for the measurement.
+ *
+ * Falls back to the bare layer for a `World` with no `id`, which today means
+ * only a hand-built literal in a test.
+ */
+export function visionScope(world: World, layer: Layer): string {
+  return world.id ? `${world.id}:${layer}` : layer;
+}
+
+/** The map memory this agent has of the layer it is standing on, in this world. */
+export function exploredTiles(world: World, agent: Agent): Set<number> | undefined {
+  return agent.vision?.explored[visionScope(world, agent.layer)];
+}
+
+/**
+ * Recomputes `agent.vision.visible` and folds it into the `explored` memory
+ * for this world and layer. Called at the end of every player turn
+ * (simulation.ts's `advancePlayerTurn`) and once when a scenario places the
+ * player, so the first frame is already honest.
  */
 export function updatePlayerVision(world: World, agent: Agent): void {
   const vision = agent.vision ?? { visible: new Set<number>(), explored: {} };
   vision.visible = new Set(playerVisibleTiles(world, agent).map((p) => tileIndex(world, p.x, p.y)));
-  const explored = (vision.explored[agent.layer] ??= new Set<number>());
+  const explored = (vision.explored[visionScope(world, agent.layer)] ??= new Set<number>());
   for (const idx of vision.visible) explored.add(idx);
   agent.vision = vision;
 }

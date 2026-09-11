@@ -1,6 +1,6 @@
 import type { Agent, PlayerAction, Vec2, World } from "./types.js";
 import { canStepTo } from "./movement.js";
-import { tileIndex } from "./vision.js";
+import { exploredTiles, tileIndex } from "./vision.js";
 
 /**
  * Tap-to-walk — direct ask: "I can't play at all on mobile. Can you allow a
@@ -29,11 +29,11 @@ const STEPS: readonly (readonly [-1 | 0 | 1, -1 | 0 | 1])[] = [
   [-1, -1],
 ];
 
-/** Tiles the player has seen at some point on their current layer, or sees now. */
-function knownTiles(agent: Agent): Set<number> | undefined {
+/** Tiles the player has seen at some point on this world's current layer, or sees now. */
+function knownTiles(world: World, agent: Agent): Set<number> | undefined {
   const v = agent.vision;
   if (!v) return undefined;
-  const known = new Set(v.explored[agent.layer] ?? []);
+  const known = new Set(exploredTiles(world, agent) ?? []);
   for (const i of v.visible) known.add(i);
   return known;
 }
@@ -46,7 +46,7 @@ function knownTiles(agent: Agent): Set<number> | undefined {
  */
 export function nextTravelStep(world: World, agent: Agent, target: Vec2): PlayerAction | undefined {
   if (target.x === agent.pos.x && target.y === agent.pos.y) return undefined;
-  const known = knownTiles(agent);
+  const known = knownTiles(world, agent);
   if (!known || !known.has(tileIndex(world, target.x, target.y))) return undefined;
 
   // BFS from the target back to the player so the first step falls out of

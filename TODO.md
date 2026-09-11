@@ -11949,3 +11949,97 @@ or something later. Or like rock throw to clear paths.."*
       terrain move must actually change the tile.
 - [x] Full suite green: engine **1647**, data 475, build clean; round-3 12/12
       and touch-drag 7/7 still pass.
+
+## Fixed: stairs — the party comes with you, and each level has its own fog
+
+Direct report: *"Okay. Stairs do not work. Units in party do not follow past
+stairs, and it like just resets to the same zone. Does not generate a new zone
+or anything..."* Then, mid-investigation: *"is the level 2 exactly the same as
+level 1? i feel like the fog of war doesn't reset so all the places ive been
+looked the same or something, and it spawns me someqwhere random."*
+
+Three separate defects under one symptom. The second intuition was the one
+that cracked it.
+
+### 1. Descent itself was never broken — measured, not assumed
+
+A live descent probe pressed `>` five times against the real dev server:
+
+| step | depth | terrain fingerprint | agents | below? |
+| --- | --- | --- | --- | --- |
+| 0 | 1 | 1290090526 | 5 | yes |
+| 1 | 2 | 1096515179 | 7 | yes |
+| 2 | 3 | -366254502 | 7 | yes |
+| 3 | 4 | -1903320629 | 6 | yes |
+| 4 | 5 | -121382462 | 3 | **no** |
+| 5 | 5 | -121382462 | 3 | no |
+
+Five distinct levels, all really generated. Step 4→5 is unchanged because
+depth 5 is the bottom — it has the exit, not more stairs — so `>` there is a
+legitimate no-op, and `useStairs` returning `undefined` prints "There are no
+stairs here."
+
+### 2. The party did not cross — and the bond was destroyed, not just stretched
+
+- [x] `crossLevel` filtered exactly ONE agent out of `from.agents` and pushed
+      exactly that one into `to.agents`. Followers stayed upstairs.
+- [x] The worse half: `needs.ts`'s `applyFollowing` clears `followingId` the
+      moment the leader is not in the same `world.agents` array. So a
+      staircase did not merely separate the party — it dissolved it, silently,
+      permanently. A bond you spent the run earning should not be deletable by
+      a flight of stairs.
+- [x] Now every living, non-egg, bonded follower crosses, placed on distinct
+      walkable tiles near the landing by a local ring search that dodges
+      occupants. Deliberately NOT distance-gated: gating reads more diegetic,
+      but its failure mode is silent permanent party loss for the follower who
+      happened to be four tiles back.
+- [x] One `crossedCaveLevel` event per crosser, so the log can narrate it.
+- [x] 5 new tests in `climb.test.ts`. Proved they fail without the fix: 4
+      failed / 8 passed with the change stashed, 12/12 with it.
+
+### 3. "The same zone" — fog of war was shared across every level
+
+- [x] **Root cause.** `Vision.explored` was keyed by `Layer` alone, and every
+      cave level is a separate `World` that calls its one populated layer
+      `"underground"`. Same dimensions, so tile index N on level 2 was
+      "explored" if index N had been explored on level 1.
+- [x] Measured on seed 7 before the fix: **96 tiles arrived pre-explored** on a
+      level the player had never set foot on, **65 of them with matching
+      terrain** — which is exactly why it read as walking back into the same
+      room.
+- [x] Same bug applied to every overworld zone (`crossZoneEdge`), all of which
+      share the layer `"surface"`.
+- [x] Fix: `World.id` (assigned by `createWorld`, derived from the seed plus a
+      process counter — never drawn from `world.rng`, which would shift every
+      subsequent roll in the run), and `explored` now keyed by
+      `visionScope(world, layer)`. Saves round-trip the id; a save written
+      before it existed gets `restored-<index>` on load so old runs still get
+      per-level fog.
+- [x] Measured after: arriving on level 2, `explored` has two separate keys and
+      the level-2 one is **0** before the first look. Level 1 keeps its own
+      memory, so climbing back up is not re-fogged.
+
+### 4. A regression I introduced, caught by the live check and reported here
+
+- [x] With the stale fog gone, level 2 rendered **100% dark** — the player
+      could not see their own feet. `tryUseStairs` never recomputed vision:
+      `advancePlayerTurn` is the only other thing that does, and a world swap
+      spends no turn. The old shared-fog bug had been hiding this the whole
+      time. `resetUiForNewWorld` now recomputes the arriving player's vision,
+      which covers stairs, zone edges and save restores alike.
+- [x] **The first darkness measurement was worthless and the control caught
+      it.** `document.querySelector("canvas")` picked a 300×150 element that
+      is not the scene; it read 100% dark on level 1 too. Sampling level 1 as
+      a control is the only reason that did not ship as a "finding."
+
+### 5. Also: the sidebar flipped to World overview on every crossing
+
+- [x] `resetUiForNewWorld` unconditionally selected the Inspector tab, so
+      crossing a staircase replaced "Human · Lv 5" with "World overview · Tick
+      0 · Population 9". Pre-existing, not from this round, but it is a real
+      part of why a level change read as the whole game resetting. Play mode
+      now stays on the You panel.
+
+- [x] Full suite green: engine **1658**, data **477**, web build clean.
+      Live-verified through the real UI: both Venonat cross and are standing
+      beside the player on level 2, still bonded, on a freshly dark map.

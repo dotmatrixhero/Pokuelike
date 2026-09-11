@@ -12,6 +12,7 @@ import {
   playerVisibleTiles,
   tileIndex,
   updatePlayerVision,
+  visionScope,
 } from "../src/vision.js";
 import { NIGHT_FOV_PENALTY } from "../src/fov.js";
 import type { Agent, Layer } from "../src/types.js";
@@ -111,7 +112,7 @@ describe("playerVisibleTiles", () => {
 });
 
 describe("updatePlayerVision: memory", () => {
-  it("visible is replaced each turn; explored only grows, per layer", () => {
+  it("visible is replaced each turn; explored only grows, per world AND layer", () => {
     const world = openWorld();
     const me = player(20, 20);
     updatePlayerVision(world, me);
@@ -122,15 +123,39 @@ describe("updatePlayerVision: memory", () => {
     updatePlayerVision(world, me);
     expect(me.vision!.visible.has(tileIndex(world, 20, 20))).toBe(false);
     expect(me.vision!.visible.has(tileIndex(world, 20, 30))).toBe(true);
-    const explored = me.vision!.explored.underground!;
+    const explored = me.vision!.explored[visionScope(world, "underground")]!;
     for (const idx of first) expect(explored.has(idx)).toBe(true);
     expect(explored.has(tileIndex(world, 20, 30))).toBe(true);
-    expect(me.vision!.explored.surface).toBeUndefined();
+    expect(me.vision!.explored[visionScope(world, "surface")]).toBeUndefined();
 
     me.layer = "surface";
     updatePlayerVision(world, me);
-    expect(me.vision!.explored.surface!.size).toBeGreaterThan(0);
-    expect(me.vision!.explored.underground!.size).toBe(explored.size);
+    expect(me.vision!.explored[visionScope(world, "surface")]!.size).toBeGreaterThan(0);
+    expect(me.vision!.explored[visionScope(world, "underground")]!.size).toBe(explored.size);
+  });
+
+  /**
+   * Direct report: "is the level 2 exactly the same as level 1? i feel like
+   * the fog of war doesn't reset so all the places ive been looked the same."
+   * Two worlds, same layer name, same dimensions — the shape every cave level
+   * and every overworld zone has.
+   */
+  it("a second world does NOT inherit the first world's map memory", () => {
+    const first = openWorld();
+    const second = openWorld();
+    expect(first.id).not.toBe(second.id);
+    const me = player(20, 20);
+    updatePlayerVision(first, me);
+    const knownOnFirst = me.vision!.explored[visionScope(first, "underground")]!;
+    expect(knownOnFirst.size).toBeGreaterThan(0);
+    expect(me.vision!.explored[visionScope(second, "underground")]).toBeUndefined();
+
+    // Arriving somewhere else on the second world reveals only what is in
+    // sight there — the first world's tiles stay remembered, separately.
+    me.pos = { x: 30, y: 30 };
+    updatePlayerVision(second, me);
+    expect(me.vision!.explored[visionScope(second, "underground")]!.has(tileIndex(second, 20, 20))).toBe(false);
+    expect(knownOnFirst.has(tileIndex(first, 20, 20))).toBe(true);
   });
 
   it("advancePlayerTurn leaves vision computed for the new position", () => {
