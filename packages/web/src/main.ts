@@ -659,6 +659,41 @@ function runActivity(): void {
 }
 
 /**
+ * Direct ask: "itd be nice if it was easy to use keyboard to select
+ * inventory items and use them as expected, comman[d] pokemon, select
+ * attacks easily, etc." Numbers the first 9 primary rows of a just-built
+ * pack/command menu (recipes to make, moves to use, standing orders,
+ * partner sections) in DOM order — `activateNumberedMenuRow` below,
+ * wired into the keydown handler wherever one of these menus is open,
+ * fires the same row a click would. Deliberately scoped to
+ * `.pack-row.tappable` only, not the smaller per-item `.pack-action-btn`
+ * row (Eat/Offer/Hold/Wear/Drop/Place): those are few (1-3 per item) and
+ * already sit right next to the item they act on, while the rows this
+ * numbers are the longer lists (every known recipe, every move, every
+ * standing order) that are genuinely tedious to reach by mouse/tap alone.
+ */
+function numberMenuRows(container: HTMLElement): void {
+  const rows = Array.from(container.querySelectorAll<HTMLButtonElement>("button.pack-row.tappable"));
+  rows.slice(0, 9).forEach((btn, i) => {
+    const badge = document.createElement("span");
+    badge.className = "menu-key-badge";
+    badge.textContent = String(i + 1);
+    btn.prepend(badge);
+  });
+}
+
+/** Fires the Nth numbered row in `container` (1-based, matching `numberMenuRows`'s own badges) — a no-op, not an error, past 9 or with nothing there. Returns whether a row actually fired, so callers know whether to fall through to anything else the key might mean. */
+function activateNumberedMenuRow(container: HTMLElement, key: string): boolean {
+  const n = Number(key);
+  if (!Number.isInteger(n) || n < 1 || n > 9) return false;
+  const rows = container.querySelectorAll<HTMLButtonElement>("button.pack-row.tappable");
+  const btn = rows[n - 1];
+  if (!btn) return false;
+  btn.click();
+  return true;
+}
+
+/**
  * The pack menu: what you carry (tap a holdable thing to hold or wear it)
  * and what you can make. Known recipes only; a known recipe you lack the
  * inputs for stays listed with what is missing — "that's the shopping list
@@ -764,6 +799,7 @@ function openPackMenu(): void {
     else if (missing.length === 0 && needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · needs a fire nearby`));
     else packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · you have no ${missing.join(", ")}`));
   }
+  numberMenuRows(packMenuBodyEl);
   packMenuEl.hidden = false;
 }
 
@@ -932,6 +968,7 @@ function openCommandMenu(): void {
       );
     }
   }
+  numberMenuRows(commandMenuBodyEl);
   commandMenuEl.hidden = false;
 }
 
@@ -1138,6 +1175,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (!commandMenuEl.hidden) {
     if (e.key === "Escape") closeCommandMenu();
+    else if (activateNumberedMenuRow(commandMenuBodyEl, e.key)) e.preventDefault();
     return;
   }
   if (targeting) {
@@ -1147,6 +1185,7 @@ window.addEventListener("keydown", (e) => {
   cancelTravel();
   if (!packMenuEl.hidden) {
     if (e.key === "Escape" || e.key === "i") closePackMenu();
+    else if (activateNumberedMenuRow(packMenuBodyEl, e.key)) e.preventDefault();
     return;
   }
   if (e.key === "x") {

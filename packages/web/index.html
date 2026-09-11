@@ -448,8 +448,13 @@
       .pack-title button { background: none; border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px; min-width: 32px; min-height: 32px; }
       .pack-heading { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin: 10px 0 4px; }
       .pack-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 7px 8px; border: 1px solid transparent; border-radius: 8px; color: var(--text); background: none; text-align: left; font: inherit; }
-      .pack-row.tappable { border-color: var(--panel-border); background: rgba(255, 255, 255, 0.05); cursor: pointer; min-height: 40px; }
+      .pack-row.tappable { border-color: var(--panel-border); background: rgba(255, 255, 255, 0.05); cursor: pointer; min-height: 40px; position: relative; padding-left: 28px; }
       .pack-row.tappable:active { background: var(--accent); color: #06111f; }
+      /* Direct ask: "easy to use keyboard to select inventory items and
+         use them as expected... select attacks easily" — see main.ts's
+         `numberMenuRows`. Left padding above makes room for this without
+         overlapping the row's own text. */
+      .menu-key-badge { position: absolute; top: 50%; left: 6px; transform: translateY(-50%); font-size: 10px; line-height: 1; color: var(--text-dim); background: rgba(255, 255, 255, 0.08); border: 1px solid var(--panel-border); border-radius: 4px; padding: 1px 4px; pointer-events: none; }
       .pack-sub { font-size: 11px; color: var(--text-dim); }
       .pack-row-actions { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
       .pack-action-btn { flex: none; padding: 5px 10px; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.05); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }

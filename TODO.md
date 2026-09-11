@@ -9905,3 +9905,51 @@ input — the ally found it and engaged entirely on its own
 (`behavior: "fight"`, `huntTarget` set, the foe's HP dropped from 8 to
 1.72) — genuine autonomous behavior, not just a state flag that reads
 correctly in isolation.
+
+## Built: wishlist item 9 — number-key shortcuts for the pack and command menus
+
+Direct ask: *"itd be nice if it was easy to use keyboard to select
+inventory items and use them as expected, comman[d] pokemon, select
+attacks easily, etc."*
+
+`numberMenuRows(container)` badges the first 9 `.pack-row.tappable`
+buttons in a just-built pack/command menu (in DOM order) with a small
+number, and the keydown handler's existing "a menu is open" branches
+(already handling Escape there) now also try `activateNumberedMenuRow`
+first — a digit key fires that row exactly as a click would, since it
+*is* a click (`btn.click()`), not a re-implementation of what the row
+does.
+
+**Scoped to `.pack-row.tappable` only, deliberately not the smaller
+per-item `.pack-action-btn` row** (Eat/Offer/Hold/Wear/Drop/Place). The
+rows this numbers are the genuinely long, tedious-by-mouse lists —
+every known recipe, every move (yours and each bonded partner's), every
+standing order — while the per-item action buttons are few (1-3) and
+already sit right next to the item they act on. Numbering everything
+would have meant either a two-stage select-item-then-select-action flow
+(real scope creep past "itd be nice") or numbers jumping unpredictably
+between item rows and action buttons in the same list; this way one
+consistent number always means the same thing (the Nth primary thing
+you could do here) across both menus.
+
+No new CSS structure — a small absolutely-positioned badge in each
+row's own existing padding (bumped from 8px to 28px on the left to make
+room), so it doesn't collide with the row's text.
+
+**Live-verified in the browser**: opened the pack menu with a real
+craftable recipe (Fiber) in the list, confirmed its row got badge "1,"
+pressed "1" — the craft activity started and the menu closed, exactly
+like tapping it. Opened the Command menu on a real bonded partner,
+confirmed all 9 rows (the player's own Tackle, the four standing-order
+rows, the partner's four moves) got sequential badges, pressed "4"
+(Hunt) — `standingOrder` was set, the menu closed, the HUD read
+"Shellder is now on hunt." Both menus' full engine suite: 1561/1561
+(unchanged — this round is web-only). Real
+`pnpm --filter @pokuelike/web build` clean.
+
+This closes out the 9-item wishlist backlog (TODO.md's "Backlog:
+9-item playtest wishlist" entry above) — every item now built, tested,
+and live-verified. One real, separate finding surfaced along the way is
+still open, not part of this list: the "follower at 'tolerant' trust
+can flee its own leader" backlog item (below the wishlist entries),
+found while live-verifying item 1.
