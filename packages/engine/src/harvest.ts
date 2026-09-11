@@ -28,7 +28,16 @@ import { CROP_IDS, FOOD_CROPS, type CropId } from "./crops.js";
  * defensive fallback for the rare tile that somehow has no flavor set.
  */
 
-export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | CropId;
+/**
+ * `"meat"`/`"hide"` (direct ask: "can't loot or butcher dead units...
+ * maybe you need a knife to do more") aren't gathered off a tile at all —
+ * `player.ts`'s "butcher" action yields them directly off a truly-dead
+ * corpse's own body — but they live in this same table/union since
+ * everything else that names an inventory-stack item does (itemName/
+ * itemWeight in the data package's crafting.ts fall back to `MATERIALS`
+ * for exactly this reason).
+ */
+export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | "meat" | "hide" | CropId;
 
 const CROP_MATERIALS = Object.fromEntries(CROP_IDS.map((id) => [id, { name: FOOD_CROPS[id].name, weight: 1 }])) as Record<CropId, { name: string; weight: number }>;
 
@@ -37,18 +46,25 @@ export const MATERIALS: Record<MaterialId, { name: string; weight: number }> = {
   deadwood: { name: "Deadwood", weight: 2 },
   flint: { name: "Flint", weight: 1 },
   food: { name: "Berries", weight: 1 },
+  meat: { name: "Meat", weight: 2 },
+  hide: { name: "Hide", weight: 2 },
   ...CROP_MATERIALS,
 };
 
 /**
  * Every material a gathered/offered food tile can actually be — the plain
  * `"food"` fallback plus every real crop (`crops.ts`'s `CROP_IDS`, herbs
- * included). What `player.ts`'s `eat`/`offer` treat as "a berry in the
- * pack" now that gathering hands back a specific crop instead of always
- * generic Berries — checking a bare `itemKey === "food"` would silently
- * stop recognizing anything else in the pack as edible.
+ * included) — plus `"meat"`, a butchered corpse's own real yield, edible
+ * raw straight out of the pack same as any berry (no engine changes
+ * needed beyond this list: `foodNutritionMultiplierOf`/`thirstReliefOf`
+ * below already default to a neutral 1x/0 for anything not a real crop).
+ * `"hide"` deliberately is NOT here — it's a crafting material, not food.
+ * What `player.ts`'s `eat`/`offer` treat as "a berry in the pack" now that
+ * gathering hands back a specific crop instead of always generic Berries
+ * — checking a bare `itemKey === "food"` would silently stop recognizing
+ * anything else in the pack as edible.
  */
-export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", ...CROP_IDS];
+export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", "meat", ...CROP_IDS];
 
 /**
  * The nutrition multiplier for a carried food item with no tile to read
@@ -96,14 +112,26 @@ export function harvestableAt(world: World, layer: Layer, pos: Vec2): MaterialId
   // it. The chamber's flora spreads over the floor near water, and a bot
   // that walked to a "floor" tile found "flora" there by the time it
   // arrived (validateTorch.ts, seed 202) — lichen grows among moss.
-  const ground = tile.terrain === "floor" || tile.terrain === "sunbeam" || tile.terrain === "mud" || tile.terrain === "flora" || tile.terrain === "seedling";
+  // "stone" (direct ask: "grab that [flint] in some stone tiles") is a
+  // real, visible rocky outcrop — the primary flint source now — but
+  // still counts as `ground` so it doesn't lose the ordinary
+  // lichen/deadwood checks a plain floor tile in the same spot would have.
+  const ground = tile.terrain === "floor" || tile.terrain === "sunbeam" || tile.terrain === "mud" || tile.terrain === "flora" || tile.terrain === "seedling" || tile.terrain === "stone";
   if (ground) {
     if (layer === "underground" && anyWithin(world, layer, pos, LICHEN_WATER_RANGE, (t) => t.terrain === "water")) out.push("lichen");
     if (anyWithin(world, layer, pos, DEADWOOD_SUNBEAM_RANGE, (t) => t.terrain === "sunbeam")) out.push("deadwood");
     // Ruling: "I want gathering on layer 1." Cave walls are rock, so floor
     // beside a wall underground gives loose flint too — the reachability
-    // test found no rocky ground or boulders on any cave seed.
-    const rockNearby = tile.groundType === "rocky" || anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || (layer === "underground" && t.terrain === "wall"));
+    // test found no rocky ground or boulders on any cave seed. `"stone"`
+    // is the real, visible fix that ruling asked for (worldgen.ts places
+    // a handful of real outcrops near cave walls); the wall-adjacency
+    // rule stays as a fallback so flint is never fully blocked by sparse
+    // placement, and a stone tile itself is always flint-bearing —
+    // standing right on the outcrop, not just near a wall.
+    const rockNearby =
+      tile.terrain === "stone" ||
+      tile.groundType === "rocky" ||
+      anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || t.terrain === "stone" || (layer === "underground" && t.terrain === "wall"));
     if (rockNearby) out.push("flint");
   }
   return out;

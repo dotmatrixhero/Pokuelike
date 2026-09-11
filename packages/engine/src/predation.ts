@@ -2111,6 +2111,13 @@ export function applyPredationInstincts(
         // blocks" — an armed wild hunter now reads exactly like an armed
         // player.
         if (other.species === "human") {
+          // Backlog: "a tolerant-trust follower can flee its own leader" —
+          // trustFleeFactor("tolerant") is 0.5, not 0, so a follower short
+          // of "bonded" still had a real (if reduced) chance to bolt from
+          // the very human it was actively following. A follower doesn't
+          // treat its own leader as a threat at all, regardless of trust
+          // stage; it can still flee anything else normally.
+          if (agent.followingId === other.id) return false;
           const radius = playerFleeRadius(world, other, baseFleeRadius, agent);
           return radius >= 1 && isDetectable(world, agent.pos, other, radius);
         }

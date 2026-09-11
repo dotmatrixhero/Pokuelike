@@ -286,3 +286,45 @@ describe("Direct ask: \"Attack should move list should work when you have a weap
     expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("tree");
   });
 });
+
+describe('Direct ask: "change attack for player moves to also be targeted, like allies moves" — explicit target', () => {
+  it("an explicit target tile lands a hit there, regardless of dx/dy (dx/dy are ignored once target is set)", () => {
+    const { world, me } = worldWithPlayer();
+    // A hostile diagonally adjacent — `dx`/`dy` (each -1/0/1) can't even
+    // express this correctly on their own the way a real `target` can,
+    // since a diagonal-plus-orthogonal tile pair collapses to the same
+    // dx/dy; passing an intentionally-wrong dx/dy proves target wins.
+    const target = prey("rat", 6, 6);
+    world.agents.push(target);
+    const before = target.hp;
+    const outcome = applyPlayerAction(world, me, { kind: "attack", dx: -1, dy: -1, moveId: "test_tackle", target: { x: 6, y: 6 } });
+    expect(outcome).toBe(true);
+    expect(target.hp).toBeLessThan(before!);
+    expect(me.lastActionOutcome?.attackedId).toBe("rat");
+  });
+
+  it("a target beyond the chosen move's range fails, same as an out-of-range command for a partner", () => {
+    const { world, me } = worldWithPlayer();
+    const target = prey("rat", 8, 5);
+    world.agents.push(target);
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, moveId: "test_tackle", target: { x: 8, y: 5 } })).toBe(false);
+    expect(target.hp).toBe(25);
+  });
+
+  it("a target tile requires an explicit moveId — no auto-pick for an arbitrary tile", () => {
+    const { world, me } = worldWithPlayer();
+    const target = prey("rat", 6, 5);
+    world.agents.push(target);
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 1, dy: 0, target: { x: 6, y: 5 } })).toBe(false);
+    expect(target.hp).toBe(25);
+  });
+
+  it("a targeted terrain-effect move fells a tree at the named tile", () => {
+    const { world, me } = worldWithPlayer();
+    me.inventory = [{ itemKey: "axe", weight: 4, count: 1 }];
+    applyPlayerAction(world, me, { kind: "equip", itemKey: "axe" });
+    setTile(world, "surface", 6, 5, "tree");
+    expect(applyPlayerAction(world, me, { kind: "attack", dx: 0, dy: 0, moveId: "test_fell", target: { x: 6, y: 5 } })).toBe(true);
+    expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("floor");
+  });
+});

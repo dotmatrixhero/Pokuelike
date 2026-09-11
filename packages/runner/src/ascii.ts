@@ -43,6 +43,12 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   // Fire reads as the one thing on the map that is actively happening.
   fire: "*",
   ice: "%",
+  // ROADMAP.md M7 — a cave level's link to its neighbor.
+  stairsDown: ">",
+  stairsUp: "<",
+  // "Done when: you emerge" — the one tile that ends the run.
+  exit: "X",
+  stone: "n",
 };
 
 const TERRAIN_BG: Record<TerrainKind, Rgb> = {
@@ -62,6 +68,10 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   shelter: [64, 50, 34],
   fire: [96, 32, 10],
   ice: [30, 58, 74],
+  stairsDown: [70, 60, 40],
+  stairsUp: [70, 60, 40],
+  exit: [120, 100, 20],
+  stone: [72, 66, 58],
 };
 
 const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -81,6 +91,10 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   shelter: [196, 158, 108],
   fire: [255, 168, 64],
   ice: [200, 232, 240],
+  stairsDown: [220, 190, 120],
+  stairsUp: [220, 190, 120],
+  exit: [255, 235, 180],
+  stone: [190, 182, 168],
 };
 
 /**

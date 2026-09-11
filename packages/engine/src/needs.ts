@@ -7,9 +7,11 @@ import {
   applyEggEating,
   applyPredationInstincts,
   applyTerrainEffectAt,
+  FALLBACK_MAX_HP,
   hasAwakeHerdmateNearby,
   hasNearbyThreat,
   manhattan,
+  nearest,
   resolveChargedAttack,
   resolveHit,
 } from "./predation.js";
@@ -24,7 +26,9 @@ import {
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
-import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
+import { FOOD_MATERIAL_IDS, MATERIALS, foodNutritionMultiplierOf, harvestableAt, takeHarvest, thirstReliefOf } from "./harvest.js";
+import { addItem, carriedWeight, removeItem } from "./inventory.js";
+import { pickBestMove, tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -52,7 +56,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
+import { applyCarrying, applyFerrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, carryCapacityOf, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying, maybeStartFerrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -1517,35 +1521,376 @@ export function applyFollowing(world: World, agent: Agent, log?: EventLog): bool
  * longer in `Agent.moves` (e.g. evolved out of it since the order was
  * queued) clears the order without acting rather than throwing.
  */
+/** Direct follow-up report: "ally doesn't seem to engage much in combat... until i like walk away they should follow or something." How far the commanding player can wander before a standing fight order stands down back to ordinary following. */
+export const COMMAND_DISENGAGE_DISTANCE = 10;
+
 export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   const cmd = agent.commandedAction;
   if (!cmd) return false;
   if (hasUrgentNeed(agent.needs)) return false;
+
+  const commander = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
+  if (commander) {
+    const leash = Math.max(Math.abs(commander.pos.x - agent.pos.x), Math.abs(commander.pos.y - agent.pos.y));
+    if (leash > COMMAND_DISENGAGE_DISTANCE) {
+      agent.commandedAction = undefined;
+      return false; // falls through to applyFollowing this same tick — "walk away" ends the fight, doesn't strand the follower
+    }
+  }
+
   const move = agent.moves?.find((m) => m.id === cmd.moveId);
   if (!move) {
     agent.commandedAction = undefined;
     return false;
   }
-  const distance = manhattan(agent.pos, cmd.target);
+
+  // A tracked living target (set at issue time — see player.ts's "command"
+  // case) is chased at its CURRENT position, not the tile it stood on when
+  // ordered — a real standing fight, not one swing at stale ground.
+  let defender: Agent | undefined;
+  if (cmd.targetAgentId) {
+    defender = world.agents.find((a) => a.id === cmd.targetAgentId && a.alive !== false);
+    if (!defender) {
+      agent.commandedAction = undefined; // the target died (or is otherwise gone) — order complete, not a bug
+      return false;
+    }
+  }
+  const targetPos = defender?.pos ?? cmd.target;
+
+  const distance = manhattan(agent.pos, targetPos);
   if (!withinMoveRange(move, distance)) {
     if (agent.behavior !== "fight") {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
     }
-    agent.pos = stepToward(world, agent.layer, agent.pos, cmd.target, agent, agent);
+    agent.pos = stepToward(world, agent.layer, agent.pos, targetPos, agent, agent);
     return true;
   }
   if (agent.moveCooldowns?.[move.id]) return true; // in range, waiting out the move's own cooldown — the order stands
-  const defender = world.agents.find(
-    (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
-  );
+  // No tracked id (an order issued before `targetAgentId` existed, or a
+  // caller that never set one) — original one-shot behavior: whoever
+  // happens to be standing on the target tile right now.
+  if (!cmd.targetAgentId) {
+    defender = world.agents.find(
+      (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
+    );
+  }
   if (defender) {
     resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, move);
+    // Direct ask: keep fighting rather than clearing on the first landed
+    // hit — a tracked order only ends (checked at the top, next tick) once
+    // the defender is actually dead or the player has walked away. An
+    // untracked one-shot order still clears immediately, unchanged.
+    if (!cmd.targetAgentId) agent.commandedAction = undefined;
   } else {
     applyTerrainEffectAt(world, agent, agent.layer, cmd.target, move);
+    agent.commandedAction = undefined; // no living target at all (a terrain order, e.g. felling a tree) — unchanged, one-shot
   }
-  agent.commandedAction = undefined;
   return true;
+}
+
+/**
+ * Direct ask: "they should eat things in their inventory if they have
+ * edible stuff when hungry." Confirmed via investigation before writing
+ * this: carrying items was never player-only (`Agent.inventory` is a
+ * plain field, and `applyLooting`/`applyHerdSupport` already give wild
+ * agents real inventories), but nothing in this file ever READ an agent's
+ * own carried food before pathing off toward a tile — a follower sitting
+ * on a full berry could still walk itself hungry. Mirrors `player.ts`'s
+ * own "eat from inventory" branch exactly (same nutrition/thirst-relief/
+ * cooked-food-heal math), just generalized to any agent.
+ */
+function eatFromOwnInventory(world: World, agent: Agent, ctx: LevelingContext | undefined, log: EventLog | undefined, rng: () => number): boolean {
+  const carried = (agent.inventory ?? []).find((i) => (FOOD_MATERIAL_IDS as readonly string[]).includes(i.itemKey) || world.items?.[i.itemKey]?.cooked !== undefined);
+  if (!carried) return false;
+  removeItem(agent, carried.itemKey, 1);
+  consume(agent.needs, "seekFood", foodNutritionMultiplierOf(carried.itemKey));
+  const thirstRelief = thirstReliefOf(carried.itemKey);
+  if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+  healFromCookedFood(world, agent, carried.itemKey);
+  grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+  log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+  return true;
+}
+
+/** Direct-report reuse of `player.ts`'s own `waterWithinReach` — kept as a small local duplicate rather than an import, since `player.ts` itself imports from this file (importing back would be a cycle). */
+function adjacentToWater(world: World, agent: Agent): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "water") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Direct ask: "my allies should do what i do, so if i drink they should
+ * look for water in the area too. if i gather or eat they should do that
+ * too." `Agent.mirrorAction` is set by `player.ts`'s "drink"/"gather"/
+ * "eat" cases on every following agent; this is what actually carries the
+ * imitation out over the follower's own action ticks — same "the player
+ * only pays for issuing it, the follower spends its own ticks" shape
+ * `applyCommandedAction` already uses.
+ *
+ * Yields entirely to the ordinary needs tree when the SAME resource is
+ * already an urgent need for this agent (e.g. mirroring "drink" while
+ * already dangerously thirsty) — that machinery is more capable
+ * (capacity-aware, obstacle-routed) than this simple imitation path, so
+ * there is no reason to run two competing plans; the mirror cue is
+ * silently dropped and the urgent-need path takes it from here instead.
+ */
+/** Live-verified via Playwright, not hypothetical: a follower can path-cache toward real water and then simply stop advancing (a `pathfinding.ts` corner-case outside this feature's scope to chase down) — bounds how many of the agent's own ticks a mirror cue is allowed to stand before it just expires. */
+const MIRROR_ACTION_TIMEOUT_TICKS = 30;
+
+export function applyMirroredAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const mirror = agent.mirrorAction;
+  if (!mirror) {
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+
+  if (mirror === "drink" && agent.needs.thirst < 0.3) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+  if (mirror === "eat" && agent.needs.hunger < 0.3) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+  agent.mirrorActionTicks = (agent.mirrorActionTicks ?? 0) + 1;
+  if (agent.mirrorActionTicks > MIRROR_ACTION_TIMEOUT_TICKS) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+
+  if (mirror === "drink") {
+    if (adjacentToWater(world, agent)) {
+      consume(agent.needs, "seekWater");
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const target = findNearestTerrain(world, agent.layer, agent.pos, "water");
+    if (!target) {
+      agent.mirrorAction = undefined;
+      return false;
+    }
+    // Real BFS-backed pathing (pathfinding.ts), not greedy stepToward — see
+    // that primitive's own doc comment: an obstacle cluster between here
+    // and the target sends a greedy walker into an oscillating loop
+    // (confirmed live: an early version of this exact function walked a
+    // follower back and forth for 100+ ticks a stone's throw from real
+    // water, never arriving). seekWater/seekFood already learned this
+    // lesson; this mirrors it rather than repeating the mistake.
+    agent.pos = stepAlongPath(world, agent, target);
+    return true;
+  }
+
+  if (mirror === "eat") {
+    if (eatFromOwnInventory(world, agent, ctx, log, rng)) {
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+    if (tile?.terrain === "food" && (tile.stock ?? 0) > 0) {
+      consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+      const thirstRelief = thirstReliefFactor(tile);
+      if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+      healFromCookedFood(world, agent, tile.flavor);
+      tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+      recordGrazing(tile);
+      grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+      log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const target = findNearestTerrain(world, agent.layer, agent.pos, "food");
+    if (!target) {
+      agent.mirrorAction = undefined;
+      return false;
+    }
+    agent.pos = stepAlongPath(world, agent, target); // see the "drink" branch's own comment on why not stepToward
+    return true;
+  }
+
+  // mirror === "gather" — scoped to "right here/adjacent," same reach the
+  // player's own gather already requires (player.ts's "gather" case only
+  // ever checks the tile underfoot). A follower usually stays within
+  // `FOLLOW_KEEP_DISTANCE` of whoever it's imitating, so it's normally
+  // gathering the very patch the player just did; it does not run its own
+  // cross-map hunt for a second harvestable tile.
+  if (harvestableAt(world, agent.layer, agent.pos).length > 0) {
+    const capacity = carryCapacityOf(world, agent);
+    for (const m of takeHarvest(world, agent.layer, agent.pos)) {
+      if (carriedWeight(agent) + MATERIALS[m].weight > capacity) continue;
+      addItem(agent, m, 1, MATERIALS[m].weight);
+    }
+    agent.mirrorAction = undefined;
+    return true;
+  }
+  agent.mirrorAction = undefined; // nothing harvestable within reach — the imitation cue expires rather than wandering off looking
+  return false;
+}
+
+/**
+ * Direct ask: "perhaps instead of campfire building, there's a command
+ * button that allows you to set behaviors for each of your allies;
+ * patrol, hunt, defend, etc." Scoped, on the user's own choice between
+ * options, to "Simple standing states": no placed guard points or
+ * patrol routes — a persistent mode (`Agent.standingOrder`) a bonded
+ * follower keeps until the player picks a different one, or "Follow"
+ * (which just clears it back to ordinary `applyFollowing`).
+ *
+ * Deliberately its own targeting logic, not a parametrized
+ * `predation.ts` `isPreyOf`/`HuntRules` call: those are gated on
+ * `rules[predator.species]` (only species flagged as hunters in the
+ * data table) and a hunger-tuned power ratio meant for a wild animal's
+ * OWN instinctive feeding decision. A player ordering an arbitrary
+ * bonded ally into a fight is a different thing — any bonded ally
+ * should be orderable, not just the ones the data table happens to
+ * flag `isPredator`. `isStandingOrderTarget` below is the resulting
+ * separate predicate: no herd-mate friendly fire, and capped at
+ * `STANDING_ORDER_POWER_RATIO` of the ally's own power so an order
+ * doesn't read as a death sentence — same judgment call predation.ts's
+ * own `PREY_POWER_RATIO` already makes, reused as a ratio, not as a
+ * shared function (`isPreyOf` doesn't fit; see above).
+ */
+export const PATROL_RADIUS = 6;
+export const HUNT_ORDER_RADIUS = 8;
+export const DEFEND_RADIUS = 4;
+const STANDING_ORDER_POWER_RATIO = 0.75;
+/** Per tick while patrolling/searching with nothing to engage: real odds of a visible step, not every tick — reads as patrolling, not jittering. */
+const WANDER_STEP_CHANCE = 0.15;
+
+/**
+ * "How big and capable is this thing" — a small local duplicate of
+ * predation.ts's own module-private `powerOf` (herdConflict.ts already
+ * keeps its own duplicate of this exact formula for the same reason:
+ * this codebase's established way of avoiding a needless export/import
+ * just for one small proxy calculation).
+ */
+function standingOrderPowerOf(agent: Agent): number {
+  return agent.maxHp ?? agent.stats?.maxHp ?? FALLBACK_MAX_HP;
+}
+
+function isStandingOrderTarget(agent: Agent, leaderId: string, candidate: Agent): boolean {
+  if (candidate.id === agent.id || candidate.id === leaderId) return false;
+  if (candidate.isEgg || candidate.alive === false) return false;
+  if (candidate.followingId === leaderId) return false; // a herd-mate, not a target
+  return standingOrderPowerOf(candidate) <= standingOrderPowerOf(agent) * STANDING_ORDER_POWER_RATIO;
+}
+
+/**
+ * A standing order's own combat resolution — same shape
+ * `applyCommandedAction` already uses for a player-issued fight
+ * (`"defeated"`, not predation's own `"killed"`: an ordered engagement,
+ * not wild predation), except the move is auto-picked (`pickBestMove`)
+ * since there's no player-chosen `moveId` behind a standing order the
+ * way there is behind a one-shot command.
+ */
+function engageStandingOrderTarget(world: World, agent: Agent, target: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  agent.huntTarget = target.id;
+  agent.fightTarget = target.id;
+  if (agent.behavior !== "fight") {
+    logBehaviorChange(log, world, agent, "fight");
+    agent.behavior = "fight";
+  }
+  const distance = manhattan(agent.pos, target.pos);
+  const move = pickBestMove(agent, target.types ?? [], distance, world.tick);
+  if (move && withinMoveRange(move, distance)) {
+    resolveHit(world, agent, target, log, "defeated", ctx, distance, rng, 1, move);
+  } else {
+    agent.pos = stepToward(world, agent.layer, agent.pos, target.pos, agent, agent, true);
+  }
+  return true;
+}
+
+/**
+ * Loosely stays within `radius` of `leader` — a real, visible difference
+ * from ordinary `follow`'s tight tail (`FOLLOW_KEEP_DISTANCE` = 2): a
+ * standing order should read as a different playstyle on the map, not
+ * just a different label (CLAUDE.md's own "mechanics visible on the
+ * map" principle). Steps back toward the leader once past `radius`;
+ * otherwise takes a real, occasional random step so Patrol/an idle Hunt
+ * reads as patrolling rather than standing frozen in place.
+ */
+function wanderNearLeader(world: World, agent: Agent, leader: Agent, radius: number, log: EventLog | undefined, rng: () => number): boolean {
+  const distance = manhattan(agent.pos, leader.pos);
+  if (distance > radius) {
+    if (agent.behavior !== "follow") {
+      logBehaviorChange(log, world, agent, "follow");
+      agent.behavior = "follow";
+    }
+    agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+    return true;
+  }
+  if (agent.behavior !== "explore") {
+    logBehaviorChange(log, world, agent, "explore");
+    agent.behavior = "explore";
+  }
+  if (rng() < WANDER_STEP_CHANCE) {
+    const dx = (Math.floor(rng() * 3) - 1) as -1 | 0 | 1;
+    const dy = (Math.floor(rng() * 3) - 1) as -1 | 0 | 1;
+    if (dx !== 0 || dy !== 0) {
+      const next = { x: agent.pos.x + dx, y: agent.pos.y + dy };
+      if (canStepTo(world, agent, agent.layer, next, agent)) agent.pos = next;
+    }
+  }
+  return true;
+}
+
+export function applyStandingOrder(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const order = agent.standingOrder;
+  if (!order) return false;
+  const leader = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
+  if (!leader || leader.alive === false || leader.layer !== agent.layer) {
+    // A standing order is for a bonded ally specifically — once there's no
+    // one left to patrol/hunt/defend for, it has nothing left to mean.
+    // Same "no leader, no order" cleanup `applyFollowing` already does for
+    // `followingId` itself.
+    agent.standingOrder = undefined;
+    agent.huntTarget = undefined;
+    return false;
+  }
+  if (hasUrgentNeed(agent.needs)) return false;
+
+  if (order === "hunt") {
+    if (agent.huntTarget) {
+      const target = world.agents.find((a) => a.id === agent.huntTarget && a.alive !== false);
+      if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+      agent.huntTarget = undefined;
+    }
+    const candidates = agentsWithin(world, agent, HUNT_ORDER_RADIUS).filter((a) => isStandingOrderTarget(agent, leader.id, a));
+    const target = nearest(agent, candidates);
+    if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+    return wanderNearLeader(world, agent, leader, PATROL_RADIUS, log, rng);
+  }
+
+  if (order === "defend") {
+    if (agent.huntTarget) {
+      const target = world.agents.find((a) => a.id === agent.huntTarget && a.alive !== false);
+      if (target && manhattan(target.pos, leader.pos) <= DEFEND_RADIUS) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+      agent.huntTarget = undefined;
+    }
+    const candidates = agentsWithin(world, leader, DEFEND_RADIUS).filter((a) => isStandingOrderTarget(agent, leader.id, a));
+    const target = nearest(agent, candidates);
+    if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+    // Nothing to defend against right now — stay close, tighter than
+    // ordinary follow (a bodyguard doesn't wander off).
+    if (manhattan(agent.pos, leader.pos) > FOLLOW_KEEP_DISTANCE) {
+      if (agent.behavior !== "follow") {
+        logBehaviorChange(log, world, agent, "follow");
+        agent.behavior = "follow";
+      }
+      agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+    }
+    return true;
+  }
+
+  // order === "patrol"
+  return wanderNearLeader(world, agent, leader, PATROL_RADIUS, log, rng);
 }
 
 export function tickAgentAction(
@@ -1602,6 +1947,16 @@ export function tickAgentAction(
   // player deliberately spent a turn issuing it) but never self-
   // preservation above — see `applyCommandedAction`'s own doc comment.
   if (applyCommandedAction(world, agent, log, ctx, rng)) return;
+  // Direct ask: "my allies should do what i do" — an imitation cue, lower
+  // priority than a standing fight order but ahead of passive following,
+  // same tier reasoning as `applyCommandedAction` right above.
+  if (applyMirroredAction(world, agent, log, ctx, rng)) return;
+  // Direct ask: "a command button that allows you to set behaviors for
+  // each of your allies; patrol, hunt, defend, etc." — same tier as the
+  // one-shot order above (a standing mode is still a real, deliberate
+  // player choice, just a persistent one instead of a single tap), ahead
+  // of passive following/treat-seeking.
+  if (applyStandingOrder(world, agent, log, ctx, rng)) return;
   // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
   // and fighting have had their say, before the needs tree, and only while
   // no need is urgent (a follower that starves is a bug).
@@ -1910,6 +2265,13 @@ export function tickAgentAction(
     return;
   }
 
+  // Direct ask: "they should eat things in their inventory if they have
+  // edible stuff when hungry" — checked before any of the tile-search
+  // machinery below: an agent that's already carrying real food has no
+  // reason to go looking for more first.
+  if (agent.behavior === "seekFood" && eatFromOwnInventory(world, agent, ctx, log, rng)) {
+    return;
+  }
   if (agent.behavior === "seekFood" && tryForageFromWater(world, agent, log, rng)) {
     // Opportunistic incidental graze (algae/krill stand-in) — tried before
     // the shelter cache/real-food-tile search below since it costs nothing

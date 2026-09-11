@@ -9287,6 +9287,1089 @@ Full suite after the fix: engine 1497/1497 (12 new in `cooking.test.ts`),
 data 393/393, web build clean (`tsc --noEmit && vite build`), runner
 typecheck clean.
 
+## M7 Climb, built: 5 chained cave levels, real stairs, escalating predators, a real exit
+
+Direct ask, arriving after a scoping tangent: I'd asked "what's left in M6,"
+laid out the disperser-door ruling, and got back: *"i think i just want to
+be able to move to the next level of the cave and shit.\ni dunnow hat youre
+asking"* — i.e., drop the M6 disperser-door tangent, they want the actual
+next milestone: going deeper in the cave.
+
+**Scoping first**, since the architecture choice is expensive to reverse:
+asked two questions. (1) How should going down a level work under the hood
+— chained `World`s linked by stairs (cheap, reuses the macro grid's own
+`focusZone` swap pattern) vs. widening `Layer` to 5+ values (touches every
+`Record<Layer,...>` in the engine). Answered: chained worlds. (2) How much
+to build right now — just prove one level 2 works, or the whole climb (5
+levels, escalating predators, exit/win screen) at once. Answered: the whole
+climb. This matches HANDOFF.md's own pre-existing M7 sketch almost exactly
+(`World.below`/`above`, stairs terrain, `createCaveRun`) — that doc had
+already scoped this milestone in an earlier session, just never built.
+
+**Engine** (`packages/engine/src`):
+- `types.ts`: three new `TerrainKind`s (`"stairsDown"`, `"stairsUp"`,
+  `"exit"`) — plain walkable, not-opaque terrain, not auto-triggered by
+  stepping onto them (same split as "food" not auto-eating). `World`
+  gained `below?`/`above?` (the level chain), `depth?`, `stairsUpAt?`/
+  `stairsDownAt?`/`exitAt?` (where each level's own special tiles are).
+  Two new `SimEvent` kinds, `crossedCaveLevel` and `emerged` — registered
+  in both exhaustive formatters (`web/eventText.ts`, `runner/format.ts`)
+  plus the 5 other `Record<TerrainKind,...>` tables that needed the new
+  kinds too (`web/legend.ts`, `web/palette.ts` ×3, `runner/ascii.ts` ×3) —
+  all compile-time errors, all caught by `tsc`, none missed.
+- New `climb.ts`: `useStairs(world, agent, log?)` moves the player agent
+  between two `World`s' `agents` arrays and returns the new active world
+  (or `undefined` off ordinary terrain, or a malformed/missing link) —
+  NOT a `PlayerAction`/turn at all, since re-pointing which `World` the
+  whole app looks at can't be expressed as a boolean-returning action the
+  way `applyPlayerAction` works; the caller (`main.ts`) re-points its own
+  `world` reference the same way it already does for the macro grid's
+  `focusZone`. `isAtExit(world, agent)` checks the exit tile;
+  `recordEmerged` logs the win moment.
+
+**Data** (`packages/data/src/scenario.ts`): `createCaveRun(seed)`. Level 1
+is `createCaveScenario(seed)` completely UNCHANGED (M1/M6's own tested
+chamber) — a `"stairsDown"` tile is added afterward, placed at the farthest
+walkable point from a real BFS anchor (`walkDistances`, the same tool the
+scenario already uses for spawn placement), so it's a real walk, not
+adjacent to anything. Levels 2-5 are freshly generated `underground` maps
+(`generateWorld`) with real, already-in-the-roster predators escalating by
+depth — not invented placeholders: Zubat (level 8) → Golbat (15) → Onix
+(22) → Haunter (28), each with real underground prey alongside (Diglett,
+Sandshrew, Dugtrio). Level 5 gets an `"exit"` tile instead of a
+`stairsDown`. Every stairs/exit tile's reachability is BY CONSTRUCTION (a
+real BFS from the level's own arrival point), not hoped for — checked in
+`caveRun.test.ts` on 5 seeds.
+
+**Web** (`main.ts`, `index.html`): new `>` key / 🪜 HUD button
+(`tryUseStairs`) crosses stairs — calls `useStairs`, re-points `world`,
+re-runs the same UI-reset pipeline `focusZone` already uses
+(`resetUiForNewWorld`/`registerHerdsForFirstFrame`), keeps the SAME
+`EventLog` across the crossing (narrative history persists across levels,
+unlike a fresh `loadWorld`). A depth readout ("Level 3 of 5") is always on
+screen in the HUD — direct precedent from this project's own design
+principle, "mechanics visible on the map, not hidden in a meter," applied
+to "how deep am I" the same way HP/hunger bars are never hidden. A new
+`#run-won` overlay (`showWinScreen`, wired through `checkWinCondition`
+inside the ordinary `playerAct` pipeline right where the existing death
+check already lives) fires "You emerge" once `isAtExit` is true on the
+deepest level.
+
+**Tests**: 7 new engine tests (`climb.test.ts` — both crossing directions,
+every failure mode: no below/above, malformed link, ordinary floor) and 7
+new data tests (`caveRun.test.ts` — reachability on 5 seeds, predator
+escalation by depth, and a full walk-the-whole-chain-via-useStairs test).
+Full suite: engine 1504/1504, data 400/400, web build clean, runner
+typecheck clean.
+
+**Live-verified** (Playwright, real dev server): descended all 4 stairs via
+the real `>` key, four times, each landing correctly and updating the HUD
+depth readout and message ("You climb down to level 4."); reached depth 5,
+walked one real step onto the actual exit tile, and the real win screen
+appeared with correct stats — the whole pipeline through actual UI
+interaction, not just unit tests.
+
+**Measured, and a real finding, not a clean bill of health**
+(`validateClimb.ts`, per HANDOFF.md's own stated bar: *"a layer that kills
+the bot every time is a balance report for the user, not a number to tune
+yourself"*). A bot that walks straight for each level's stairs, fights back
+when a predator gets adjacent, and rests (`wait`) when energy drops below
+0.3 (a real bug in the FIRST version of this bot, not the game: it never
+rested at all, and died of exhaustion damage at depth 1 in 63 ticks —
+zero predators there, purely from marching non-stop; the M6 round's own
+"wait recovers energy" fix exists for exactly this and the bot just never
+used it) reached the exit on **5 of 5 seeds, zero deaths**. But:
+
+| | depth 2 | depth 3 | depth 4 | depth 5 |
+|---|---|---|---|---|
+| melee encounters (5 seeds summed) | 0 | 0 | 0 | 2 |
+
+HP climbed the entire run on every seed (19 → 27–30), never dropped. **This
+is not evidence the escalation curve is tuned — it's evidence the bot
+barely met the predators it was supposed to be tested against.** Not
+guessed-and-fixed myself (never unilaterally retune balance numbers): 2-3
+predators scattered randomly across a 90×60 map, versus a bot beelining
+for the far-corner stairs, plausibly just don't cross paths often. Open
+options for the user: (1) more predators per level; (2) place them nearer
+the straight-line path between a level's arrival point and its stairs/exit
+(deliberately, not randomly); (3) leave it — a gentle first climb may be
+fine, and a less-optimal real player (wandering, gathering, not beelining)
+would encounter more than this bot did anyway.
+
+**Not built this round** (still open from ROADMAP.md's M7 Build list):
+Fight-alongside and Rescue (real danger exists now, just not wired up
+yet); "the stone" (unclear referent, not scoped); underground as a
+generated ecology (ground-type/water-kind/fertility — levels 2-5 use plain
+`generateWorld`); the disperser door's "one armful" cache (still open from
+M6).
+
+## Graduating the cave into a fully walkable overworld
+
+Direct ask, once "no win screen — you spawn in the overworld" turned out
+not to be a bug report at all: *"no that was a resquest, not a bug report.
+i want you to spawn in overworld after graduating from the end of tge
+cave."* Scoped before building (three options: drop into spectator
+Overworld mode only; one playable zone with no cross-zone walking yet; or
+full seamless macro-grid walking, same as wild animals already migrate
+between zones). Answered: **full seamless macro-grid walking.**
+
+Investigated first (a background agent's report) since this touches real,
+previously-built architecture: `MacroWorld`/`Region` (only the *focused*
+zone ever has a real `World` with real `Agent`s; every other tracked zone
+is a cheap per-species statistical `RegionAggregate`, no positions at all),
+`setFocusedZone` (the existing promote/demote transition `main.ts`'s own
+`focusZone` already drives from a map click), and the existing wild-agent
+zone-crossing (`regionCrossed`/`dispersal.ts`) — which turned out to be
+the WRONG template to copy: a wild disperser that reaches a neighboring
+zone is folded straight into that zone's abstract aggregate, with **no
+real position at the destination at all**, because the destination might
+not even have a `World` yet. That's fine for a statistic; it's exactly
+wrong for a player, who needs a real, walkable tile to land on.
+
+**Engine** (`overworld.ts`): new `crossZoneEdge(mw, player, dx, dy, ctx,
+log)`. Checked by `main.ts`'s `playerAct`, ahead of the ordinary turn-
+advance, whenever a "move" would step outside the focused zone's own
+tile-grid bounds. Deliberately does NOT reuse the wild-agent crossing path
+— it pulls the player out of `world.agents` first, then delegates to the
+EXISTING `setFocusedZone` completely unmodified for the wild population's
+own demote/promote bookkeeping (so that machinery stays exactly as tested),
+then places the player at the mirrored entering-edge coordinate (exit east
+at y=15, enter west at y=15 — one wraparound-modulo formula handles all
+four edges plus diagonal corner crossings in one line), snapped to the
+nearest real walkable tile the same way every other computed-position
+placement in this codebase already does. Instant, no extra tick cost —
+the same "the transition itself is free" shape the cave's own stairs
+(`climb.ts`'s `useStairs`) already established. New `crossedZone` SimEvent
+(not `regionCrossed` — that one's shape is wild-disperser/herd-specific).
+7 new unit tests (`overworld.test.ts`): all four edges, a diagonal corner
+crossing, an ordinary in-bounds move is correctly a no-op, the outermost
+edge of the whole macro grid has nowhere to go, and the wild population
+left behind still demotes normally.
+
+**Web** (`main.ts`, `index.html`): the win screen ("You emerge") gained a
+"Continue into the wider world" button / Enter key, alongside the
+existing "R to play the cave again." `enterOverworldFromCaveWin` carries
+the SAME graduated human across — level, moves, inventory, hp all intact,
+not a fresh spawn — into a freshly generated `MacroWorld`
+(`createDemoMacroWorld`), landing them in its starting zone's already-real
+`World`. This is the one deliberate relaxation of "player mode and the
+macro grid are mutually exclusive," which every other transition in this
+file still holds to — the spectator macro-map view/toggle stay untouched
+and hidden, same as ordinary player mode already keeps them; `playerAct`
+is the only other place that now reads `macroWorld` while `playerMode` is
+on.
+
+**Live-verified** (Playwright, real dev server): won the cave, pressed
+Enter, confirmed the graduated human's level (12) and inventory (a torch)
+carried over unchanged and `layer` flipped to `"surface"`; then walked to
+the zone's actual east edge and stepped off it — landed in the
+neighboring zone at the mirrored y (snapped a couple tiles by
+`findWalkableNear` since the exact mirrored tile wasn't itself walkable),
+HUD message "You cross into a new stretch of land," no console errors.
+
+Full suite: engine 1511/1511 (7 new), data 400/400, web build clean,
+runner typecheck clean.
+
+## Fixed: cooking recipes were permanently unreachable, not hidden by a UI bug
+
+Direct report: *"i dont see fire crafting or cooking recipes as an
+option."* Verified live before touching anything (per the standing rule:
+reproduce before diagnosing) — a completely fresh cave spawn's real
+`knownRecipes` was `["fiber","cordage","boundHaft","torch","club",
+"poultice","foragePouch"]`. None of the four cooking dishes were ever in
+it, on any run, ever — not a rendering/gating glitch in the pack menu,
+which correctly only lists whatever `knownRecipes` actually contains.
+
+Root cause: the cooking round shipped all four dishes with
+`knownAtStart: false`, on the same footing as axe/machete/knappedFlint —
+crafting.ts's own top doc comment frames those as "learned later (M6+:
+examine, being taught, a written recipe)." That discovery mechanic was
+never built, for any recipe, so `knownAtStart: false` has always meant
+"permanently unreachable," not "reachable once you find X" — a real,
+broader, pre-existing gap this report just happened to surface first via
+cooking specifically.
+
+Fixed the same way `foragePouch` was fixed earlier this session: flipped
+`roastedApple`/`berryStew`/`potatoMash`/`vegetableStew` to
+`knownAtStart: true`. Every one of their ingredients is a gatherable crop
+(apple, oran, pecha, potato, tomato, corn) — nothing else was gating them
+— and the user's own original ask ("building a fire you can deploy... to
+cook") read as day-one survival kit, not a late-game unlock, the same
+reasoning that justified the pouch fix. Left axe/machete/knappedFlint/
+camouflageCloak exactly as they were — that's the real, separate,
+still-open "no recipe discovery mechanic exists at all" gap, not
+something this fix should quietly paper over; noted here rather than
+fixed by default.
+
+Live-verified (Playwright, real dev server, completely fresh spawn — no
+inventory/recipe manipulation): pack menu's Make list now shows all four
+dishes with correct missing-ingredient text; separately confirmed the
+existing "needs a fire nearby" gate still fires correctly when the
+ingredient is present but no fire is (gave the player a real apple, no
+fire nearby — showed "apple · needs a fire nearby", not craftable).
+
+Full suite: data 400/400 (including the reachability test's own printed
+craft order, which now visibly includes all four dishes at the end).
+
+## Backlog: 9-item playtest wishlist, direct asks verbatim, not yet built
+
+Rapid-fire list, tracked in full so nothing gets lost while working
+through it a slice at a time:
+
+1. "my allies should do what i do, so if i drink they should look for
+   water in the area too. if i gather or eat they should do that too" —
+   ally mirrors the player's own verb.
+2. "they should eat things in their inventory if they have eidble stuff
+   when hungry" — ally self-feeds from carried food.
+3. "change attack for player moves to also be targeted, like allies
+   moves" — player's own attack should use the same pick-a-move-then-
+   click-a-tile flow the command menu already gives bonded partners,
+   not the instant last-faced-direction swing it has now.
+4. "ally doesn't seem to engage much in combat. if i target a unit with a
+   move it should go do that and continue to fight and engage until i
+   like walk away they should follow or something" — a commanded attack
+   order should persist (re-engage the same target repeatedly) instead
+   of resolving once and clearing.
+5. "get rid of fire building as a direct action - make it a crafting
+   thing that sets down a campfire" — remove the instant `lightFire`
+   PlayerAction/'v' key; a craftable campfire item you place instead.
+6. "perhaps instead of campfire building, there's a command button that
+   allows you to set behaviors for each of your allies; patrol, hunt,
+   defend, etc." — standing per-ally behavior modes, not just one-shot
+   commanded moves. Relationship to #5 (same UI slot? both built
+   independently?) not yet clarified.
+7. "have herd hp and status bars like easy to pin so you can see all; at
+   once" — a docked panel showing every current ally's HP/status, not
+   just the one selected agent's.
+8. "can't loot or butcher dead units. need to be able to - maybe you need
+   a knife to do more but that should be a thing." — corpses currently
+   give nothing; want a real loot/butcher action, knife improving yield.
+9. "itd be nice if it was easy to uise keyboard to select inventory
+   items and use them as expected, comman pokemon, select attacks
+   easily, etc." — keyboard-first UX across inventory/command/attack
+   menus.
+
+## Fixed: human base stats bumped — real numbers behind it
+
+Direct ask, mid-way through building the wishlist above: *"also, human
+stats are bit too low. like i'm getting outsped and one shot by too many
+pokemon. can you make it so the stats reasonably scale?"*
+
+Measured before touching anything (`calculateStats`/`calculateDamage`,
+the engine's own real formulas, not a guess): the original
+`baseStats: { hp: 45, attack: 28, defense: 25, spAttack: 20, spDefense:
+25, speed: 40 }` (BST 183 — under even Caterpie, the single weakest base
+stat total in the mainline roster) was not "appropriately fragile," it
+was a guaranteed overkill against anything ROADMAP M7's cave climb
+actually put in the player's path:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 276% of maxHp | 176% | 113% |
+| Haunter (28) | Sludge | 621% | 397% | 252% |
+| Haunter (28) | Psybeam | 414% | 263% | 167% |
+
+(percentages are of the human's own maxHp in ONE hit — anything over
+100% is an overkill one-shot). Speed told the same story: a level-20
+human's speed (21) still trailed Golbat (32), Onix (35), and Haunter (58)
+at every level tested — the human never got to act first regardless of
+how much it leveled.
+
+Bumped to `{ hp: 50, attack: 35, defense: 50, spAttack: 30, spDefense:
+50, speed: 65 }` (BST 280 — still meaningfully under a starter's
+~310-320, so "the frailest thing in the ecosystem" premise isn't
+abandoned, just no longer a guaranteed instant kill). Same real-formula
+check against the new numbers:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 180% | 103% | 68% |
+| Haunter (28) | Sludge | 403% | 228% | 148% |
+| Haunter (28) | Psybeam | 267% | 153% | 98% |
+
+Onix (a mid-depth predator, not the final boss) is now genuinely
+survivable from level 15 on. Haunter — the level-5 cave's own final boss
+— stays a real, dangerous fight even at the new numbers, which reads as
+intentional rather than a miss: it's supposed to be the hardest thing in
+the run. Speed 65 now beats Golbat (32) outright and is close behind
+Onix (35); Haunter (58) still typically acts first, matching its role.
+
+`HUMAN_LEVELING_PROFILE` (leveling.ts) references `SPECIES.human.
+baseStats` directly, so this one edit propagates everywhere without a
+second change site. Live-verified (Playwright, real dev server): a fresh
+spawn's real stats matched the new formula (small deltas from a random
+nature roll, exactly as expected for any spawned agent — not a bug).
+
+**Immediate follow-up redirect on the first pass's split:** *"Yeah I'm
+okay with low attack generally, but higher hp and speed would be nice."*
+Kept defense/spDefense exactly where they landed (that's the actual lever
+against one-shots), pulled attack/spAttack down further, and pushed
+hp/speed past the first pass: `{ hp: 70, attack: 28, defense: 50,
+spAttack: 25, spDefense: 50, speed: 90 }` (BST 313, right around a real
+starter's own total). Same real-formula re-check:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 159% | 89% | 59% |
+| Haunter (28) | Sludge | 356% | 198% | 128% |
+| Haunter (28) | Psybeam | 235% | 133% | 84% |
+
+Speed 90 now beats Zubat/Golbat/Onix outright at moderate levels and
+closes most of the gap to Haunter — a level-20 human's speed (41) is up
+from an original 21, against Haunter's fixed 58. Data suite re-run:
+400/400.
+
+This is a numbers change to a stated design pillar (DESIGN.md/
+CAMPAIGN_DESIGN.md's "frailest thing in the ecosystem"), done on a
+direct, explicit ask rather than my own initiative — flagging that
+plainly rather than quietly treating it as a routine tweak. Full suite:
+engine 1518/1518, data 400/400, web/runner typecheck clean.
+
+## Built: wishlist items 1+2 — allies mirror the player's verb, self-feed from inventory
+
+Direct asks: *"my allies should do what i do, so if i drink they should
+look for water in the area too. if i gather or eat they should do that
+too"* and *"they should eat things in their inventory if they have
+eidble stuff when hungry."*
+
+**What was built.** `player.ts`'s drink/eat/gather cases each now call a
+new `signalMirrorToFollowers(world, leader, action)`, which stamps
+`Agent.mirrorAction: "drink" | "gather" | "eat"` onto every agent
+following the player. `needs.ts` gained `applyMirroredAction`, hooked
+into `tickAgentAction` right after `applyCommandedAction` (a standing
+player order still outranks the imitation cue, same tier reasoning): if
+the same need is already urgent for that agent, the cue yields to the
+ordinary needs tree instead of double-dipping; otherwise it paths to the
+nearest water/food tile (`findNearestTerrain` + `stepAlongPath`) and
+resolves the action, checking the agent's own inventory for real food
+before ever looking at the ground. That inventory-eat logic
+(`eatFromOwnInventory`) is also wired directly into the ordinary seekFood
+branch of the needs tree — item 2's ask ("eat things in their inventory
+... when hungry") applies whether or not a mirror cue is even in play.
+
+**Bug #1, found live, real: naive greedy pathing oscillates.** First pass
+used `stepToward` (matching `applyCommandedAction`'s own combat-pathing
+convention) for the mirror's drink/eat walk. Live Playwright test (a real
+bonded follower, player drinks, hundreds of ticks advanced): the follower
+visibly oscillated between 2-3 tiles for 300+ ticks, never reaching
+water, until its own thirst dropped low enough that my "yield to urgent
+need" guard silently gave up on the cue — it never actually succeeded, it
+just quit. This is the exact stuck-near-obstacles failure mode this
+codebase already has a comment about elsewhere (an Onix stuck oscillating
+near a boulder cluster). Fixed by switching both drink and eat to
+`stepAlongPath` — the same real BFS pathfinder `seekWater`/`seekFood`
+already use for this reason.
+
+**Bug #2, chased hard, turned out to be a test artifact — but surfaced a
+real, separate, pre-existing bug.** Re-verifying after the `stepAlongPath`
+fix, the follower got permanently stuck standing still, `mirrorAction`
+never clearing even once its thirst had dropped to 0.066 (well past my
+own "already urgent, give up" threshold of 0.3). I initially treated this
+as a second pathing bug and added a defensive `mirrorActionTicks` /
+`MIRROR_ACTION_TIMEOUT_TICKS = 30` escape valve (same shape as the
+existing `ticksWithoutResource`/`MIGRATE_AFTER_TICKS` pattern) rather than
+fully root-causing it under time pressure.
+
+Root-causing it properly (before writing this up) found the real cause:
+my test setup gave the follower `followingId` directly without ever
+giving it real rapport toward the player. `hasUrgentNeed`/my own clear
+check were never being reached at all — `predation.ts`'s own
+`applyFightOrFlight`/threat-detection runs earlier in `tickAgentAction`'s
+priority chain and had the follower **fleeing from the player it was
+following** (`agent.behavior === "flee"`, `fleeingFromId: "player"`),
+which wins every tick and starves out `applyMirroredAction` entirely. In
+the real game a follower only ever starts following at `curious`+ trust
+(`trust.ts`'s `tickFollowers`), so I re-ran the exact same scenario with
+real bonded rapport (`score: 0.9`) instead of a bare `followingId` — drink,
+gather, and eat all resolved cleanly (drink in 1 tick, gather instantly,
+eat in 19 ticks of real multi-tile pathing toward food placed 8 tiles
+away), no stuck state at all. The first "stuck forever" run was my own
+test fixture being wrong, not the feature.
+
+**But that dig turned up a real, separate, pre-existing issue**: I then
+tested a follower sitting at `tolerant` trust (rapport `0.1` — real
+followers can genuinely be here; `tickFollowers` only ever drops
+`followingId` once trust decays all the way to `wary`, not at `tolerant`)
+and it **did** flee the player every tick, `fleeingFromId: "player"`,
+exactly like the flawed test. `trust.ts`'s own `trustFleeFactor` is `0`
+only at `bonded` — `tolerant` is `0.5`, not 0 — so a follower that has
+decayed from `curious` to `tolerant` but not yet to `wary` can genuinely
+treat its own leader as a live threat and flee it, mid-following. Whether
+that is a bug (a follower should never flee the one it's following,
+period, until it actually stops following) or working as designed (partial
+trust means partial safety, even from itself) is a real design question,
+not mine to rule on — **logged as a backlog item below, not fixed in this
+round.** Given this is real, if rare, kept the `mirrorActionTicks` timeout
+as the legitimate defensive backstop it turned out to be for exactly this
+case, rather than removing it as unneeded.
+
+**Verification.** `packages/engine/test/mirrorAction.test.ts` (new, 14
+tests: signaling followers, drink/eat/gather resolution + pathing +
+inventory-first-eat + no-cross-map-hunt-on-gather + yield-to-urgent-need,
+plus the plain seekFood-tree self-feed case) — all passing. Full engine
+suite: 1532/1532. `tsc --noEmit` clean. Live-verified in a real browser
+against a real dev server (Playwright): drink/gather/eat mirror cues all
+independently confirmed resolving correctly with a genuinely bonded
+follower, including real multi-tile pathing toward food placed 8 tiles
+away — not just "logic reads right."
+
+## Backlog: a follower at `tolerant` trust can flee the very player it's following
+
+Found live while verifying items 1+2 above, not something I went looking
+for. `trust.ts`'s `trustFleeFactor("tolerant")` is `0.5`, not `0` — only
+`bonded` zeroes it out — and `tickFollowers` only drops `followingId` once
+trust has decayed all the way down to `wary`, not at `tolerant`. So a
+follower that has slipped from `curious`/`bonded` down to `tolerant`
+(rapport decay, no recent interaction) but hasn't yet hit `wary` is, per
+the existing code, still actively following *and* capable of reading its
+own leader as a live threat and fleeing it every tick. Confirmed live:
+rapport `0.1` (`tolerant` band) on an otherwise-normal follower produced
+`behavior: "flee"`, `fleeingFromId: "player"`, repeatedly. Two ways to
+rule on it, not decided here:
+1. A follower should never flee the one it's actively following, full
+   stop — `playerFleeRadius`/the threat check should skip agents whose
+   `followingId === player.id` entirely, regardless of trust stage.
+2. Working as intended — partial trust is partial safety, and a spooked
+   half-trusting follower fleeing mid-follow (then presumably resuming,
+   or dropping to `wary` and un-following) is a real, legible consequence
+   of not having fully earned its loyalty yet.
+
+## Built: wishlist item 3 — the player's own attack is tile-targeted, like ally commands
+
+Direct ask: *"change attack for player moves to also be targeted, like
+allies moves."* Before this, the attack menu's "You" section fired the
+moment a move was tapped, swinging at whatever tile `lastFacing` (the
+direction you last walked) happened to be — so hitting something you
+hadn't just walked toward meant walking toward it first (or bumping a
+wall) purely to turn, wasting a real turn on facing alone.
+
+**What changed.** `PlayerAction`'s `attack` case gained an optional
+`target: Vec2`, alongside the `dx`/`dy` it already had (kept, unchanged,
+for the one caller that still wants a bare directional swing — the
+quick auto-pick path nothing here touches). When `target` is set,
+`moveId` is required (there's no auto-pick for an arbitrary tile the way
+the plain swing has — distance alone doesn't say which known move can
+even reach it), and the range check uses the real distance to that tile
+instead of an assumed 1. `main.ts`'s "You" move rows now enter the exact
+same `targeting` mode ally moves already used (tap a move, then tap a
+tile) instead of instant-firing; `targeting.agentId` is `undefined` for
+the player's own swing and a real id for a partner's, sharing one click
+handler that branches into `{kind: "attack", target, ...}` or
+`{kind: "command", agentId, ...}` accordingly.
+
+**A real design question surfaced building this, not guessed at:** what
+distance metric counts as "adjacent" for the player's own melee? The
+game's general combat/range code (`predation.ts`'s `manhattan`, used for
+ally commands, hunting, fleeing) treats a diagonal tile as distance 2,
+outside a plain `range: {max: 1}` move. But the OLD dx/dy swing let you
+hit any of the 8 tiles around the player at an assumed distance of 1,
+diagonals included — it never actually computed a distance at all.
+Using `manhattan` for the new tile-targeted path would have quietly
+nerfed melee reach to the 4 orthogonal tiles the instant a swing became
+tile-targeted instead of directional, purely as a side effect of the
+interaction-model change this ask asked for — not something to slip in
+unstated. Used Chebyshev distance instead (`max(|dx|, |dy|)`) for this
+one case, matching how the player already moves (a diagonal step costs
+the same turn as an orthogonal one) and preserving the exact reach the
+old swing already had. Ally commands (`needs.ts`) are untouched and keep
+`manhattan` — a different, self-correcting case (an out-of-range order
+just walks the partner one step closer next tick, so a diagonal
+approach costs one extra tile of travel, not a hard refusal), not a
+one-shot swing standing in one spot.
+
+**Live-verified in the browser, not just by reading the engine tests.**
+First live pass on a diagonal target came back "Nothing there to hit,"
+which — same shape as the mirror-action false alarm above — turned out
+to be a test-fixture problem, not a code bug: `advancePlayerTurn` runs
+the whole world forward several real ticks before the player's own
+queued action actually fires (their action-energy threshold, not an
+instant resolve), and my synthetic diagonal target, an ordinary
+`rattata` with no rapport toward the player, read the player as a full
+threat and fled before the swing landed — the exact same "unbonded
+creature reacts to the player mid-scenario" class of artifact as the
+follower-flees bug just above, not a second copy of the same finding,
+just the same lesson landing twice in one session. Pinning it
+(`asleep: true`, so it doesn't act at all) confirmed the real thing:
+attack menu → tap Tackle → `targeting` set, HUD reads "Targeting with
+Tackle — tap a tile" → tapping the diagonal tile fires
+`{kind: "attack", target: {x, y}, moveId: "tackle"}` → lands
+("You strike Rattata!", `attackedId` set). Also re-verified a bonded
+partner's own command flow through the same shared click handler is
+unaffected (`{kind: "command", ...}`, `commandedAction` set correctly)
+— a real regression check, not an assumption, since both share one
+`targeting` variable and one canvas click listener now.
+
+**Tests.** `playerCombat.test.ts` gained 4 new cases: a diagonal target
+hit via `target` regardless of a deliberately-wrong `dx`/`dy` (proving
+`target` wins), an out-of-range target tile failing, a target requiring
+an explicit `moveId`, and a targeted terrain-effect move (felling a
+tree) at a named tile. Full engine suite: 1536/1536. `tsc --noEmit`
+(engine) and the real `pnpm --filter @pokuelike/web build` (not just
+`tsc --noEmit` on its own — CLAUDE.md's own lesson on why that
+specifically matters for this package) both clean.
+
+## Built: wishlist item 8 — loot and butcher dead units, a knife does more
+
+Direct ask: *"can't loot or butcher dead units. need to be able to -
+maybe you need a knife to do more but that should be a thing."*
+
+**Two distinct verbs, not one.** Loot was already a real engine
+mechanism (`support.ts`'s `applyLooting`) — any wild agent's own behavior
+tree can already take an item off a fainted-or-dead agent's carried
+`inventory`. It just had no player-facing action to trigger it on
+demand. New `{kind: "loot"}` `PlayerAction` (key `o`) reuses that
+function completely unmodified — "the player is just another agent to
+the sim" applies here too, so there was nothing player-specific to
+write. Butcher is genuinely new: a one-time real-material harvest off a
+TRULY dead corpse's own body (not its inventory) — `meat` bare-handed;
+`meat ×2` and `hide` with a held `flintKnife` (`{kind: "butcher"}`, key
+`p`). A new `Agent.butchered` flag marks a corpse used up so it can't be
+re-harvested for infinite materials before `CORPSE_PERSIST_TICKS` prunes
+it; wild scavenging is untouched — an animal still eating from an
+already-butchered body isn't a loophole this needed to close, just an
+ordinary thing to happen to a corpse.
+
+**Respected an existing ruling instead of re-deciding it.** DESIGN.md
+already draws a fainted-vs-truly-dead line for eating ("only true death
+is consumable"). Loot works on either (matches `applyLooting`'s existing
+behavior); butcher only works on a true kill (`isTrulyDead`) — a merely
+fainted agent can be looted mid-fight but not carved up.
+
+**New materials, made reachable immediately, not left dangling.**
+`meat`/`hide` (harvest.ts's `MaterialId`/`MATERIALS`) — `meat` added to
+`FOOD_MATERIAL_IDS` so it's directly edible raw with zero extra code
+(its nutrition/thirst-relief functions already default to a neutral
+1x/0 for anything that isn't a real crop). `hide` is crafting-only, no
+recipe yet — same situation flint/deadwood were in before their own
+consuming recipes existed, not a hidden dead end. Also added a real
+`roastedMeat` cooked recipe (data package only, zero engine changes —
+the cooking machinery is fully generic over `ItemDef.cooked`) so a
+knife's richer yield has an immediate payoff beyond "heavier raw food."
+`knownAtStart: true` on it, deliberately — this project has hit the
+"recipe exists, nothing can ever discover it" bug twice already
+(cooking recipes, TODO.md above; axe/machete/knappedFlint, still open);
+meat only ever enters the pack via `butcher`, itself always available,
+so gating the recipe behind a discovery mechanic that doesn't exist yet
+would be the exact same mistake a third time.
+
+**Tests.** New `test/lootButcher.test.ts`, 10 cases: loot from a truly
+dead AND a merely fainted corpse, loot failing with nothing to take;
+bare-handed butcher (meat only), knife butcher (meat ×2 + hide), fainted-
+not-dead refusing butcher, an already-butchered corpse refusing a second
+harvest, no corpse in reach failing, no carry headroom failing outright,
+and a partial-capacity case (takes what fits, still marks the corpse
+used up). Full engine suite: 1546/1546. Data package (crafting/recipe
+reachability tests among them): 400/400. `tsc --noEmit` clean on engine,
+data, and runner; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**, not just read from the test file: a
+real corpse placed on the player's tile, looted (took its carried
+flint), then butchered bare-handed (1 meat) — a second butcher attempt
+on the same corpse correctly refused ("Nothing nearby to butcher — a
+knife would get you more"). Separately, with a `flintKnife` equipped,
+butchering yielded `meat ×2` and `hide` as designed. Confirmed the raw
+meat this produces is genuinely eatable (hunger 0.497 → 0.895 on a real
+`eat`), and confirmed `roastedMeat` actually shows up in the pack menu's
+Make list next to a deployed fire ("Roasted Meat · meat · 6 turns · tap
+to make") — not just present in the recipe table, actually reachable
+from a real inventory state, the same live-reachability bar this
+project's cooking-recipe fix above insists on.
+
+## Built: wishlist item 7 — a docked, pinnable herd/party status panel
+
+Direct ask: *"have herd hp and status bars like easy to pin so you can
+see all; at once"* — every bonded follower's HP and status together, not
+just the one currently-selected agent's, and not buried behind opening
+the Inspector and clicking through them one at a time.
+
+**Shape.** A new floating overlay (`#herd-status-panel`, `index.html`),
+docked bottom-left over the map — the one corner nothing else already
+claims (auto-cam badge top-left, minimap/player HUD top-right, region
+banner/playback HUD bottom-center). Floats over the map rather than
+displacing it, same as `#player-hud` already does; deliberately NOT a
+new side-panel tab — DESIGN.md already has one documented lesson from
+this exact codebase about a second docked panel competing with the map
+for space (`#battle-screen-panel` originally stood alone, then got
+folded into the Inspector's own tabs after a direct complaint that it
+"obscures the map"). One row per follower: name, a short status line
+(`describeBehavior`, reused unmodified — a bonded partner's status text
+is exactly the same sentence the Inspector already shows for any
+selected agent), and an HP bar (red under 25%, grey while fainted).
+Rebuilds its rows once a frame (`EventLogPanel`'s own shape) rather than
+`BattleScreenPanel`'s persistent-per-chip DOM (which exists specifically
+to animate HP transitions smoothly) — a handful of rows is cheap to
+just rebuild, and that transition polish isn't what this ask is about.
+
+**"Easy to pin."** Shows itself automatically the moment the player has
+any bonded follower — no menu, no keypress. A ✕ on the panel dismisses
+it; a new 🐾 button in the player HUD (beside the existing pack button)
+brings it back. Both just flip one in-memory boolean
+(`herdPanelPinned`) — same "no persistence across reload" convention
+this codebase's only other show/hide UI state (the side panel's
+collapse/expand toggles) already uses.
+
+**Live-verified in the browser** — and hit the same class of test-setup
+artifact this session already found twice: the first pass set a
+synthetic ally's `followingId` directly with no real rapport, and by
+the time the panel's next frame rendered, `trust.ts`'s own
+`tickFollowers` (real engine logic, called once per player turn) had
+already un-followed it — a stranger at `wary` trust never gets to keep
+`followingId` past its first turn. The panel's `hidden` flag correctly
+tracked that (flipped back to hidden once the follower really left),
+it just left one frame of stale row content behind, which is what the
+first run's output showed. Redone with genuine bonded rapport
+(`score: 0.9`) instead of a bare `followingId`: the follower stayed
+bonded, and the panel correctly showed itself, rendered the right name/
+status/HP (a deliberately-set low HP correctly triggered the red "low"
+class), and both the ✕ and 🐾 toggles worked as designed.
+
+Also added the `loot`/`butcher` keys (`o`/`p`) to the HUD's own
+`#hud-keys` legend row while in this area — a small gap left over from
+last round's item 8 (every other verb is listed there; these two
+weren't).
+
+Full engine suite: 1546/1546 (unchanged — this round touched only
+`index.html`/`main.ts`). Real `pnpm --filter @pokuelike/web build`
+clean.
+
+## Built: wishlist item 5 — fire-building is a real crafted item now, not an instant swing
+
+Direct ask: *"get rid of fire building as a direct action - make it a
+crafting thing that sets down a campfire."* The original `lightFire`
+verb ('v' key / 🔥 HUD button) let a torch-holder burn 2 raw deadwood
+into an instant fire on the spot — no crafting step at all, just an
+ordinary directional swing with a resource cost. This round supersedes
+it entirely: a new `campfire` recipe (`deadwood ×3 + flint ×1`, 6
+turns, `knownAtStart: true` — day-one survival kit, same reasoning as
+the cooking recipes and `foragePouch` above) produces a real `campfire`
+item you carry; a new `{kind: "placeCampfire"}` `PlayerAction` consumes
+one to actually ignite the ground (same terrain rules as before: bare
+floor is fine, water/wall aren't, feeding an already-burning tile is
+additive not a reset).
+
+**Where placing lives.** Not a new raw key — the pack menu's per-item
+row, a new "Place" action next to Drop, the same shape "Eat"/"Offer"
+already use for a carried food item. This mirrors a real precedent
+already in this codebase: Eat/Offer used to be raw-key-adjacent too,
+until a direct ask ("we're getting too many buttons... let's make offer
+and eat only available from inventory after you gather") moved them
+into Pack-only. Placing a specific crafted item is exactly that same
+shape, so it got the same treatment — the old 'v' key, its HUD button,
+and its `#hud-keys` legend entry are gone, not just repointed.
+
+**Tests.** `cooking.test.ts`'s old `lightFire` describe block rewritten
+in place for `placeCampfire` (consumes the crafted item instead of
+torch+deadwood; same terrain/refuel cases carried over) — 5 tests, all
+passing. Full engine suite: 1545/1545 (net -1 from the old suite: 6
+`lightFire` cases became 5 `placeCampfire` ones, the torch-specific
+"fails without a held torch" case no longer applies since a torch was
+never required to place one). Data package (recipe reachability among
+them): 400/400. `tsc --noEmit` clean on engine; real
+`pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**: crafted a campfire from raw deadwood
++ flint through the pack menu's own "tap to make" flow (its normal
+auto-advancing turn loop, not a manual poke — an earlier pass of this
+same check broke the in-progress craft by sending extra `wait` inputs
+on top of that loop, since any action other than `continue` abandons an
+activity in progress; redone without interfering), then opened the pack
+again and tapped the newly-made Campfire's "Place" button — it consumed
+the item, ignited a real `fire` tile, and the HUD read "You set down a
+campfire."
+
+## Built: wishlist item 6 — standing orders for bonded allies (Patrol/Hunt/Defend/Follow)
+
+Direct ask: *"perhaps instead of campfire building, there's a command
+button that allows you to set behaviors for each of your allies; patrol,
+hunt, defend, etc."* Scoped, on the user's own choice between two options
+offered, to *"Simple standing states"* — a persistent mode a bonded
+follower keeps until told otherwise, not a richer system with placed
+guard points or patrol routes.
+
+**What each mode actually does** — real, distinguishable behavior, not
+just a label (this project's own "mechanics visible on the map"
+principle):
+- **Follow** (the absence of an order, `undefined` — picking it in the
+  menu just clears the field): unchanged, ordinary `applyFollowing`.
+- **Patrol**: stays loosely within `PATROL_RADIUS` (6) of the leader
+  instead of `applyFollowing`'s tight `FOLLOW_KEEP_DISTANCE` (2) — steps
+  back in once past that, otherwise takes a real, occasional random step
+  so it visibly wanders rather than standing frozen.
+- **Hunt**: actively searches `HUNT_ORDER_RADIUS` (8) around the ally
+  itself for something to fight, and keeps fighting it every tick until
+  it faints or the ally disengages — wanders (Patrol's own logic) when
+  nothing's there. Chases the same tracked target tick over tick, same
+  "standing fight, not one swing" shape `applyCommandedAction` already
+  established for one-shot orders.
+- **Defend**: same searching/engaging logic, but anchored on the
+  *leader's* position within the tighter `DEFEND_RADIUS` (4) — a
+  bodyguard watching the space around the player, not around itself —
+  and stays close (not loose-patrol) when there's nothing to fight.
+
+All three still yield to self-preservation above them in
+`tickAgentAction`'s own priority chain (predation instincts: flee,
+guardian mobbing, egg defense) and to the ally's own urgent needs —
+a standing order is real but it isn't a death wish.
+
+**A genuinely new targeting predicate, not a reused one.** `predation.
+ts`'s own `isPreyOf`/`HuntRules` are gated on `rules[predator.species]`
+— only species flagged `isPredator` in the data table can ever "hunt"
+at all. That's the wrong shape here: a player should be able to order
+*any* bonded ally into a fight, not just the ones the table happens to
+flag as predators. Wrote a separate `isStandingOrderTarget` instead: no
+herd-mate friendly fire (never targets the leader or another follower
+of the same leader), and capped at `STANDING_ORDER_POWER_RATIO` (0.75 —
+the same judgment call `predation.ts`'s own `PREY_POWER_RATIO` already
+makes, reused as a ratio, not as a shared function) so an order doesn't
+read as a death sentence. Combat itself reuses `resolveHit` with the
+`"defeated"` cap `applyCommandedAction` already uses (an ordered
+engagement, not a permanent wild kill), with an auto-picked move
+(`pickBestMove`) since there's no player-chosen `moveId` behind a
+standing order the way there is behind a one-shot command.
+
+**Where it lives.** The existing per-partner section of the command
+menu (renamed "Command," since it's no longer only about moves) gained
+four instant rows — Follow/Patrol/Hunt/Defend, the current one marked
+`(current)` — right above that partner's own move list. No tile-tap
+needed, unlike a move order: the mode just takes effect. The herd status
+panel (item 7, above) also shows the active order next to each
+follower's name, so it's visible without reopening the menu.
+
+**Tests.** New `test/standingOrder.test.ts`, 16 cases: issuing/clearing
+the order (including refusing a non-follower), Patrol staying put vs.
+stepping back in from beyond its radius, yielding to an urgent need,
+clearing itself when the leader is gone, Hunt engaging regardless of
+the ally's own hunger, refusing something far stronger, never targeting
+a herd-mate, chasing a tracked target across ticks, wandering when
+nothing's in reach, and Defend's leader-anchored radius (engages near
+the leader even when the ally itself is elsewhere, ignores something
+just outside `DEFEND_RADIUS`, stays close when idle). Full engine
+suite: 1561/1561. Data package: 400/400. `tsc --noEmit` clean on
+engine; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**: opened the Command menu on a real
+bonded partner, confirmed all four order rows render with the current
+one marked, tapped Hunt (HUD read "Shellder is now on hunt," herd panel
+showed "Shellder · Hunt"), then placed a real, weak, sleeping foe two
+tiles away and advanced a single real world tick with no further player
+input — the ally found it and engaged entirely on its own
+(`behavior: "fight"`, `huntTarget` set, the foe's HP dropped from 8 to
+1.72) — genuine autonomous behavior, not just a state flag that reads
+correctly in isolation.
+
+## Built: wishlist item 9 — number-key shortcuts for the pack and command menus
+
+Direct ask: *"itd be nice if it was easy to use keyboard to select
+inventory items and use them as expected, comman[d] pokemon, select
+attacks easily, etc."*
+
+`numberMenuRows(container)` badges the first 9 `.pack-row.tappable`
+buttons in a just-built pack/command menu (in DOM order) with a small
+number, and the keydown handler's existing "a menu is open" branches
+(already handling Escape there) now also try `activateNumberedMenuRow`
+first — a digit key fires that row exactly as a click would, since it
+*is* a click (`btn.click()`), not a re-implementation of what the row
+does.
+
+**Scoped to `.pack-row.tappable` only, deliberately not the smaller
+per-item `.pack-action-btn` row** (Eat/Offer/Hold/Wear/Drop/Place). The
+rows this numbers are the genuinely long, tedious-by-mouse lists —
+every known recipe, every move (yours and each bonded partner's), every
+standing order — while the per-item action buttons are few (1-3) and
+already sit right next to the item they act on. Numbering everything
+would have meant either a two-stage select-item-then-select-action flow
+(real scope creep past "itd be nice") or numbers jumping unpredictably
+between item rows and action buttons in the same list; this way one
+consistent number always means the same thing (the Nth primary thing
+you could do here) across both menus.
+
+No new CSS structure — a small absolutely-positioned badge in each
+row's own existing padding (bumped from 8px to 28px on the left to make
+room), so it doesn't collide with the row's text.
+
+**Live-verified in the browser**: opened the pack menu with a real
+craftable recipe (Fiber) in the list, confirmed its row got badge "1,"
+pressed "1" — the craft activity started and the menu closed, exactly
+like tapping it. Opened the Command menu on a real bonded partner,
+confirmed all 9 rows (the player's own Tackle, the four standing-order
+rows, the partner's four moves) got sequential badges, pressed "4"
+(Hunt) — `standingOrder` was set, the menu closed, the HUD read
+"Shellder is now on hunt." Both menus' full engine suite: 1561/1561
+(unchanged — this round is web-only). Real
+`pnpm --filter @pokuelike/web build` clean.
+
+This closes out the 9-item wishlist backlog (TODO.md's "Backlog:
+9-item playtest wishlist" entry above) — every item now built, tested,
+and live-verified. One real, separate finding surfaced along the way is
+still open, not part of this list: the "follower at 'tolerant' trust
+can flee its own leader" backlog item (below the wishlist entries),
+found while live-verifying item 1.
+
+## Built: real, visible "stone" tiles in the cave — flint's actual source now
+
+Direct ask: *"Can you collect flint in the cave? I think I want us to be
+able to grab that in some stone tiles..."*
+
+**What was actually true before touching anything.** Live-verified first,
+not assumed: flint was already gatherable underground, but only via an
+invisible rule (`harvest.ts`'s `rockNearby` check — a floor tile adjacent
+to a `"wall"` tile yields flint). Confirmed live: 355 such tiles on one
+real seed, and a real gather there did yield flint. But nothing on the
+map marked which floor tiles counted — the exact "mechanics hidden in a
+meter, not visible on the map" pattern this project keeps finding and
+fixing. Presented the choice (add a real visible stone tile vs. just
+document the existing rule); direct answer: *"Add it and render using a
+good ripped tile sprite."*
+
+**New terrain kind, not just a flag.** `"stone"` — a new `TerrainKind`
+(types.ts), walkable, not opaque, not an obstacle like `"boulder"`. Every
+place `TerrainKind` is exhaustively enumerated (`palette.ts`'s
+`TERRAIN_BG`/`TERRAIN_FG`/`TERRAIN_GLYPH`, `legend.ts`, runner's
+`ascii.ts`) needed — and got — a real entry; the compiler found all of
+them once `"stone"` was added to the union, exactly the "an exhaustive
+switch breaks in N packages at once" pattern this project already knows
+to watch for.
+
+**Placement — real, findable outcrops, not everywhere.** New
+`worldgen.ts` function `pickUndergroundStoneOutcrops`, run right after
+the cave's CA wall/floor grid and connected-region cleanup (same slot
+`pickUndergroundWaterPocket` already occupies for the guaranteed water
+pocket): candidates are real dry floor cells adjacent to a wall (rock
+breaking through from the wall it's beside, not scattered mid-floor at
+random), shuffled and greedily spaced apart so all outcrops don't land
+in one corner, each grown into a small 1-3 tile patch. `harvest.ts`'s
+flint check now also fires directly on a `"stone"` tile itself (not just
+tiles adjacent to it) — the wall-adjacency rule stays as a fallback, not
+replaced, so flint is never fully blocked by sparse outcrop placement.
+
+**Art — a genuine crop, not a placeholder.** Installed Pillow (this
+container had no image-editing tool otherwise) and manually located,
+then auto-scanned for low-color-variance, a clean 24×24 rounded-
+cobblestone patch from `legacy-cpp/data/sprites/"biome sprites
+unripped.png"` (the same sheet this project's other terrain art —
+`floor_stone`, `floor_desert`, etc. — was already ripped from,
+following that work's own documented "auto-scan for flat patches, then
+hand-verify" method to avoid repeating its one real past mistake, a
+"fake lava" crop that was just a flat background block). Verified
+`getextrema()` alpha is fully opaque (no background bleed) before
+saving to `packages/web/public/tiles/stone.png` — the existing
+`getTileSprite` convention (a plain `TerrainKind` not in
+`TILE_VARIANT_COUNTS` looks up `/tiles/<kind>.png` directly) picks it up
+automatically, zero renderer.ts changes needed. Deliberately a fresh
+crop, not a reuse of the already-wired `floor_stone.png` (a Highland-
+biome *floor* texture) — reusing that would have made an underground
+flint outcrop look pixel-identical to unrelated surface terrain
+elsewhere, undermining the entire "make this visible and distinct"
+point of the ask.
+
+**Tests.** `gather.test.ts`: a stone tile always yields flint, and so
+does a plain floor tile immediately beside one; two tiles away, nothing.
+`worldgen.test.ts`: every generated cave (5 seeds) has real stone tiles,
+each one walkable/non-opaque and within 2 tiles of a wall or another
+stone tile (the outcrop it's part of); the existing "every walkable tile
+is one connected region" test's own local `isWalkable` helper was stale
+(hardcoded to `floor`/`water` only) and needed updating to include
+`stone` — a real, walkable-in-the-actual-engine terrain kind that its
+own BFS didn't know about, briefly reading as "the cave fragmented into
+4 pieces" when nothing had actually changed about real connectivity.
+Full engine suite: 1563/1563. Data: 400/400. `tsc --noEmit` clean on
+engine/web/runner; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser, not just read from tests**: a real
+generated cave (seed 20260903) had 12 real stone tiles; walked the
+player onto one and gathered — "You gather flint," a real flint landed
+in the pack. Screenshotted the actual rendered sprite in-game (zoomed in
+next to the player): the rounded cobblestone texture is clearly visible
+and reads as distinctly different rock from the surrounding cave floor
+and from the dark wall blocks nearby, not a fallback color rect.
+
+**Not done here, logged as its own idea**: mid-review the user separately
+described wanting *"contiguous layers of higher rock, like different
+plane separated by edged rock... copy that artistic vibe"* — real
+elevation "shelves" with rock-edge border art, building on the existing
+`Tile.elevation` shading system (currently just per-tile brightness, no
+distinct edge/border art). A real, separate rendering feature, not yet
+scoped — needs its own design pass before implementation.
+
+## Fixed: a follower at `tolerant` trust can flee the very player it's following
+
+Direct ask: after "Have you tried to play the game lately," went and
+actually played a real cave run (seed 77777, real keypresses throughout,
+no rigged state) before touching this. Confirmed the pacing stuff first —
+energy decay matches `DECAY_PER_TICK`, HP regens while resting, fog-of-
+war travel gating is correct — then hit the backlog bug this session's
+own logging had left undecided. Given the choice ("never flee your own
+leader" vs. "working as intended"), picked **option 1**.
+
+**The fix**: `predation.ts`'s ordinary flee/mob filter (the one that reads
+`playerFleeRadius` for any `other.controlledBy === "player"`) now returns
+`false` outright whenever `agent.followingId === other.id` — a follower
+never reads its own leader as a threat, full stop, regardless of trust
+stage. Everything else about that filter (fleeing something else, a non-
+follower's ordinary trust-scaled radius) is untouched.
+
+**A real finding from verifying this, not a hypothetical**: my first live
+check said the fix didn't work — a tolerant-trust follower fled its
+leader after ~28 real turns even with the patch applied. Turned out to be
+my own test rig, not the code: `rapport.ts`'s `decayedRapportScore` reads
+`RapportEdge.towardPlayer` to pick the decay rate, and a *real* player-
+rapport edge always has that flag set (`adjustRapport`), but my synthetic
+setup script built the edge by hand and left it unset — so it decayed at
+the fast, non-player rate, crossed under `TRUST_TOLERANT` by tick ~82,
+`tickFollowers` correctly un-followed it (stage now `wary`), and *then*
+it fled as a stranger would — nothing to do with the fix under test. Same
+"test artifact, not a real bug" shape this session already hit twice
+before with rigged fixtures. Re-ran with `towardPlayer: true` set (what a
+real edge actually looks like): the same tolerant-trust follower, boxed
+right next to a player moving back and forth for 40 real turns (tick 0→
+113), stayed `behavior: "follow"` the entire time, never flipped to
+`flee`. That's the real confirmation, live in the browser, not just the
+unit test.
+
+**Tests**: `bond.test.ts` — a tolerant-trust (not bonded) follower does
+not flee its leader even when the player's move-triggered threat
+signature would have cleared the old radius. Full engine suite:
+1564/1564. `tsc --noEmit` clean across all 4 packages.
+
+## Fixed: gather no longer restarts when you press 'g' again mid-gather
+
+Direct ask, sent while I was reporting the playtest above: *"G should lock
+you into finishing the action of gathering unless you're attacked."* Asked
+which of two existing behaviors that covered: CRAFTING_LOOP.md's
+documented "something new walks into view, you stop and notice" rule, or
+just the redundant-keypress restart I'd hit live moments earlier. Answer:
+**fix the keypress bug, keep the sighting-stop** — the "something walked
+in" interrupt is deliberate design (CRAFTING_LOOP.md: "you are sitting in
+a cave twisting fiber... if something walks in you stop"), not the bug.
+
+**Root cause**: `player.ts`'s `applyPlayerAction` has one rule — "any
+action other than continuing the activity abandons it" — then falls
+straight into the `"gather"` case, which unconditionally sets
+`agent.activity = { turnsLeft: GATHER_TURNS, ... }`. A second `"gather"`
+action while already gathering hit both: cleared by the abandon rule,
+then immediately restarted from `GATHER_TURNS` by the case itself. Four
+rapid re-presses (exactly what a Playwright script — and plausibly a
+real, slightly impatient player — did) could never finish a 3-turn
+gather; each press reset the clock.
+
+**Fix**: a re-issued `"gather"` while `agent.activity?.kind === "gather"`
+is now a genuine no-op — `turnsLeft` untouched, nothing re-triggered.
+Move, a real attack landing, or anything else still abandons the
+activity exactly as before; only the same-action redundant re-press is
+now inert.
+
+**Live-verified**: walked onto a real stone outcrop (seed 77777), mashed
+`g` 4 times in ~90ms — `turnsLeft` stayed at 3 after the mash (previously
+would have reset every time), then the existing auto-continue loop
+finished it with no further input: `"You gather flint."`, 1 flint landed
+in the pack.
+
+**Tests**: `gather.test.ts` — re-issuing `gather` mid-gather doesn't reset
+`turnsLeft`, and the gather still completes normally afterward. Full
+engine suite: 1565/1565. `tsc --noEmit` clean across all 4 packages.
+
+## Built: more underground water + light, and a real lit trail toward the exit
+
+Direct ask, verbatim: *"I need more water around the cave. In general the
+starting cave feels very open and hard to see what's going on. Can't find
+the exit. Need some better design to help guide."*
+
+Read the actual generation code before proposing anything (design-mode
+first — no edits until the menu below was answered). Three separate,
+confirmed root causes, all compounding:
+
+1. **Water**: every 90×60 cave level got exactly ONE guaranteed water
+   pocket (radius 3, ~30 tiles) — `pickUndergroundWaterPocket`. That was
+   the entire water supply for the map.
+2. **"Very open, hard to see"**: `ambientLightAt` (vision.ts) — a
+   `sunbeam` tile is the ONLY light source underground (no day/night cycle
+   down there). Sunbeam tiles were placed only on the surface during
+   generation, plus level 1's own hand-authored starting-chamber ring.
+   Levels 2-5 (`buildDeeperLevel`, the plain cave generator) had ZERO
+   light sources anywhere — the entire level sits at the dark sight
+   radius (~4 tiles) start to finish, even though "walk toward the light"
+   is vision.ts's own documented "whole M1 fantasy."
+3. **Can't find the exit**: `attachStairsDown`/`attachExit` place the
+   stairs at the single farthest walkable point from the map's center,
+   with zero hint mechanism of any kind.
+
+Presented a menu (per this project's own "give a menu with a
+recommendation" convention, since this touches worldgen tuning) rather
+than picking for them: **1) how strong should exit-guidance be** — a lit
+trail biased along the real walk, scattered light with no path bias, or
+an explicit compass/hint — chose **the lit trail**; **2) how much more
+water** — 3-4 small pockets vs. fewer bigger ones — chose **3-4 pockets**.
+
+**Built**:
+- `worldgen.ts`: `pickUndergroundWaterPocket` → `pickUndergroundWaterPockets`
+  — up to `UNDERGROUND_WATER_POCKET_COUNT` (4) pockets, greedily spaced
+  apart (same shuffle-then-space idiom `pickUndergroundStoneOutcrops`
+  already used), each with a chance-based lit halo of `sunbeam` tiles
+  around it (`UNDERGROUND_POCKET_LIGHT_RADIUS`/`_CHANCE`) — real ambient
+  light on every level that generates underground caves at all, not just
+  level 1's hand-authored one.
+- `types.ts`/`worldgen.ts`: `World.primaryUndergroundWaterAt` — the exact
+  center of the strongest (wet-density-weighted) pocket, so a consumer
+  that wants "the" main pocket can find that SAME one deterministically
+  once several exist nearby.
+- `scenario.ts`: `attachStairsDown`/`attachExit` now anchor from
+  `world.stairsUpAt` (where the player actually lands on this level) —
+  more correct than the old "recompute a center-ish point independently"
+  — and a new `litTrailToward` places two small lit waypoints at 1/3 and
+  2/3 of the real walk-distance toward the stairs/exit. Real diegetic
+  guidance (reuses the exact "walk toward the light" mechanic, not a
+  compass or a HUD arrow), and it only guards the WALK — it still doesn't
+  point straight at the goal.
+
+**Three real bugs found and fixed along the way, each caught only by live
+verification, not by reading the diff**:
+
+1. Adding `pickUndergroundWaterPockets` broke every `createCaveScenario`
+   test (`reach.length` 0 — no sunbeam reachable from spawn) *before* I'd
+   even gotten to the stairs/trail work. Root cause: my first draft
+   shuffled the remaining candidate pool BEFORE carving the primary
+   pocket's own jittered circle — extra `rng()` calls in between shifted
+   every jitter draw the primary circle's own shape depended on, relative
+   to the untouched-order old single-pocket code, occasionally producing
+   a shape that mattered downstream. Fixed by carving the primary pocket
+   immediately after picking it, exactly matching the old rng-stream
+   position, before any shuffling happens.
+2. That alone wasn't enough — `world.primaryUndergroundWaterAt` (the
+   pocket's own generation CENTER) is several tiles deep into the water,
+   surrounded on every side by more water out to the pocket's own radius.
+   `walkDistances` never steps onto ANY water tile, so a BFS seeded
+   exactly at a pool's center found nothing and stayed a single-point
+   map — `createCaveScenario`'s player spawned standing IN the water
+   (`tile: "water"`, confirmed live via a throwaway diagnostic script).
+   Tried `findWalkableNear` next — also failed silently, because
+   `canEnterWater` only rejects LARGE water bodies; an ordinary small
+   pond is unrestricted for every agent, so it just returned the water
+   tile back unchanged. Fixed with a small new `nearestDryLand` helper in
+   scenario.ts that excludes water outright regardless of body size.
+3. Even after both fixes, one seed (202) missed the "light isn't visible
+   from spawn" tolerance by exactly 1 step (15 vs. the old ≥16 floor).
+   Real, expected: with light scattered around every pocket now (not just
+   the hand-authored chamber), an unrelated pocket's halo can legitimately
+   land a couple of tiles closer to spawn than the chamber alone would —
+   widened `cave.test.ts`'s fudge factor accordingly (documented why, not
+   silently loosened).
+
+**Live-verified in the browser** (seed 88888, `?player=cave`): world stats
+read off `window.__pokuelike.world` directly — 118 water tiles / 124
+sunbeam tiles on level 1 (was ~34 water / 0 sunbeam before), and level 2
+(previously-pitch-black `buildDeeperLevel`) now shows 107 sunbeam tiles
+where it had zero. No console errors across a real walked stretch (148
+ticks), needs decayed normally, spawn still lands in the dark as designed
+(screenshot confirms no sunbeam visible at tick 0).
+
+**Tests**: `worldgen.test.ts` — several separate water components per
+cave (not one), sunbeam tiles present on every seed, connectivity test's
+own local `isWalkable` helper updated for the new `"sunbeam"` walkable
+terrain (same stale-fixture shape hit before with `"stone"`). `cave.test.ts`/
+`caveRun.test.ts` — all passing, including the widened tolerance. Full
+suite: engine 1567/1567, data 400/400. `tsc --noEmit` clean and a real
+`pnpm --filter @pokuelike/web build` clean across all 4 packages.
+
 ## Built: wild humans feel like a threat despite weak stats, plus valuable loot — see DESIGN.md
 
 - [x] Direct ask: "make the humans feel a little more like a threat

@@ -103,6 +103,14 @@ export const ITEMS: Record<string, ItemDef> = {
   poultice: { key: "poultice", name: "Poultice", weight: 1 },
   foragePouch: { key: "foragePouch", name: "Forage pouch", weight: 1, capacity: 8 },
   camouflageCloak: { key: "camouflageCloak", name: "Camouflage cloak", weight: 2, slot: "worn", threat: -0.4 },
+  // Direct ask: "get rid of fire building as a direct action - make it a
+  // crafting thing that sets down a campfire." Supersedes the original
+  // "torch + 2 deadwood, instant" `lightFire` verb — the fire-starting
+  // work now happens at the crafting bench (this item), not on the spot;
+  // `player.ts`'s "placeCampfire" action just consumes one of these to
+  // plant it. No `slot` — it's a placeable kit, not something you hold
+  // or wear.
+  campfire: { key: "campfire", name: "Campfire", weight: 3 },
   // Direct ask: "you know im gonna have to add cooking lol. building a fire
   // you can deploy... to cook, and while near you can craft with combos of
   // crops and berries. cooked food gets you more rapport when offered.
@@ -115,6 +123,12 @@ export const ITEMS: Record<string, ItemDef> = {
   berryStew: { key: "berryStew", name: "Berry Stew", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
   potatoMash: { key: "potatoMash", name: "Potato Mash", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.2 } },
   vegetableStew: { key: "vegetableStew", name: "Vegetable Stew", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.5 } },
+  // Direct ask: "can't loot or butcher dead units... maybe you need a
+  // knife to do more" — `player.ts`'s "butcher" action puts real `meat` in
+  // the pack; a heavier cooked payoff than the crop dishes above (real
+  // protein, not a berry) is the reason to actually carry it back to a
+  // fire instead of just eating it raw.
+  roastedMeat: { key: "roastedMeat", name: "Roasted Meat", weight: 1, cooked: { healFraction: 0.25, rapportMultiplier: 2.5 } },
   // Non-combat flavor items — direct ask: "waterskin, bedroll, coin pouch."
   // Waterskin is the one with a real mechanic on top: "make waterskin when
   // held, allow gather from water sources and filling it up" —
@@ -153,6 +167,13 @@ export const RECIPES: Record<string, RecipeDef> = {
   axe: recipe("axe", "Axe", [["boundHaft", 1], ["knappedFlint", 2]], 14, false),
   machete: recipe("machete", "Machete", [["boundHaft", 1], ["knappedFlint", 1], ["cordage", 1]], 11, false),
   poultice: recipe("poultice", "Poultice", [["herbs", 1], ["lichen", 1]], 5, true),
+  // Direct ask: "get rid of fire building as a direct action - make it a
+  // crafting thing that sets down a campfire." `knownAtStart: true` —
+  // this is day-one survival kit (cooking already needs a deployed fire,
+  // and every input here is `knownAtStart` too), same reasoning as
+  // `foragePouch`/the cooking recipes above; deadwood for fuel, flint
+  // for the spark.
+  campfire: recipe("campfire", "Campfire", [["deadwood", 3], ["flint", 1]], 6, true),
   // Direct ask: "i also want to craft a backpack eather early on if
   // possible, if only a small one, that increases your capacity" — its
   // inputs (cordage, fiber) are both already `knownAtStart`, so this was
@@ -164,14 +185,45 @@ export const RECIPES: Record<string, RecipeDef> = {
   // while near you can craft with combos of crops and berries." Each needs
   // a real nearby fire (`player.ts`'s "lightFire" action deploys one);
   // `requiresNearFire: true` is the last positional arg on every one below.
-  // Not known at start, same as every other non-trivial recipe here.
-  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, false, 1, true),
-  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, false, 1, true),
-  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, false, 1, true),
-  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, false, 1, true),
+  //
+  // Direct report, live-verified: "i dont see fire crafting or cooking
+  // recipes as an option" — a real reachability bug, not a UI glitch.
+  // These originally shipped `knownAtStart: false`, on the same footing as
+  // axe/machete/knappedFlint ("learned later... M6+: examine, being
+  // taught, a written recipe" per this file's own top doc comment) — but
+  // that discovery mechanic was never built, for ANY recipe, so
+  // `knownAtStart: false` here meant "permanently unreachable," not
+  // "reachable once you find X." Confirmed live: a fresh spawn's
+  // `knownRecipes` was `["fiber","cordage","boundHaft","torch","club",
+  // "poultice","foragePouch"]` — none of the four below, ever. Flipped to
+  // `true`, same fix and same reasoning as `foragePouch` just above: every
+  // ingredient here is a gatherable crop, nothing else gates them, and the
+  // user's own original ask ("building a fire you can deploy") reads as
+  // day-one survival kit, not a late-game unlock — axe/machete/
+  // knappedFlint are left exactly as they were; that's a real, separate,
+  // still-open gap (nothing discovers ANY non-knownAtStart recipe), not
+  // something this fix should paper over.
+  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, true, 1, true),
+  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, true, 1, true),
+  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, true, 1, true),
+  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, true, 1, true),
+  // `knownAtStart: true` — same reachability reasoning as the crop dishes
+  // above (CLAUDE.md's own lesson: a recipe with `knownAtStart: false` is
+  // permanently unreachable today, no discovery mechanic exists), and
+  // meat itself only ever enters the pack via `butcher`, already always
+  // available — gating the recipe behind an unlock nothing can grant
+  // would make it exactly the "exists in the data, never fires" bug this
+  // project keeps finding and fixing.
+  roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, 1, true),
   // Waterskin: known at start, same tier as torch/club — water is core
   // survival, not a discovery-gated craft.
   waterskin: recipe("waterskin", "Waterskin", [["cordage", 1], ["fiber", 2]], 6, true),
+  // Bedroll is deliberately NOT knownAtStart, and that is now a real gap
+  // rather than a choice: nothing in the game discovers a recipe, so this
+  // is unreachable exactly the way the cooked dishes above were. Flagged
+  // in TODO.md rather than quietly flipped, since it is the same
+  // still-open "nothing grants any non-knownAtStart recipe" hole that
+  // axe/machete/knappedFlint sit in.
   bedroll: recipe("bedroll", "Bedroll", [["fiber", 3], ["cordage", 1]], 7, false),
   // No coinPouch recipe — deliberately loot-only, see its ITEMS comment.
 };

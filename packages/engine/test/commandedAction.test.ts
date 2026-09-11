@@ -126,6 +126,25 @@ describe("player.ts: command case — issuing the order", () => {
     expect(applyPlayerAction(world, me, { kind: "command", agentId: "s", moveId: "test_claw", target: { x: 9, y: 5 } })).toBe(false);
     expect(s.commandedAction).toBeUndefined();
   });
+
+  it("captures the living agent standing on the target tile as targetAgentId — the standing fight order this enables", () => {
+    const world = openWorld();
+    const me = human(5, 5);
+    const s = partner("s", 6, 5, { moves: [CLAW] });
+    const target = prey("rat", 9, 5);
+    world.agents.push(me, s, target);
+    expect(applyPlayerAction(world, me, { kind: "command", agentId: "s", moveId: "test_claw", target: { x: 9, y: 5 } })).toBe(true);
+    expect(s.commandedAction).toEqual({ moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" });
+  });
+
+  it("an empty target tile has no targetAgentId at all — a plain one-shot terrain-style order", () => {
+    const world = openWorld();
+    const me = human(5, 5);
+    const s = partner("s", 6, 5, { moves: [CLAW] });
+    world.agents.push(me, s);
+    applyPlayerAction(world, me, { kind: "command", agentId: "s", moveId: "test_claw", target: { x: 9, y: 5 } });
+    expect(s.commandedAction?.targetAgentId).toBeUndefined();
+  });
 });
 
 describe("needs.ts: applyCommandedAction — carrying the order out over the partner's own ticks", () => {
@@ -204,5 +223,69 @@ describe("needs.ts: applyCommandedAction — carrying the order out over the par
     const s = partner("s", 5, 5, { moves: [CLAW] });
     world.agents.push(s);
     expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(false);
+  });
+});
+
+/**
+ * Direct follow-up report: "ally doesn't seem to engage much in combat. if
+ * i target a unit with a move it should go do that and continue to fight
+ * and engage until i like walk away they should follow or something." A
+ * `targetAgentId`-tracked order (see player.ts's "command" case) is a real
+ * standing fight — chases the target's current position, keeps swinging
+ * every time it's off cooldown, and only stands down on the target's death
+ * or the commander walking far enough away.
+ */
+describe("needs.ts: applyCommandedAction — a tracked target is a standing fight, not one swing", () => {
+  it("keeps the order after landing a hit — does not clear like an untracked one-shot order would", () => {
+    const world = openWorld();
+    const s = partner("s", 8, 5, { moves: [CLAW], commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" } });
+    const target = prey("rat", 9, 5);
+    world.agents.push(s, target);
+    const before = target.hp;
+    expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(true);
+    expect(target.hp).toBeLessThan(before!);
+    expect(s.commandedAction).toBeDefined(); // still standing — the fight isn't over
+    expect(s.commandedAction?.targetAgentId).toBe("rat");
+  });
+
+  it("keeps chasing the target's CURRENT position, not the tile it started at", () => {
+    const world = openWorld();
+    const s = partner("s", 2, 5, { moves: [CLAW], commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" } });
+    const target = prey("rat", 9, 5);
+    world.agents.push(s, target);
+    target.pos = { x: 4, y: 5 }; // moved since the order was issued
+    expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(true);
+    expect(s.pos.x).toBeGreaterThan(2);
+    expect(s.pos.x).toBeLessThanOrEqual(4); // stepping toward the target's real position, not (9,5)
+  });
+
+  it("clears the order once the tracked target actually dies, rather than swinging at empty ground", () => {
+    const world = openWorld();
+    const s = partner("s", 8, 5, { moves: [CLAW], commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" } });
+    const target = prey("rat", 9, 5, { alive: false });
+    world.agents.push(s, target);
+    expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(false);
+    expect(s.commandedAction).toBeUndefined();
+  });
+
+  it("stands down back to ordinary following once the commanding player walks far enough away", () => {
+    const world = openWorld();
+    const me = human(5, 5);
+    const s = partner("s", 8, 5, { moves: [CLAW], commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" } });
+    const target = prey("rat", 9, 5);
+    world.agents.push(me, s, target);
+    me.pos = { x: 30, y: 30 }; // well beyond COMMAND_DISENGAGE_DISTANCE from the follower
+    expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(false);
+    expect(s.commandedAction).toBeUndefined();
+  });
+
+  it("stays engaged while the commander is still reasonably close", () => {
+    const world = openWorld();
+    const me = human(9, 6); // adjacent to the fight, not far at all
+    const s = partner("s", 8, 5, { moves: [CLAW], commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" } });
+    const target = prey("rat", 9, 5);
+    world.agents.push(me, s, target);
+    expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(true);
+    expect(s.commandedAction).toBeDefined();
   });
 });

@@ -9,6 +9,7 @@ import {
   activeMacroWeatherAt,
   advanceAbstractRegion,
   createMacroWorld,
+  crossZoneEdge,
   demoteRegion,
   promoteZone,
   setFocusedZone,
@@ -1055,5 +1056,129 @@ describe("herd identity persists across zones", () => {
     if (emigratedEvent?.kind === "regionEmigrated") {
       expect(emigratedEvent.herdId).toBe("the-og-herd");
     }
+  });
+});
+
+/**
+ * Direct ask: "spawn in overworld after graduating from the end of the
+ * cave," scoped to full seamless macro-grid walking. `crossZoneEdge` is
+ * what a "move" that would step off the focused zone's own tile-grid
+ * bounds turns into instead of just failing.
+ */
+describe("crossZoneEdge", () => {
+  function humanPlayer(pos: Vec2): Agent {
+    return {
+      id: "player",
+      species: "human",
+      pos,
+      layer: "surface",
+      homeLayer: "surface",
+      needs: createNeeds(),
+      behavior: "idle",
+      controlledBy: "player",
+    };
+  }
+
+  it("crossing the east edge lands in the zone to the east, at the mirrored west-edge y", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 29, y: 15 });
+    originWorld.agents.push(player, livingAgent("wild0"));
+    const origin = makeRegion(1, 1, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 1, 1);
+    const log = new EventLog();
+
+    const next = crossZoneEdge(mw, player, 1, 0, CTX, log);
+
+    expect(next).toBeDefined();
+    expect(mw.focusedKey).toBe(zoneKey(1, 2));
+    expect(originWorld.agents).not.toContain(player);
+    expect(next!.agents).toContain(player);
+    expect(player.pos).toEqual({ x: 0, y: 15 });
+    const event = log.events.find((e) => e.kind === "crossedZone");
+    expect(event).toBeDefined();
+    if (event?.kind === "crossedZone") {
+      expect(event.fromZone).toBe(zoneKey(1, 1));
+      expect(event.toZone).toBe(zoneKey(1, 2));
+      expect(event.agentId).toBe("player");
+    }
+  });
+
+  it("crossing the west edge mirrors onto the east edge of the neighbor at the same y", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 0, y: 8 });
+    originWorld.agents.push(player);
+    const origin = makeRegion(2, 2, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 2, 2);
+
+    const next = crossZoneEdge(mw, player, -1, 0, CTX);
+
+    expect(next).toBeDefined();
+    expect(mw.focusedKey).toBe(zoneKey(2, 1));
+    expect(player.pos).toEqual({ x: 29, y: 8 });
+  });
+
+  it("crossing north/south mirrors onto the opposite y edge at the same x", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 12, y: 0 });
+    originWorld.agents.push(player);
+    const origin = makeRegion(2, 2, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 2, 2);
+
+    const next = crossZoneEdge(mw, player, 0, -1, CTX);
+
+    expect(next).toBeDefined();
+    expect(mw.focusedKey).toBe(zoneKey(1, 2));
+    expect(player.pos).toEqual({ x: 12, y: 29 });
+  });
+
+  it("a diagonal move that exits both bounds at once crosses into the corner-adjacent zone", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 29, y: 29 });
+    originWorld.agents.push(player);
+    const origin = makeRegion(1, 1, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 1, 1);
+
+    const next = crossZoneEdge(mw, player, 1, 1, CTX);
+
+    expect(next).toBeDefined();
+    expect(mw.focusedKey).toBe(zoneKey(2, 2));
+    expect(player.pos).toEqual({ x: 0, y: 0 });
+  });
+
+  it("an ordinary in-bounds move is not a crossing at all", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 15, y: 15 });
+    originWorld.agents.push(player);
+    const origin = makeRegion(1, 1, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 1, 1);
+
+    expect(crossZoneEdge(mw, player, 1, 0, CTX)).toBeUndefined();
+    expect(originWorld.agents).toContain(player);
+    expect(mw.focusedKey).toBe(zoneKey(1, 1));
+  });
+
+  it("at the outermost edge of the whole macro grid, there is nowhere to cross into", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 0, y: 15 });
+    originWorld.agents.push(player);
+    const origin = makeRegion(0, 0, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 0, 0);
+
+    expect(crossZoneEdge(mw, player, -1, 0, CTX)).toBeUndefined();
+    expect(originWorld.agents).toContain(player);
+    expect(player.pos).toEqual({ x: 0, y: 15 });
+  });
+
+  it("the wild population left behind is demoted normally — pulling the player out first keeps demoteRegion's own machinery untouched", () => {
+    const originWorld = createWorld(30, 30, 1);
+    const player = humanPlayer({ x: 29, y: 15 });
+    originWorld.agents.push(player, livingAgent("b0"), livingAgent("b1"));
+    const origin = makeRegion(1, 1, originWorld);
+    const mw = makeMacroWorld(makeGrid(5, 5), [origin], 1, 1);
+
+    crossZoneEdge(mw, player, 1, 0, CTX);
+
+    expect(originWorld.agents).toEqual([]);
+    expect(origin.aggregates!["bulbasaur"]!.population).toBe(2);
   });
 });

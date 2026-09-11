@@ -58,3 +58,4 @@ export * from "./macroGrid.js";
 export * from "./landmarks.js";
 export * from "./overworld.js";
 export * from "./utilityMoves.js";
+export * from "./climb.js";

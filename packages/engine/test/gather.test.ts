@@ -74,6 +74,18 @@ describe("harvestableAt", () => {
     setTile(world, "surface", 5, 5, "water");
     expect(harvestableAt(world, "surface", { x: 6, y: 5 })).toEqual([]);
   });
+
+  it('direct ask: "grab that [flint] in some stone tiles" — a real stone tile always yields flint, and a plain floor tile right beside one does too', () => {
+    const world = cave();
+    setTile(world, "underground", 5, 20, "stone");
+    expect(harvestableAt(world, "underground", { x: 5, y: 20 })).toEqual(["flint"]);
+    // Adjacent bare floor (no groundType, no nearby wall) — the outcrop
+    // itself is enough, same "near the rock" reasoning the wall-adjacency
+    // fallback already uses for walls.
+    expect(harvestableAt(world, "underground", { x: 6, y: 20 })).toEqual(["flint"]);
+    // Two tiles away — out of reach of the outcrop.
+    expect(harvestableAt(world, "underground", { x: 7, y: 20 })).toEqual([]);
+  });
 });
 
 describe("gather (ROADMAP M5)", () => {
@@ -105,6 +117,26 @@ describe("gather (ROADMAP M5)", () => {
     advancePlayerTurn(world, { kind: "gather" });
     expect(me.lastActionOutcome).toMatchObject({ action: { kind: "gather" }, ok: false });
     expect(me.activity).toBeUndefined();
+  });
+
+  it("Direct ask: \"G should lock you into finishing the action of gathering\" — re-issuing gather mid-gather is a no-op, not a restart", () => {
+    const world = cave();
+    const me = human(12, 10);
+    world.agents.push(me);
+    advancePlayerTurn(world, { kind: "gather" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS });
+    advancePlayerTurn(world, { kind: "continue" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS - 1 });
+    // A stray re-press of the same gather key — the exact real-play pitfall
+    // hit live in a Playwright session — used to fall through the "any
+    // action other than continue abandons it" rule straight back into the
+    // "gather" case, which unconditionally reset turnsLeft to GATHER_TURNS.
+    // Four rapid re-presses could never finish a 3-turn gather.
+    advancePlayerTurn(world, { kind: "gather" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS - 1 });
+    for (let i = 0; i < GATHER_TURNS - 1; i++) advancePlayerTurn(world, { kind: "continue" });
+    expect(me.activity).toBeUndefined();
+    expect(countOf(me, "lichen")).toBe(1);
   });
 
   it("three takes empty a tile; it regrows one take every HARVEST_REGROW_TICKS", () => {

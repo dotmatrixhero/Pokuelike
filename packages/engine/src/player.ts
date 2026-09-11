@@ -8,7 +8,7 @@ import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
 import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, thirstReliefOf, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
-import { carryCapacityOf, healFromCookedFood } from "./support.js";
+import { applyLooting, carryCapacityOf, healFromCookedFood, isTrulyDead } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, resolveHit } from "./predation.js";
@@ -62,6 +62,19 @@ export function applyPlayerAction(
   rng: () => number = world.rng,
 ): boolean {
   const outcome: PlayerActionOutcome = { action, ok: false, tick: world.tick };
+  // Direct ask: "G should lock you into finishing the action of
+  // gathering." Re-pressing the same gather key mid-gather used to fall
+  // into the "any action other than continue abandons it" rule below and
+  // then straight back into the "gather" case, which unconditionally
+  // resets `turnsLeft` — so a stray double-tap (or, as found live, four
+  // rapid presses in a playtest script) silently restarted the countdown
+  // forever instead of ever finishing. A genuine no-op here: activity,
+  // turnsLeft and everything else are left exactly as they were.
+  if (agent.activity?.kind === "gather" && action.kind === "gather") {
+    outcome.ok = true;
+    agent.lastActionOutcome = outcome;
+    return true;
+  }
   // Any action other than continuing the activity abandons it.
   if (agent.activity && action.kind !== "continue") agent.activity = undefined;
   // Anything other than waiting wakes the player up — see the "wait" case
@@ -120,6 +133,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         recordGrazing(tile);
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
         log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+        signalMirrorToFollowers(world, agent, "eat");
         return true;
       }
       // Direct ask: "make offer and eat only available from inventory after
@@ -141,6 +155,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       healFromCookedFood(world, agent, carried);
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+      signalMirrorToFollowers(world, agent, "eat");
       return true;
     }
     case "drink": {
@@ -160,6 +175,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       }
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "thirst" });
+      signalMirrorToFollowers(world, agent, "drink");
       return true;
     }
     case "gather": {
@@ -173,6 +189,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // tops off gear you're already carrying, not new cargo.
       if (!canHarvest && !canFillWaterskin(world, agent)) return false;
       agent.activity = { kind: "gather", turnsLeft: GATHER_TURNS, turnsTotal: GATHER_TURNS };
+      signalMirrorToFollowers(world, agent, "gather");
       return true;
     }
     case "craft": {
@@ -211,14 +228,32 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       return true;
     }
     case "attack": {
-      const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      const targetPos = action.target ?? { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      // A tile-targeted swing always names a real move — see this action's
+      // own doc comment on why there's no auto-pick equivalent for an
+      // arbitrary tile the way the bare directional swing has.
+      if (action.target && !action.moveId) return false;
+      // Chebyshev, not `manhattan` (predation.ts's own, used everywhere ELSE
+      // range is checked) — deliberately. The player moves 8-directionally,
+      // one step in any of 8 directions costs the same turn, and the old
+      // dx/dy swing this replaces already treated every one of those 8
+      // neighbors as "distance 1" by construction (dx/dy each -1/0/1, no
+      // distance computed at all). Manhattan would silently shrink melee
+      // reach to the 4 orthogonal tiles the instant a swing became
+      // tile-targeted instead of directional — a real behavior change this
+      // feature isn't meant to make. Ally commands (needs.ts) keep using
+      // manhattan; that's a separate, self-correcting case (an out-of-range
+      // order just walks the partner one step closer next tick), not this
+      // one-shot swing.
+      const distance = action.target ? Math.max(Math.abs(action.target.x - agent.pos.x), Math.abs(action.target.y - agent.pos.y)) : 1;
       // Direct ask: "Attack should move list should work when you have a
       // weapon, or tackle if you don't. The player has moves too" — an
       // explicit `moveId` names one of the player's own real moves; a
-      // chosen move must exist, be off cooldown, and reach distance 1 (dx/
-      // dy are each -1/0/1 by construction) to count as "you swung."
+      // chosen move must exist, be off cooldown, and reach `distance` (1 by
+      // construction for the plain dx/dy swing; whatever `target` is
+      // actually away for a tile-targeted one) to count as "you swung."
       const chosen = action.moveId ? agent.moves?.find((m) => m.id === action.moveId) : undefined;
-      if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, 1))) return false;
+      if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, distance))) return false;
       const defender = world.agents.find(
         (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
       );
@@ -229,11 +264,9 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         // false, so it can't tell those two apart for `out.ok`. Checked
         // here first, the same pre-check `canAttackFromHere` already does
         // at every other real call site, to know whether a swing actually
-        // happened at all. Distance is always 1 by construction — dx/dy
-        // are each -1/0/1, comfortably within every move on the player's
-        // loadout (`range: {max: 1}`).
-        if (!chosen && !pickBestMove(agent, defender.types ?? [], 1, world.tick)) return false;
-        resolveHit(world, agent, defender, log, "defeated", ctx, 1, rng, 1, chosen);
+        // happened at all.
+        if (!chosen && !pickBestMove(agent, defender.types ?? [], distance, world.tick)) return false;
+        resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, chosen);
         out.attackedId = defender.id;
         return true;
       }
@@ -268,7 +301,29 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       if (!partner) return false;
       const move = partner.moves?.find((m) => m.id === action.moveId);
       if (!move) return false;
-      partner.commandedAction = { moveId: action.moveId, target: action.target };
+      // Direct follow-up report: "ally doesn't seem to engage much in
+      // combat... it should go do that and continue to fight and engage
+      // until i like walk away." Captured once, here, at issue time: a
+      // living agent standing on the targeted tile becomes a tracked
+      // target `needs.ts`'s `applyCommandedAction` chases and keeps
+      // fighting until it dies, rather than one swing at a tile that goes
+      // stale the instant the target takes a step.
+      const targetAgent = world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
+      partner.commandedAction = { moveId: action.moveId, target: action.target, targetAgentId: targetAgent?.id };
+      return true;
+    }
+    case "setStandingOrder": {
+      // Direct ask: "a command button that allows you to set behaviors
+      // for each of your allies; patrol, hunt, defend, etc." Same
+      // "bonded = currently following" gate `command` above uses.
+      const partner = world.agents.find((a) => a.id === action.agentId && a.followingId === agent.id && a.alive !== false);
+      if (!partner) return false;
+      if (action.order === "follow") {
+        partner.standingOrder = undefined;
+        partner.huntTarget = undefined;
+      } else {
+        partner.standingOrder = action.order;
+      }
       return true;
     }
     case "crouch": {
@@ -310,28 +365,31 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       }
       return true;
     }
-    case "lightFire": {
-      // Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
-      // something) to cook." Torch is the tool (stays equipped), deadwood
-      // is the fuel actually spent.
-      if (agent.equipment?.held !== "torch" || countOf(agent, "deadwood") < 2) return false;
+    case "placeCampfire": {
+      // Direct ask: "get rid of fire building as a direct action - make it
+      // a crafting thing that sets down a campfire." Consumes a crafted
+      // `campfire` item (`crafting.ts`) rather than a held torch + raw
+      // deadwood — the fire-starting is done by the time you're carrying
+      // one; this action just plants it.
+      if (countOf(agent, "campfire") < 1) return false;
       const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
       const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
       if (!tile || !tile.walkable || tile.terrain === "water") return false;
-      removeItem(agent, "deadwood", 2);
+      removeItem(agent, "campfire", 1);
       if (tile.terrain === "fire") {
-        // Direct follow-up: "burns out but you can feed it more wood to
-        // increase fuel" — genuinely additive, not just a refresh-to-full
-        // (fire.ts's own `igniteTile`, used by combat's terrainBurn, resets
-        // an already-burning tile rather than stacking; deliberately
-        // different here, since this is a player choosing to keep a fire
-        // going, not a second hit landing on a burning target).
+        // Direct follow-up (carried over from the original verb): "burns
+        // out but you can feed it more wood to increase fuel" —
+        // genuinely additive, not just a refresh-to-full (fire.ts's own
+        // `igniteTile`, used by combat's terrainBurn, resets an already-
+        // burning tile rather than stacking; deliberately different here,
+        // since this is a player choosing to keep a fire going, not a
+        // second hit landing on a burning target).
         tile.burnTicksRemaining = (tile.burnTicksRemaining ?? 0) + FIRE_BURN_TICKS;
       } else {
         // Deliberately bypasses fire.ts's own FLAMMABLE_TERRAIN gate — a
-        // torch-lit campfire is fueled by the wood in your pack, not by the
-        // ground catching, so (unlike a combat-caused fire) it can be lit
-        // on bare floor, not just vegetation.
+        // deployed campfire is fueled by the kit in your pack, not by the
+        // ground catching, so (unlike a combat-caused fire) it can be
+        // placed on bare floor, not just vegetation.
         const from = tile.terrain;
         setTile(world, agent.layer, targetPos.x, targetPos.y, "fire");
         tileAt(world, agent.layer, targetPos.x, targetPos.y)!.burnTicksRemaining = FIRE_BURN_TICKS;
@@ -340,7 +398,57 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       invalidateResourceIndex(world);
       return true;
     }
+    case "loot": {
+      // Direct ask: "can't loot or butcher dead units." Reuses
+      // support.ts's `applyLooting` unmodified — the player is just
+      // another agent to the sim (this file's own doc comment), and that
+      // function already has no relationship restriction ("predator,
+      // rival, even the victim's own herd" per its own doc comment), so
+      // there's nothing player-specific to add here at all.
+      return applyLooting(world, agent, log);
+    }
+    case "butcher": {
+      // Direct follow-up, same report: "maybe you need a knife to do more
+      // but that should be a thing." Only a TRULY dead corpse — DESIGN.md's
+      // "only true death is consumable" ruling, the same line `eat`/
+      // `applyScavenging` already draw between fainted (lootable, not
+      // eatable) and truly dead (both).
+      const corpse = corpseWithinReach(world, agent, (a) => isTrulyDead(a) && !a.isEgg && !a.butchered);
+      if (!corpse) return false;
+      const capacity = carryCapacityOf(world, agent);
+      const knifeEquipped = agent.equipment?.held === "flintKnife";
+      const yields: MaterialId[] = knifeEquipped ? ["meat", "meat", "hide"] : ["meat"];
+      const butchered: { itemKey: string; count: number }[] = [];
+      for (const m of yields) {
+        if (carriedWeight(agent) + MATERIALS[m].weight > capacity) continue;
+        addItem(agent, m, 1, MATERIALS[m].weight);
+        const existing = butchered.find((b) => b.itemKey === m);
+        if (existing) existing.count++;
+        else butchered.push({ itemKey: m, count: 1 });
+      }
+      // Nothing fit at all — leave the corpse un-butchered so a fuller
+      // pack later (or dropping something first) can still come back for
+      // it, same "no room, nothing happened" shape `gather` already has.
+      if (butchered.length === 0) return false;
+      corpse.butchered = true;
+      out.butchered = butchered;
+      log?.record({ kind: "butchered", tick: world.tick, agentId: agent.id, species: agent.species, fromId: corpse.id, fromSpecies: corpse.species, itemKeys: butchered.map((b) => b.itemKey) });
+      return true;
+    }
   }
+}
+
+/** A truly-dead, not-yet-butchered corpse (or anything else `pred` names) on the player's own tile or one of the 8 around it — same reach `waterWithinReach`/`nearFire` already scan. */
+function corpseWithinReach(world: World, agent: Agent, pred: (candidate: Agent) => boolean): Agent | undefined {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      const found = world.agents.find((a) => a.id !== agent.id && a.layer === agent.layer && a.pos.x === x && a.pos.y === y && pred(a));
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -455,6 +563,13 @@ export function syncPlayerMoves(world: World, agent: Agent): void {
 }
 
 /** Water on the player's own tile or any of the eight around it — you kneel at the edge; you do not have to wade in. */
+/** Direct ask: "my allies should do what i do, so if i drink they should look for water in the area too. if i gather or eat they should do that too." Set on every agent currently following this one; `needs.ts`'s `applyMirroredAction` carries it out over each follower's own action ticks. */
+function signalMirrorToFollowers(world: World, leader: Agent, action: "drink" | "gather" | "eat"): void {
+  for (const a of world.agents) {
+    if (a.followingId === leader.id && a.alive !== false) a.mirrorAction = action;
+  }
+}
+
 export function waterWithinReach(world: World, agent: Agent): boolean {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {

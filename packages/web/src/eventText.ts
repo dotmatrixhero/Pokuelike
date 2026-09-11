@@ -65,6 +65,10 @@ export function formatEvent(event: SimEvent, world?: World): string {
   switch (event.kind) {
     case "crossedLayer":
       return `${idLabel(world, event.agentId, event.species)} crossed ${event.from} -> ${event.to}`;
+    case "crossedCaveLevel":
+      return `${idLabel(world, event.agentId, event.species)} went ${event.direction} to level ${event.toDepth}`;
+    case "emerged":
+      return `${idLabel(world, event.agentId, event.species)} emerged from the cave`;
     case "consumed":
       return `${idLabel(world, event.agentId, event.species)} ${event.need === "thirst" ? "drank" : "ate"} on ${event.layer}`;
     case "behaviorChanged":
@@ -121,6 +125,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.agentId, event.species)} recovered consciousness at ${event.hp} hp`;
     case "looted":
       return `${idLabel(world, event.looterId, event.looterSpecies)} looted ${event.itemKey} from ${idLabel(world, event.fromId, event.fromSpecies)}`;
+    case "butchered":
+      return `${idLabel(world, event.agentId, event.species)} butchered ${idLabel(world, event.fromId, event.fromSpecies)} for ${event.itemKeys.join(", ")}`;
     case "foodDelivered":
       return `${idLabel(world, event.carrierId, event.carrierSpecies)} delivered food to ${idLabel(world, event.receiverId, event.receiverSpecies)}`;
     case "carrying":
@@ -220,6 +226,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `~${event.population} ${speciesDisplayName(event.species)} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
       return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
+    case "crossedZone":
+      return `${idLabel(world, event.agentId, event.species)} crossed into a new stretch of land`;
   }
 }
 

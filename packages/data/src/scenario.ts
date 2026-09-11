@@ -196,6 +196,36 @@ function findTerrainNear(world: World, layer: Layer, x: number, y: number, terra
   return { x: cx, y: cy };
 }
 
+/**
+ * The nearest walkable, genuinely dry (non-water) tile to `(x, y)` — a real,
+ * sampled bug found this was needed: `findWalkableNear` (worldgen.ts) only
+ * rejects water belonging to a LARGE body (`canEnterWater`'s own doc
+ * comment — "an ordinary pond/puddle/stream" is unrestricted for every
+ * agent), so it happily returned the anchor itself when seeded at the
+ * CENTER of one of `generateUndergroundCaves`'s small guaranteed water
+ * pockets — several tiles deep into the pool, surrounded on every side by
+ * more water out to the pocket's own radius. `walkDistances` (right below)
+ * never steps onto ANY water tile at all, large body or small, so a BFS
+ * seeded there found zero neighbors and stayed a single-point map — the
+ * player spawned standing IN the water. This is the same ring-search shape
+ * as `findWalkableNear`, just without that large-body exemption.
+ */
+function nearestDryLand(world: World, layer: Layer, x: number, y: number): Vec2 {
+  const cx = Math.round(x), cy = Math.round(y);
+  const maxRadius = Math.max(world.width, world.height);
+  for (let r = 0; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = cx + dx, ny = cy + dy;
+        const t = tileAt(world, layer, nx, ny);
+        if (t?.walkable && t.terrain !== "water") return { x: nx, y: ny };
+      }
+    }
+  }
+  return { x: cx, y: cy };
+}
+
 /** BFS step-distance from `from` over walkable tiles of `layer` (8-way). Unreachable tiles are absent. */
 export function walkDistances(world: World, layer: Layer, from: Vec2): Map<string, number> {
   const dist = new Map<string, number>();
@@ -310,12 +340,25 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   const L: Layer = "underground";
   const rng = world.rng;
 
-  const water = findTerrainNear(world, L, SCENARIO_WIDTH / 2, SCENARIO_HEIGHT / 2, "water");
+  // `generateUndergroundCaves` now places several water pockets (direct
+  // report: "I need more water around the cave"), so a plain nearest-to-
+  // center search could just as easily land the hand-authored chamber on
+  // one of the smaller extra pockets instead of the deliberate, wet-
+  // density-weighted main one — `world.primaryUndergroundWaterAt` names
+  // that main pocket's own generation CENTER directly, and `nearestDryLand`
+  // (above) walks that back to real dry ground beside the pool — the
+  // actual chamber anchor this scenario always needed. The plain
+  // `findTerrainNear` spiral (for "water" terrain, from the map's own
+  // center) is only a defensive fallback for the untested-in-practice case
+  // a cave generated with no floor to seed a pocket from at all.
+  const chamberCenter = world.primaryUndergroundWaterAt
+    ? nearestDryLand(world, L, world.primaryUndergroundWaterAt.x, world.primaryUndergroundWaterAt.y)
+    : findTerrainNear(world, L, SCENARIO_WIDTH / 2, SCENARIO_HEIGHT / 2, "water");
 
   // The chamber: light and growth in a ring around the water.
   for (let dy = -CAVE_CHAMBER_RADIUS; dy <= CAVE_CHAMBER_RADIUS; dy++) {
     for (let dx = -CAVE_CHAMBER_RADIUS; dx <= CAVE_CHAMBER_RADIUS; dx++) {
-      const x = water.x + dx, y = water.y + dy;
+      const x = chamberCenter.x + dx, y = chamberCenter.y + dy;
       const t = tileAt(world, L, x, y);
       if (!t || t.terrain !== "floor") continue;
       const roll = rng();
@@ -334,7 +377,7 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   // (herds.ts's `HerdRecord.species`) — from the wide prey pool.
   const startingSpecies = CAVE_STARTER_SPECIES[Math.floor(rng() * CAVE_STARTER_SPECIES.length)]!;
   const herd = Array.from({ length: 4 }, (_, i) => ({
-    ...spawnAgent(startingSpecies, `${startingSpecies}-${i}`, findWalkableNear(world, L, water.x + (i % 2 ? 2 : -2), water.y + (i < 2 ? -2 : 2)), 5, rng),
+    ...spawnAgent(startingSpecies, `${startingSpecies}-${i}`, findWalkableNear(world, L, chamberCenter.x + (i % 2 ? 2 : -2), chamberCenter.y + (i < 2 ? -2 : 2)), 5, rng),
     needs: createNeeds({ thirst: 0.5 + i * 0.1 }),
     herdId: `${startingSpecies}-herd`,
     // Most of the pool lives on `surface` by species default (only
@@ -346,7 +389,7 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   }));
 
   // The player: a walkable tile a real walk away from the light.
-  const dist = walkDistances(world, L, water);
+  const dist = walkDistances(world, L, chamberCenter);
   const band: Vec2[] = [];
   let farthest: { pos: Vec2; d: number } | undefined;
   for (const [k, d] of dist) {
@@ -378,6 +421,185 @@ export function createCaveScenario(seed: number = SCENARIO_SEED): World {
   // The first frame is honest: fog is already down before the first key.
   updatePlayerVision(world, player);
   return world;
+}
+
+/** ROADMAP.md M7 Climb — how many cave levels a run chains together. */
+export const CAVE_RUN_DEPTH = 5;
+
+interface CaveLevelPopulation {
+  predators: { species: string; count: number; level: number }[];
+  prey: { species: string; count: number; level: number }[];
+}
+
+/**
+ * Real underground roster (`species.ts`), escalating with depth — not
+ * invented placeholders. Zubat (a real predator, low level) -> Golbat (its
+ * own evolution, higher level) -> Onix (the roster's heaviest melee
+ * predator) -> Haunter (an ambush predator) guarding the exit. Prey species
+ * are the same underground natives (Diglett/Sandshrew/Dugtrio) the
+ * chamber's own herd draws from — see `CAVE_STARTER_SPECIES`.
+ */
+const CAVE_RUN_POPULATION: Record<number, CaveLevelPopulation> = {
+  2: {
+    predators: [{ species: "zubat", count: 3, level: 8 }],
+    prey: [{ species: "diglett", count: 3, level: 6 }],
+  },
+  3: {
+    predators: [{ species: "golbat", count: 2, level: 15 }],
+    prey: [
+      { species: "sandshrew", count: 2, level: 10 },
+      { species: "diglett", count: 2, level: 10 },
+    ],
+  },
+  4: {
+    predators: [{ species: "onix", count: 3, level: 22 }],
+    prey: [{ species: "dugtrio", count: 2, level: 16 }],
+  },
+  5: {
+    predators: [{ species: "haunter", count: 2, level: 28 }],
+    prey: [],
+  },
+};
+
+function buildDeeperLevel(seed: number, depth: number): World {
+  const world = generateWorld(SCENARIO_WIDTH, SCENARIO_HEIGHT, seed ^ (depth * 0x9e3779b1));
+  const pop = CAVE_RUN_POPULATION[depth]!;
+  let i = 0;
+  for (const group of [...pop.predators, ...pop.prey]) {
+    for (let n = 0; n < group.count; n++) {
+      const pos = findWalkableNear(world, "underground", Math.floor(world.rng() * SCENARIO_WIDTH), Math.floor(world.rng() * SCENARIO_HEIGHT));
+      world.agents.push(spawnAgent(group.species, `${group.species}-${depth}-${i++}`, pos, group.level, world.rng));
+    }
+  }
+  return world;
+}
+
+function farthestReachable(dist: Map<string, number>, fallback: Vec2): Vec2 {
+  let best = fallback;
+  let bestDist = -1;
+  for (const [key, d] of dist) {
+    if (d > bestDist) {
+      const [x, y] = key.split(",").map(Number) as [number, number];
+      best = { x, y };
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * How far along the real walk from where the player lands to the stairs/
+ * exit each lit waypoint sits, as a fraction of that walk's total length —
+ * direct report: "can't find the exit... need some better design to help
+ * guide." Two waypoints (not one) so the run reads as a real trail getting
+ * denser toward the goal, not one coincidental lit room.
+ */
+const LIT_TRAIL_WAYPOINT_FRACTIONS = [1 / 3, 2 / 3] as const;
+/** Small — a real lit alcove along the way, not a corridor-length floodlight that would give away the destination outright. */
+const LIT_TRAIL_WAYPOINT_RADIUS = 2;
+
+/**
+ * Lights a couple of small waypoints along the real walk from `anchor`
+ * (where the player actually lands on this level) toward wherever the
+ * stairs/exit ended up — direct report: "the starting cave feels very
+ * open and hard to see what's going on. Can't find the exit. Need some
+ * better design to help guide." Reuses the exact mechanic vision.ts's own
+ * doc comment calls "the whole M1 fantasy" (spawn in the dark, walk to the
+ * light) rather than inventing a compass or a HUD arrow — a real diegetic
+ * trail, not a UI hint, and one that still requires exploring rather than
+ * pointing straight at the goal. `dist` is the same walk-distance map
+ * `attachStairsDown`/`attachExit` already computed to place the target
+ * tile, so this costs no extra BFS.
+ */
+function litTrailToward(world: World, dist: Map<string, number>, targetDist: number, rng: () => number): void {
+  for (const fraction of LIT_TRAIL_WAYPOINT_FRACTIONS) {
+    const desired = targetDist * fraction;
+    let bestKey: string | undefined;
+    let bestDiff = Infinity;
+    for (const [key, d] of dist) {
+      const diff = Math.abs(d - desired);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestKey = key;
+      }
+    }
+    if (!bestKey) continue;
+    const [cx, cy] = bestKey.split(",").map(Number) as [number, number];
+    for (let dy = -LIT_TRAIL_WAYPOINT_RADIUS; dy <= LIT_TRAIL_WAYPOINT_RADIUS; dy++) {
+      for (let dx = -LIT_TRAIL_WAYPOINT_RADIUS; dx <= LIT_TRAIL_WAYPOINT_RADIUS; dx++) {
+        if (Math.hypot(dx, dy) > LIT_TRAIL_WAYPOINT_RADIUS + 0.5) continue;
+        const t = tileAt(world, "underground", cx + dx, cy + dy);
+        if (t && t.terrain === "floor" && rng() < 0.7) setTile(world, "underground", cx + dx, cy + dy, "sunbeam", t.elevation);
+      }
+    }
+  }
+}
+
+/**
+ * Places a `"stairsDown"` tile at the farthest walkable point from where
+ * the player actually lands on this level (`world.stairsUpAt`, when this
+ * level was reached via stairs down from above — level 1 has no such
+ * landing, so it falls back to its own center) — a real walk, not
+ * adjacent to wherever the player lands.
+ */
+function attachStairsDown(world: World, depth: number): void {
+  const anchor = world.stairsUpAt ?? findWalkableNear(world, "underground", world.width / 2, world.height / 2);
+  const dist = walkDistances(world, "underground", anchor);
+  const pos = farthestReachable(dist, anchor);
+  setTile(world, "underground", pos.x, pos.y, "stairsDown");
+  world.stairsDownAt = pos;
+  if (world.stairsUpAt) litTrailToward(world, dist, dist.get(`${pos.x},${pos.y}`) ?? 0, world.rng);
+}
+
+/** Same placement rule as `attachStairsDown`, for the deepest level's exit instead. */
+function attachExit(world: World): void {
+  const anchor = world.stairsUpAt ?? findWalkableNear(world, "underground", world.width / 2, world.height / 2);
+  const dist = walkDistances(world, "underground", anchor);
+  const pos = farthestReachable(dist, anchor);
+  setTile(world, "underground", pos.x, pos.y, "exit");
+  world.exitAt = pos;
+  if (world.stairsUpAt) litTrailToward(world, dist, dist.get(`${pos.x},${pos.y}`) ?? 0, world.rng);
+}
+
+/** Links `below` under `above`: sets `depth`, `below`/`above` pointers, and `below`'s own `"stairsUp"` landing tile. */
+function linkLevels(above: World, below: World): void {
+  below.depth = (above.depth ?? 1) + 1;
+  const landing = findWalkableNear(below, "underground", below.width / 2, below.height / 2);
+  setTile(below, "underground", landing.x, landing.y, "stairsUp");
+  below.stairsUpAt = landing;
+  above.below = below;
+  below.above = above;
+}
+
+/**
+ * ROADMAP.md M7 Climb — direct ask, once the design conversation resolved
+ * back to something simple: "i think i just want to be able to move to the
+ * next level of the cave and shit." HANDOFF.md's own architecture
+ * recommendation, taken: chained `World`s (`World.below`/`above`) linked by
+ * stairs, rather than widening `Layer` to five-plus values that would touch
+ * every `Record<Layer, ...>` in the engine.
+ *
+ * Level 1 is `createCaveScenario` completely unchanged (M1/M6's own tested
+ * chamber), with a `"stairsDown"` tile added afterward the same way the
+ * scenario already places its own spawn — a real walk via `walkDistances`,
+ * not adjacent to anything. Levels 2-5 are freshly generated `underground`
+ * maps (`CAVE_RUN_POPULATION`'s escalating real predators/prey). Returns
+ * level 1; the rest of the chain hangs off its `below` pointer.
+ */
+export function createCaveRun(seed: number = SCENARIO_SEED): World {
+  const level1 = createCaveScenario(seed);
+  level1.depth = 1;
+  attachStairsDown(level1, 1);
+
+  let current = level1;
+  for (let depth = 2; depth <= CAVE_RUN_DEPTH; depth++) {
+    const next = buildDeeperLevel(seed, depth);
+    linkLevels(current, next);
+    if (depth < CAVE_RUN_DEPTH) attachStairsDown(next, depth);
+    else attachExit(next);
+    current = next;
+  }
+  return level1;
 }
 
 export function createDemoWorld(seed: number = SCENARIO_SEED): World {

@@ -4,6 +4,10 @@ export function formatEvent(event: SimEvent): string {
   switch (event.kind) {
     case "crossedLayer":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed ${event.from} -> ${event.to} at (${event.pos.x},${event.pos.y})`;
+    case "crossedCaveLevel":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) went ${event.direction} from cave level ${event.fromDepth} to ${event.toDepth}`;
+    case "emerged":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) emerged from the cave at depth ${event.depth}`;
     case "consumed":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) ${event.need === "thirst" ? "drank" : "ate"} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "behaviorChanged":
@@ -52,6 +56,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
     case "looted":
       return `[tick ${event.tick}] ${speciesDisplayName(event.looterSpecies)} (${event.looterId}) looted ${event.itemKey} from ${speciesDisplayName(event.fromSpecies)} (${event.fromId})`;
+    case "butchered":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) butchered ${speciesDisplayName(event.fromSpecies)} (${event.fromId}) for ${event.itemKeys.join(", ")}`;
     case "foodDelivered":
       return `[tick ${event.tick}] ${speciesDisplayName(event.carrierSpecies)} (${event.carrierId}) delivered food to ${speciesDisplayName(event.receiverSpecies)} (${event.receiverId})`;
     case "carrying":
@@ -140,6 +146,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ~${event.population} ${speciesDisplayName(event.species)} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
+    case "crossedZone":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed from zone ${event.fromZone} into zone ${event.toZone} at (${event.pos.x},${event.pos.y})`;
   }
 }
 

@@ -1139,6 +1139,64 @@ export function setFocusedZone(mw: MacroWorld, row: number, col: number, ctx: Im
 }
 
 /**
+ * ROADMAP.md's overworld, made walkable by the player — direct ask: "spawn
+ * in overworld after graduating from the end of the cave," scoped to full
+ * seamless macro-grid walking (not a spectator-only drop-in). Checked by
+ * `main.ts`'s `playerAct` right before an ordinary "move" would otherwise
+ * fail at the focused zone's own tile-grid bounds: `undefined` means this
+ * wasn't actually an edge (the move should proceed through the ordinary
+ * `applyPlayerAction` pipeline as normal), or there's no neighboring zone
+ * to cross into (the outermost edge of the whole macro grid — a real dead
+ * end, same as any other "you can't go there").
+ *
+ * Deliberately NOT folded through `setFocusedZone`'s general demote/promote
+ * pair unmodified: `demoteRegion` would otherwise convert the PLAYER
+ * themself into an abstract population statistic along with every wild
+ * agent in the zone they're leaving, the same way it already does for
+ * ordinary wild agents (`RegionAggregate`, no individual position at all —
+ * see this file's own top doc comment). Pulling the player out of
+ * `world.agents` first, before delegating to `setFocusedZone` for the wild
+ * population's own demote/promote bookkeeping, keeps that machinery
+ * completely unmodified and reused as-is, and sidesteps `regionCrossed`'s
+ * wild-disperser-only crossing path entirely (that one folds the crosser
+ * into an abstract aggregate at the destination with no real placement at
+ * all — see this file's own doc comment on `foldAgentIntoAggregate` — which
+ * is exactly wrong for a player who needs a real, walkable tile to land on).
+ *
+ * Instant, no extra tick cost — same "the transition itself is free, only
+ * the ordinary per-action tick after it costs anything" shape ROADMAP.md
+ * M7's cave stairs (`climb.ts`'s `useStairs`) already established.
+ */
+export function crossZoneEdge(mw: MacroWorld, player: Agent, dx: -1 | 0 | 1, dy: -1 | 0 | 1, ctx: ImmigrationContext, log?: EventLog): World | undefined {
+  const region = mw.regions.get(mw.focusedKey);
+  if (!region?.world) return undefined;
+  const world = region.world;
+  const next = { x: player.pos.x + dx, y: player.pos.y + dy };
+  if (next.x >= 0 && next.y >= 0 && next.x < world.width && next.y < world.height) return undefined; // an ordinary in-bounds move — not a crossing at all
+
+  const destRow = region.row + (next.y < 0 ? -1 : next.y >= world.height ? 1 : 0);
+  const destCol = region.col + (next.x < 0 ? -1 : next.x >= world.width ? 1 : 0);
+  if (!zoneAt(mw.grid, destRow, destCol)) return undefined; // the outermost edge of the whole grid — nowhere to go
+
+  const fromZone = mw.focusedKey;
+  world.agents = world.agents.filter((a) => a !== player);
+  setFocusedZone(mw, destRow, destCol, ctx, log);
+  const destWorld = mw.regions.get(mw.focusedKey)!.world!;
+  // Wraps the exiting coordinate onto the entering edge (exit east at y=15,
+  // enter west at y=15) — same idea as a torus, just clamped by whichever
+  // single bound was actually exceeded (a diagonal move can exceed both at
+  // once, crossing into a corner-adjacent zone in one step).
+  const landing = {
+    x: ((next.x % world.width) + world.width) % world.width,
+    y: ((next.y % world.height) + world.height) % world.height,
+  };
+  player.pos = findWalkableNear(destWorld, player.layer, landing.x, landing.y);
+  destWorld.agents.push(player);
+  log?.record({ kind: "crossedZone", tick: destWorld.tick, agentId: player.id, species: player.species, fromZone, toZone: mw.focusedKey, pos: player.pos });
+  return destWorld;
+}
+
+/**
  * Builds a macro world from an already-generated `MacroGrid` (see
  * `macroGrid.ts`'s `generateMacroGrid`), immediately promoting exactly one
  * zone — `(focusedRow, focusedCol)` — to a real, fully-simulated place.

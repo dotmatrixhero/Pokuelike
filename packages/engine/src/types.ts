@@ -239,6 +239,19 @@ export type TerrainKind =
    */
   | "sludge"
   /**
+   * Direct ask: "Can you collect flint in the cave? I think I want us to
+   * be able to grab that in some stone tiles" — a real, visible rock
+   * outcrop, not the invisible "floor next to a wall" rule flint
+   * gathering used to rely on entirely underground (`harvest.ts`'s
+   * `harvestableAt` — that rule stays as a fallback, this is the real,
+   * deliberate source now). Walkable, not opaque (absent from
+   * `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`, world.ts) — a patch of rocky
+   * ground you stand on and gather from, not an obstacle like `"boulder"`.
+   * Placed by `worldgen.ts`'s underground cave generation as a handful of
+   * small outcrops near cave walls.
+   */
+  | "stone"
+  /**
    * A tile that is actively on fire — see fire.ts. Walkable (you can run
    * through a fire, it just hurts) and not opaque. Burns down over
    * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading
@@ -261,7 +274,26 @@ export type TerrainKind =
    * reset), so a frozen river tile still remembers it's a river once it
    * thaws.
    */
-  | "ice";
+  | "ice"
+  /**
+   * ROADMAP.md M7: links one cave level to the next-deeper one. Walkable,
+   * not opaque — same "just terrain" treatment `climb.ts`'s `useStairs`
+   * gives it (crossing is a deliberate action on this tile, not automatic
+   * on stepping onto it, same as "food" doesn't auto-eat). Always paired
+   * with a `"stairsUp"` tile on the level below (`World.below`), placed by
+   * `data`'s `createCaveRun` at generation time.
+   */
+  | "stairsDown"
+  /** The other side of a `"stairsDown"` — links back up to `World.above`. */
+  | "stairsUp"
+  /**
+   * The end of the run — ROADMAP.md M7's "Done when: you emerge." Placed
+   * once, on the deepest level. Walkable, not opaque; stepping onto it is
+   * detected by `climb.ts`'s `isAtExit`, same "terrain is just terrain,
+   * the caller decides what stepping onto it means" split as the stairs
+   * kinds above.
+   */
+  | "exit";
 
 /**
  * Which real body of water a "water" (or currently-frozen "ice") tile
@@ -635,7 +667,25 @@ export type PlayerAction =
    * instead of letting `pickBestMove` auto-select one; omitted keeps the
    * original auto-pick behavior (the plain 'f'-key/HUD-button swing).
    */
-  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; moveId?: string }
+  | {
+      kind: "attack";
+      dx: -1 | 0 | 1;
+      dy: -1 | 0 | 1;
+      moveId?: string;
+      /**
+       * Direct ask: "change attack for player moves to also be targeted,
+       * like allies moves." When given, names the exact tile to strike —
+       * the same pick-a-move-then-tap-a-tile flow `command` already gives
+       * bonded partners — instead of the adjacent tile `dx`/`dy` (the
+       * direction you last moved) computes. Requires `moveId`: unlike the
+       * plain directional swing, there's no "auto-pick a move" for an
+       * arbitrary tile, since distance alone doesn't say which of the
+       * player's moves can even reach it. `dx`/`dy` stay required by the
+       * type — kept for the one caller that still wants them, the plain
+       * 'f'-key/HUD-button swing — but are ignored once `target` is set.
+       */
+      target?: Vec2;
+    }
   /**
    * Direct ask: "even before m7... under the attack option a sub menu
    * show up to select your bonded pokemon if its within the same zone as
@@ -650,25 +700,60 @@ export type PlayerAction =
    * doesn't know that move.
    */
   | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /**
+   * Direct ask: "perhaps instead of campfire building, there's a command
+   * button that allows you to set behaviors for each of your allies;
+   * patrol, hunt, defend, etc." Sets `agentId` (must currently be
+   * following the player) to the named standing order — see `Agent.
+   * standingOrder`/`needs.ts`'s `applyStandingOrder` for what each mode
+   * actually does. `"follow"` clears it back to ordinary passive
+   * following rather than being its own stored value. Costs the
+   * player's turn to issue, same as `command`; fails if there's no such
+   * follower.
+   */
+  | { kind: "setStandingOrder"; agentId: string; order: "patrol" | "hunt" | "defend" | "follow" }
   /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
   | { kind: "drop"; itemKey: string }
   /**
-   * Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
-   * something) to cook, and while near you can craft with combos of crops
-   * and berries" — and the scoping follow-up on how it burns: "burns out
-   * but you can feed it more wood to increase fuel." Requires a held torch
-   * and 2 carried deadwood (consumed — the torch itself stays equipped, as
-   * the tool, not the fuel); ignites the adjacent tile in the given
-   * direction, or — if that tile is already burning — adds another
-   * `FIRE_BURN_TICKS` worth of fuel to it rather than requiring it to burn
-   * out first. Unlike combat's own `terrainBurn`/`igniteNear` (fire.ts),
-   * this deliberately does NOT require the target tile's own terrain to be
-   * flammable: a torch-lit campfire is fueled by the wood you're carrying,
-   * not by the ground catching, so it can be lit on bare floor. Still
-   * fails against a wall, water, or anything else not walkable. Fails
-   * (still costs the turn) without a held torch or without 2 deadwood.
+   * Direct ask, superseding the original "torch + 2 deadwood, instant"
+   * `lightFire` verb: "get rid of fire building as a direct action - make
+   * it a crafting thing that sets down a campfire." The fire itself is
+   * now a real crafted item (`crafting.ts`'s `campfire` recipe/item) you
+   * carry and then place — this action just does the placing, consuming
+   * one carried `campfire` item (fails, still costs the turn, without
+   * one). Ignites the adjacent tile in the given direction, or — if
+   * that tile is already burning — adds another `FIRE_BURN_TICKS` worth
+   * of fuel to it, same "burns out but you can feed it more" shape the
+   * original verb had. Unlike combat's own `terrainBurn`/`igniteNear`
+   * (fire.ts), this deliberately does NOT require the target tile's own
+   * terrain to be flammable: a deployed campfire is fueled by the kit
+   * you're carrying, not by the ground catching, so it can be placed on
+   * bare floor. Still fails against a wall, water, or anything else not
+   * walkable.
    */
-  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
+  | { kind: "placeCampfire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  /**
+   * Direct ask: "can't loot or butcher dead units. need to be able to."
+   * Takes one item off a fainted-or-dead agent's own carried `inventory`
+   * (support.ts's `applyLooting`, already used by any wild agent's own
+   * behavior tree — reused unmodified here, "just another agent to the
+   * sim" applies to this verb too) within `LOOT_RADIUS`. Fails (still
+   * costs the turn) with nothing fainted/dead nearby, nothing left in its
+   * inventory, or no carry headroom for the next item.
+   */
+  | { kind: "loot" }
+  /**
+   * Direct ask, same report: "maybe you need a knife to do more but that
+   * should be a thing." A one-time real-material harvest off a TRULY dead
+   * (not merely fainted — DESIGN.md's "only true death is consumable"
+   * ruling, same line `eat`/`applyScavenging` already draw) corpse's own
+   * body, distinct from `loot`'s item-transfer: bare-handed yields meat
+   * only; a held `flintKnife` yields more (meat and hide). One-time per
+   * corpse — see `Agent.butchered`. Fails (still costs the turn) with no
+   * butcherable corpse within reach, or with no carry headroom for any of
+   * what it would yield.
+   */
+  | { kind: "butcher" };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -691,6 +776,8 @@ export interface PlayerActionOutcome {
   felled?: { from: TerrainKind; to: TerrainKind; yields?: MaterialId };
   /** `gather` completing as a waterskin fill instead of a material take — how many charges the waterskin now holds. */
   filledWater?: number;
+  /** `butcher` succeeding: what the corpse actually yielded (capacity-trimmed — see player.ts's own case). */
+  butchered?: { itemKey: string; count: number }[];
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -873,17 +960,70 @@ export interface Agent {
    * space with it - it then uses its own pathfinding to get to the right
    * position and use it." Set by `player.ts`'s `command` case on the
    * player's bonded follower; read every action tick by `needs.ts`'s
-   * `applyCommandedAction`, which steps the agent toward `target` until it
-   * is within `moveId`'s own range, then resolves the move there — against
-   * a living defender via `predation.ts`'s `resolveHit` (its own
+   * `applyCommandedAction`, which steps the agent toward the target until
+   * it is within `moveId`'s own range, then resolves the move there —
+   * against a living defender via `predation.ts`'s `resolveHit` (its own
    * `explicitMove` param), or against terrain via `predation.ts`'s
-   * `applyTerrainEffectAt` — and clears this. An urgent need
-   * (hunger/thirst) still wins — the order simply waits, same as
-   * `applyFollowing` already yields to needs. Cleared without acting if
-   * the named move is no longer in `Agent.moves` (e.g. the order was
-   * queued, then something changed what this agent knows).
+   * `applyTerrainEffectAt`. An urgent need (hunger/thirst) still wins — the
+   * order simply waits, same as `applyFollowing` already yields to needs.
+   * Cleared without acting if the named move is no longer in `Agent.moves`
+   * (e.g. the order was queued, then something changed what this agent
+   * knows).
+   *
+   * `targetAgentId` (set only when a living agent occupied `target` at the
+   * moment the order was issued) is what makes this a real standing fight
+   * order rather than a single swing at a tile — direct follow-up report:
+   * "ally doesn't seem to engage much in combat... it should go do that
+   * and continue to fight and engage until i like walk away." With it set,
+   * `applyCommandedAction` re-plans toward wherever that agent currently
+   * IS each tick (not the frozen tile it started at) and keeps resolving
+   * the move against it — clearing only once the target actually dies, or
+   * the commanding player has moved far enough away that the order stands
+   * down back to ordinary following. Without it (the target tile had no
+   * living agent — a terrain-effect order like felling a tree), behavior
+   * is unchanged: one resolution and done.
    */
-  commandedAction?: { moveId: string; target: Vec2 };
+  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
+  /**
+   * Direct ask: "perhaps instead of campfire building, there's a command
+   * button that allows you to set behaviors for each of your allies;
+   * patrol, hunt, defend, etc." Scoped, on the user's own choice between
+   * options given, to "Simple standing states": a persistent mode a
+   * bonded follower keeps until the player picks a different one — no
+   * placed guard points or patrol routes. `undefined` means ordinary
+   * passive following (`applyFollowing`, unchanged); picking "Follow" in
+   * the command menu just clears this back to `undefined` rather than
+   * being its own value. See `needs.ts`'s `applyStandingOrder` for what
+   * each mode actually does — it sits at the same tier as
+   * `commandedAction` above (a real player order, not a passive default),
+   * ahead of ordinary following, behind self-preservation.
+   */
+  standingOrder?: "patrol" | "hunt" | "defend";
+  /**
+   * Direct ask: "my allies should do what i do, so if i drink they should
+   * look for water in the area too. if i gather or eat they should do
+   * that too." Set on every following agent (`Agent.followingId` pointing
+   * at the player) whenever the player performs the matching action —
+   * `player.ts`'s "drink"/"gather"/"eat" cases. Read and cleared by
+   * `needs.ts`'s `applyMirroredAction`, which paths the follower toward
+   * the same kind of resource and performs the same verb once there — an
+   * imitation cue, not a need-driven behavior (a follower whose own need
+   * is already urgent just lets the ordinary, more capable needs tree
+   * handle it instead, rather than run two competing movement plans).
+   */
+  mirrorAction?: "drink" | "gather" | "eat";
+  /**
+   * How many of this agent's own action ticks `mirrorAction` has been
+   * pending without resolving — live-verified escape valve, not a
+   * hypothetical: an early version of the mirror feature left a follower
+   * pinned in place for 80+ ticks chasing real water across cave terrain,
+   * its cached path stale but never expiring (a `pathfinding.ts` corner-
+   * case, not something this feature should try to fully solve). Past
+   * `MIRROR_ACTION_TIMEOUT_TICKS` (needs.ts), the cue just expires — same
+   * "an escape valve on top of the one below" shape `ticksWithoutResource`/
+   * `MIGRATE_AFTER_TICKS` already use for the ordinary needs tree.
+   */
+  mirrorActionTicks?: number;
   /**
    * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
    * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's
@@ -1240,6 +1380,20 @@ export interface Agent {
   finishingPool?: number;
   /** World.tick a true kill happened, for the corpse-persistence pruning window in simulation.ts. */
   diedAtTick?: number;
+  /**
+   * Direct ask: "can't loot or butcher dead units. need to be able to."
+   * `player.ts`'s "butcher" action is a one-time real-material harvest off
+   * a truly-dead corpse's own body (meat, plus hide with a knife held) —
+   * distinct from looting, which takes items the corpse was already
+   * carrying and can happen more than once (one item per visit, until its
+   * `inventory` runs out). Set the instant a butcher succeeds so the same
+   * corpse can't be re-butchered for infinite materials before
+   * `CORPSE_PERSIST_TICKS` prunes it; wild scavenging (support.ts's
+   * `applyScavenging`) is unaffected — an animal eating directly from an
+   * already-butchered body is a separate, ordinary thing to happen to a
+   * corpse, not a loophole this flag needs to close.
+   */
+  butchered?: boolean;
   /**
    * The one major status condition this agent currently carries, if any —
    * see `StatusKind` and status.ts. `ticksRemaining` only matters for
@@ -2579,4 +2733,42 @@ export interface World {
    * per-agent — only ever a handful of entries (at most one per title).
    */
   notables?: Partial<Record<NotableTitleId, NotableRecord>>;
+
+  /**
+   * ROADMAP.md M7 Climb — "Multiple cave layers and transitions between
+   * them." HANDOFF.md's own architecture recommendation, taken: each cave
+   * level is a full, independent `World` (its own `agents`, its own
+   * generated terrain) rather than widening the three-valued `Layer` union
+   * to five-plus values, which would touch every `Record<Layer, ...>` in
+   * the engine for no real player-facing difference. `below`/`above` chain
+   * levels together; `climb.ts`'s `useStairs` moves the player agent
+   * between a level's `agents` array and its neighbor's, and the caller
+   * (`main.ts`) re-points its own `world` reference the same way it already
+   * does for the macro grid's `focusZone`. Wild sim agents do not cross
+   * levels in v1 — only the player does.
+   */
+  below?: World;
+  /** See `below`'s doc comment. */
+  above?: World;
+  /** 1 = the surface-adjacent chamber (`createCaveScenario`'s own layer 1); increases with depth. Absent means this world isn't part of a chained cave run at all. */
+  depth?: number;
+  /** Where a player arriving from `above` lands — the `"stairsUp"` tile on this level. Absent on level 1 (nothing above it). */
+  stairsUpAt?: Vec2;
+  /** Where a player arriving from `below` lands — the `"stairsDown"` tile on this level. Absent on the deepest level (it has the exit instead). */
+  stairsDownAt?: Vec2;
+  /** The `"exit"` tile's position — only set on the deepest level. See `climb.ts`'s `isAtExit`. */
+  exitAt?: Vec2;
+  /**
+   * The center of the strongest (wet-density-weighted) underground water
+   * pocket `generateUndergroundCaves` placed — set even when several
+   * smaller pockets exist nearby (`pickUndergroundWaterPockets`'s own doc
+   * comment; direct report: "I need more water around the cave"). Lets a
+   * consumer that wants "the" main pocket — `@pokuelike/data`'s
+   * `createCaveScenario`, building its hand-authored starting chamber
+   * around it — find that SAME one deterministically, instead of a plain
+   * nearest-to-center search that could now just as easily land on one of
+   * the smaller extra pockets. Undefined only if the cave generated with
+   * no floor at all to seed a pocket from.
+   */
+  primaryUndergroundWaterAt?: Vec2;
 }

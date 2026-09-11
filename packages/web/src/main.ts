@@ -1,5 +1,5 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
-import { createCaveScenario, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
@@ -133,15 +133,25 @@ const modePlayBtn = document.getElementById("mode-play") as HTMLButtonElement;
 const playerHudEl = document.getElementById("player-hud") as HTMLElement;
 const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
 const gameOverEl = document.getElementById("game-over") as HTMLElement;
+const runWonEl = document.getElementById("run-won") as HTMLElement;
+const runWonStatsEl = document.getElementById("run-won-stats") as HTMLElement;
+const runWonContinueBtn = document.getElementById("run-won-continue") as HTMLButtonElement;
 const gameOverCauseEl = document.getElementById("game-over-cause") as HTMLElement;
 const gameOverStatsEl = document.getElementById("game-over-stats") as HTMLElement;
 const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
+const hudDepthEl = document.getElementById("hud-depth") as HTMLElement;
 const packMenuEl = document.getElementById("pack-menu") as HTMLElement;
 const packMenuBodyEl = document.getElementById("pack-menu-body") as HTMLElement;
 const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButtonElement;
 const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
 const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
+// Direct ask: "have herd hp and status bars like easy to pin so you can
+// see all; at once."
+const herdStatusPanelEl = document.getElementById("herd-status-panel") as HTMLElement;
+const herdStatusBodyEl = document.getElementById("herd-status-body") as HTMLElement;
+const herdStatusHideBtn = document.getElementById("herd-status-hide") as HTMLButtonElement;
+const hudPartyBtn = document.getElementById("hud-party-btn") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -184,6 +194,8 @@ let playerMode = false;
 let playerScene: "surface" | "cave" = "surface";
 let playerSeed = 0;
 let playerDead = false;
+/** ROADMAP.md M7: "Done when: you emerge." Set once the player steps onto the deepest level's exit tile — see `checkWinCondition`. */
+let playerWon = false;
 let lastLoggedEventCount = 0;
 /**
  * MOVES_AND_TOOLS.md's `attack` needs a direction, and there's no on-screen
@@ -200,8 +212,13 @@ let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
  * canvas click (any tile — living target or bare terrain) becomes that
  * order's `target` instead of the ordinary select/travel-to click. Cleared
  * on firing, on Escape, or on pressing Attack again.
+ *
+ * `agentId: undefined` means the move being targeted is the PLAYER's own —
+ * direct ask, "change attack for player moves to also be targeted, like
+ * allies moves": the same pick-a-move-then-tap-a-tile flow, just firing
+ * `{kind: "attack", target, moveId}` instead of `{kind: "command", ...}`.
  */
-let targeting: { agentId: string; moveId: string } | undefined;
+let targeting: { agentId?: string; moveId: string } | undefined;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -362,6 +379,8 @@ function resetUiForNewWorld(): void {
   lastAutoSwitchedBattleSeq = undefined;
   selectTab("inspector", false);
   updateStatusLabels();
+  herdPanelPinned = true;
+  herdStatusPanelEl.hidden = true;
 }
 
 /**
@@ -426,10 +445,11 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   canvasWrap.classList.remove("force-hide");
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
-  world = scene === "cave" ? createCaveScenario(seed) : createPlayerDemoWorld(seed);
+  world = scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
   playerScene = scene;
   playerSeed = seed;
   playerDead = false;
+  playerWon = false;
   log = new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
@@ -441,6 +461,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
     focusCameraOn(player.pos);
   }
   gameOverEl.hidden = true;
+  runWonEl.hidden = true;
   playerHudEl.hidden = false;
   packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
@@ -465,8 +486,10 @@ function enterWatchMode(seed: number): void {
   cancelTravel();
   playerMode = false;
   playerDead = false;
+  playerWon = false;
   playerHudEl.hidden = true;
   gameOverEl.hidden = true;
+  runWonEl.hidden = true;
   document.body.classList.remove("player-mode");
   enterOverworldMode(seed, "zone");
   syncModeButtons();
@@ -514,6 +537,9 @@ function renderPlayerHud(): void {
   const outcome = player.lastActionOutcome;
   if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
   renderPack(player);
+  // ROADMAP.md M7: mechanics visible on the map, not hidden in a meter — the
+  // player should always know how deep they are, same reasoning as the HP bar.
+  hudDepthEl.textContent = world.depth ? `Level ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
 }
 
 /** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
@@ -586,13 +612,25 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
       return ok ? `You signal ${name}.` : `${name} won't take that order.`;
     }
+    case "setStandingOrder": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      if (!ok) return `${name} won't take that order.`;
+      return action.order === "follow" ? `${name} goes back to following you.` : `${name} is now on ${action.order}.`;
+    }
     case "drop":
       return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
-    case "lightFire": {
-      if (ok) return "You build up a fire.";
-      if (player.equipment?.held !== "torch") return "You need a torch in hand.";
-      if (countOf(player, "deadwood") < 2) return "Not enough deadwood — you need 2.";
+    case "placeCampfire": {
+      if (ok) return "You set down a campfire.";
+      if (countOf(player, "campfire") < 1) return "You don't have a campfire to place.";
       return "Nowhere to put it there.";
+    }
+    case "loot":
+      return ok ? "You loot the body." : "Nothing nearby to loot.";
+    case "butcher": {
+      if (!ok) return player.equipment?.held === "flintKnife" ? "Nothing nearby left to butcher." : "Nothing nearby to butcher — a knife would get you more.";
+      const parts = outcome.butchered?.map((b) => `${itemName(b.itemKey).toLowerCase()}${b.count > 1 ? ` ×${b.count}` : ""}`) ?? [];
+      return `You butcher it: ${parts.join(", ")}.`;
     }
   }
 }
@@ -628,6 +666,41 @@ function runActivity(): void {
     travelTimer = window.setTimeout(step, TRAVEL_STEP_MS);
   };
   travelTimer = window.setTimeout(step, TRAVEL_STEP_MS);
+}
+
+/**
+ * Direct ask: "itd be nice if it was easy to use keyboard to select
+ * inventory items and use them as expected, comman[d] pokemon, select
+ * attacks easily, etc." Numbers the first 9 primary rows of a just-built
+ * pack/command menu (recipes to make, moves to use, standing orders,
+ * partner sections) in DOM order — `activateNumberedMenuRow` below,
+ * wired into the keydown handler wherever one of these menus is open,
+ * fires the same row a click would. Deliberately scoped to
+ * `.pack-row.tappable` only, not the smaller per-item `.pack-action-btn`
+ * row (Eat/Offer/Hold/Wear/Drop/Place): those are few (1-3 per item) and
+ * already sit right next to the item they act on, while the rows this
+ * numbers are the longer lists (every known recipe, every move, every
+ * standing order) that are genuinely tedious to reach by mouse/tap alone.
+ */
+function numberMenuRows(container: HTMLElement): void {
+  const rows = Array.from(container.querySelectorAll<HTMLButtonElement>("button.pack-row.tappable"));
+  rows.slice(0, 9).forEach((btn, i) => {
+    const badge = document.createElement("span");
+    badge.className = "menu-key-badge";
+    badge.textContent = String(i + 1);
+    btn.prepend(badge);
+  });
+}
+
+/** Fires the Nth numbered row in `container` (1-based, matching `numberMenuRows`'s own badges) — a no-op, not an error, past 9 or with nothing there. Returns whether a row actually fired, so callers know whether to fall through to anything else the key might mean. */
+function activateNumberedMenuRow(container: HTMLElement, key: string): boolean {
+  const n = Number(key);
+  if (!Number.isInteger(n) || n < 1 || n > 9) return false;
+  const rows = container.querySelectorAll<HTMLButtonElement>("button.pack-row.tappable");
+  const btn = rows[n - 1];
+  if (!btn) return false;
+  btn.click();
+  return true;
 }
 
 /**
@@ -711,6 +784,13 @@ function openPackMenu(): void {
       actions.push({ label: held ? "Put away" : "Hold", onTap: () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey }) });
     } else if (def?.slot === "worn" && !worn) {
       actions.push({ label: "Wear", onTap: () => playerAct({ kind: "equip", itemKey: item.itemKey }) });
+    } else if (item.itemKey === "campfire") {
+      // Direct ask: "get rid of fire building as a direct action - make it
+      // a crafting thing that sets down a campfire" — placing one is a
+      // per-item pack action now, same as Offer, not a raw always-there
+      // key (this exact codebase already moved Eat/Offer the same way,
+      // on the same "too many buttons" reasoning).
+      actions.push({ label: "Place", onTap: () => playerAct({ kind: "placeCampfire", dx: lastFacing.dx, dy: lastFacing.dy }) });
     }
     actions.push({ label: "Drop", onTap: () => playerAct({ kind: "drop", itemKey: item.itemKey }) });
     packMenuBodyEl.appendChild(actionsRowEl(label, actions));
@@ -729,6 +809,7 @@ function openPackMenu(): void {
     else if (missing.length === 0 && needsFire) packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · needs a fire nearby`));
     else packMenuBodyEl.appendChild(rowEl(`${r.name}`, `${inputs} · you have no ${missing.join(", ")}`));
   }
+  numberMenuRows(packMenuBodyEl);
   packMenuEl.hidden = false;
 }
 
@@ -743,6 +824,68 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
+ * Direct ask: "have herd hp and status bars like easy to pin so you can
+ * see all; at once." Shows itself automatically once the player has a
+ * bonded follower — the ✕ button (herdStatusHideBtn) dismisses it,
+ * hud-party-btn brings it back; both just flip `herdPanelPinned`, no
+ * persistence across a reload (this codebase's only other show/hide UI
+ * state — the side panel's collapse/expand toggles — works the same way).
+ * Rebuilds every frame (`EventLogPanel`'s own shape), not
+ * `BattleScreenPanel`'s persistent-per-agent-chip pattern — a handful of
+ * rows read once a frame is cheap, and the smooth HP-transition polish
+ * that pattern buys isn't what this ask is actually about.
+ */
+let herdPanelPinned = true;
+
+function renderHerdStatusPanel(): void {
+  const me = findPlayer(world);
+  const followers = me ? bondedPartnersInZone(me) : [];
+  if (!herdPanelPinned || followers.length === 0) {
+    herdStatusPanelEl.hidden = true;
+    return;
+  }
+  herdStatusPanelEl.hidden = false;
+  herdStatusBodyEl.replaceChildren();
+  for (const a of followers) {
+    const name = SPECIES[a.species]?.name ?? a.species;
+    const maxHp = a.maxHp ?? 1;
+    const hp = a.hp ?? maxHp;
+    const fraction = Math.max(0, Math.min(1, maxHp > 0 ? hp / maxHp : 0));
+    const row = document.createElement("div");
+    row.className = "herd-status-row";
+    const nameRow = document.createElement("div");
+    nameRow.className = "herd-status-name";
+    const nameSpan = document.createElement("span");
+    // Direct ask: "a command button that allows you to set behaviors for
+    // each of your allies" — the order is worth seeing at a glance here
+    // too, not just in the command menu that set it.
+    const orderLabel = a.standingOrder ? ` · ${a.standingOrder[0]!.toUpperCase()}${a.standingOrder.slice(1)}` : "";
+    nameSpan.textContent = `${name}${orderLabel}`;
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "herd-status-status";
+    statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    nameRow.append(nameSpan, statusSpan);
+    const bar = document.createElement("span");
+    bar.className = "herd-status-bar";
+    const fill = document.createElement("span");
+    fill.className = `herd-status-fill${a.fainted ? " fainted" : fraction < 0.25 ? " low" : ""}`;
+    fill.style.width = `${Math.round(fraction * 100)}%`;
+    bar.appendChild(fill);
+    row.append(nameRow, bar);
+    herdStatusBodyEl.appendChild(row);
+  }
+}
+
+herdStatusHideBtn.addEventListener("click", () => {
+  herdPanelPinned = false;
+  renderHerdStatusPanel();
+});
+hudPartyBtn.addEventListener("click", () => {
+  herdPanelPinned = true;
+  renderHerdStatusPanel();
+});
+
+/**
  * Direct asks: "under the attack option a sub menu show up to select your
  * bonded pokemon if its within the same zone as you, and you can select a
  * move and target a space with it - it then uses its own pathfinding to get
@@ -751,9 +894,13 @@ function bondedPartnersInZone(me: Agent): Agent[] {
  * player has moves too, even if it's just tackle." Attack always opens
  * this now: a "You" section lists the player's own real moves
  * (bare-handed Tackle, plus whatever a held item grants — `Agent.moves`,
- * kept in sync by `syncPlayerMoves`), each firing the ordinary directional
- * swing (`lastFacing`) with that specific move; a bonded-follower section
- * per partner in zone, same as before, for the tile-targeted command.
+ * kept in sync by `syncPlayerMoves`); a bonded-follower section per
+ * partner in zone, same as before. Direct follow-up ask: "change attack
+ * for player moves to also be targeted, like allies moves" — tapping
+ * either section's move now enters the same tap-a-tile `targeting` mode
+ * (`agentId: undefined` for the player's own), rather than the player's
+ * own swing instant-firing in `lastFacing`'s direction the moment it's
+ * picked.
  */
 function openCommandMenu(): void {
   const me = findPlayer(world);
@@ -786,16 +933,37 @@ function openCommandMenu(): void {
   for (const move of myMoves) {
     const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
     commandMenuBodyEl.appendChild(
-      row(move.name, onCooldown ? "on cooldown" : "tap to swing in the direction you last moved", () => {
+      row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
         if (onCooldown) return;
         closeCommandMenu();
-        playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId: move.id });
+        targeting = { moveId: move.id };
+        hudMessageEl.textContent = `Targeting with ${move.name} — tap a tile. Esc to cancel.`;
       })
     );
   }
   for (const partner of bondedPartnersInZone(me)) {
     const name = SPECIES[partner.species]?.name ?? partner.species;
     commandMenuBodyEl.appendChild(heading(name));
+    // Direct ask: "a command button that allows you to set behaviors for
+    // each of your allies; patrol, hunt, defend, etc." Instant, unlike the
+    // move rows below — no tile to tap, the order just takes effect.
+    const currentOrder = partner.standingOrder ?? "follow";
+    const orders: { order: "follow" | "patrol" | "hunt" | "defend"; label: string; sub: string }[] = [
+      { order: "follow", label: "Follow", sub: "stays close, doesn't engage on its own" },
+      { order: "patrol", label: "Patrol", sub: "wanders loosely nearby" },
+      { order: "hunt", label: "Hunt", sub: "actively seeks out and fights nearby threats" },
+      { order: "defend", label: "Defend", sub: "stays close, fights off anything that gets near you" },
+    ];
+    for (const o of orders) {
+      const isCurrent = currentOrder === o.order;
+      commandMenuBodyEl.appendChild(
+        row(`${o.label}${isCurrent ? " (current)" : ""}`, o.sub, () => {
+          if (isCurrent) return;
+          closeCommandMenu();
+          playerAct({ kind: "setStandingOrder", agentId: partner.id, order: o.order });
+        })
+      );
+    }
     const moves = partner.moves ?? [];
     if (moves.length === 0) commandMenuBodyEl.appendChild(row("Knows no moves.", undefined, () => {}));
     for (const move of moves) {
@@ -810,6 +978,7 @@ function openCommandMenu(): void {
       );
     }
   }
+  numberMenuRows(commandMenuBodyEl);
   commandMenuEl.hidden = false;
 }
 
@@ -844,6 +1013,79 @@ function showGameOver(playerId: string): void {
   gameOverEl.hidden = false;
 }
 
+/** ROADMAP.md M7 — "Done when: you emerge." The win screen for reaching the deepest level's exit tile. */
+function showWinScreen(): void {
+  playerWon = true;
+  runWonStatsEl.textContent = `Tick ${world.tick} · seed ${playerSeed}`;
+  runWonEl.hidden = false;
+}
+
+/** Checked after every player turn: only the deepest level carries an `"exit"` tile at all, so this is a no-op everywhere else. */
+function checkWinCondition(player: Agent): void {
+  if (world.depth === CAVE_RUN_DEPTH && isAtExit(world, player)) showWinScreen();
+}
+
+/**
+ * Direct follow-up ask, right after the cave-climb win screen shipped:
+ * "spawn in overworld after graduating from the end of the cave" — scoped
+ * to full seamless macro-grid walking, not a one-off spectator drop-in.
+ * Carries the SAME human agent across (level, moves, inventory, hp all
+ * intact — this is the graduated player, not a fresh spawn) into a brand
+ * new macro-grid world. Sets `macroWorld` while `playerMode` stays true —
+ * the one deliberate relaxation of the "these two are mutually exclusive"
+ * invariant every other mode transition in this file still holds to;
+ * `playerAct` is the only other place that reads `macroWorld` while
+ * `playerMode` is on (to check for zone-edge crossings), everything else
+ * (the macro map view, its own toggle) stays untouched and hidden, same as
+ * ordinary player mode already keeps them.
+ */
+function enterOverworldFromCaveWin(): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  playerWon = false;
+  runWonEl.hidden = true;
+  macroWorld = createDemoMacroWorld(playerSeed);
+  const startWorld = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
+  world.agents = world.agents.filter((a) => a !== player);
+  player.layer = "surface";
+  player.homeLayer = "surface";
+  player.pos = findWalkableNear(startWorld, "surface", startWorld.width / 2, startWorld.height / 2);
+  startWorld.agents.push(player);
+  world = startWorld;
+  resetUiForNewWorld();
+  registerHerdsForFirstFrame();
+  hudMessageEl.textContent = "You emerge into the wider world.";
+  renderPlayerHud();
+  focusCameraOn(player.pos);
+}
+
+runWonContinueBtn.addEventListener("click", () => enterOverworldFromCaveWin());
+
+/**
+ * ROADMAP.md M7 — direct ask: "i think i just want to be able to move to
+ * the next level of the cave." Not a `PlayerAction`/turn at all — crossing
+ * levels swaps which `World` the whole app is looking at (same "re-point
+ * `world` after the engine call" dance `focusZone` already does for the
+ * macro grid), which an ordinary turn-advancing action can't express.
+ */
+function tryUseStairs(): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  const fromDepth = world.depth;
+  const next = useStairs(world, player, log);
+  if (!next) {
+    hudMessageEl.textContent = "There are no stairs here.";
+    return;
+  }
+  world = next;
+  const down = fromDepth !== undefined && world.depth !== undefined && world.depth > fromDepth;
+  resetUiForNewWorld();
+  registerHerdsForFirstFrame();
+  renderPlayerHud();
+  focusCameraOn(player.pos);
+  hudMessageEl.textContent = `You climb ${down ? "down" : "up"} to level ${world.depth}.`;
+}
+
 /**
  * One player turn: queue the action and run world ticks until the player's
  * action energy comes round and it is applied — a slow human lets more of
@@ -859,11 +1101,33 @@ function playerAct(action: PlayerAction): void {
   const player = findPlayer(world);
   if (!player) return;
   if (action.kind === "move") lastFacing = { dx: action.dx, dy: action.dy };
+  // Direct ask: "spawn in overworld after graduating from the end of the
+  // cave," scoped to full seamless walking — a move that would step off
+  // the focused zone's own tile-grid bounds crosses into the neighbor
+  // instead of just failing, the same "instant, no extra tick" shape the
+  // cave's own stairs already use (tryUseStairs, below). Checked here,
+  // ahead of the ordinary turn-advance, so a real wall still blocks
+  // normally — only an actual out-of-bounds step reaches crossZoneEdge at
+  // all (see its own doc comment for why it returns undefined otherwise).
+  if (macroWorld && action.kind === "move") {
+    const crossed = crossZoneEdge(macroWorld, player, action.dx, action.dy, IMMIGRATION_CONTEXT, log);
+    if (crossed) {
+      world = crossed;
+      resetUiForNewWorld();
+      registerHerdsForFirstFrame();
+      afterTick();
+      focusCameraOn(player.pos);
+      renderPlayerHud();
+      hudMessageEl.textContent = "You cross into a new stretch of land.";
+      return;
+    }
+  }
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
   focusCameraOn(player.pos);
   renderPlayerHud();
   if (!findPlayer(world)) showGameOver(player.id);
+  else checkWinCondition(player);
 }
 
 const PLAYER_KEYS: Record<string, PlayerAction> = {
@@ -909,15 +1173,19 @@ window.addEventListener("keydown", (e) => {
   if (!playerMode) return;
   // Typing in the seed box or any input must not walk the player.
   if ((e.target as HTMLElement | null)?.tagName === "INPUT") return;
-  if (playerDead) {
+  if (playerDead || playerWon) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
       loadPlayerWorld(playerSeed, playerScene);
+    } else if (playerWon && e.key === "Enter") {
+      e.preventDefault();
+      enterOverworldFromCaveWin();
     }
     return;
   }
   if (!commandMenuEl.hidden) {
     if (e.key === "Escape") closeCommandMenu();
+    else if (activateNumberedMenuRow(commandMenuBodyEl, e.key)) e.preventDefault();
     return;
   }
   if (targeting) {
@@ -927,6 +1195,7 @@ window.addEventListener("keydown", (e) => {
   cancelTravel();
   if (!packMenuEl.hidden) {
     if (e.key === "Escape" || e.key === "i") closePackMenu();
+    else if (activateNumberedMenuRow(packMenuBodyEl, e.key)) e.preventDefault();
     return;
   }
   if (e.key === "x") {
@@ -945,9 +1214,21 @@ window.addEventListener("keydown", (e) => {
     attemptAttack();
     return;
   }
-  if (e.key === "v") {
+  // Direct ask: "can't loot or butcher dead units. need to be able to -
+  // maybe you need a knife to do more but that should be a thing."
+  if (e.key === "o") {
     e.preventDefault();
-    playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
+    playerAct({ kind: "loot" });
+    return;
+  }
+  if (e.key === "p") {
+    e.preventDefault();
+    playerAct({ kind: "butcher" });
+    return;
+  }
+  if (e.key === ">" || e.key === "<") {
+    e.preventDefault();
+    tryUseStairs();
     return;
   }
   if (e.key === "i" || e.key === "c") {
@@ -1265,7 +1546,7 @@ function travelTo(target: Vec2): void {
 // by its own id alongside the row.
 document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (!playerMode || playerDead) return;
+    if (!playerMode || playerDead || playerWon) return;
     const act = btn.dataset.act;
     if (targeting && act !== "attack") return; // a target tile is the only thing that should land next
     cancelTravel();
@@ -1275,7 +1556,7 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").f
       runActivity();
     } else if (act === "pack") openPackMenu();
     else if (act === "attack") attemptAttack();
-    else if (act === "lightFire") playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
+    else if (act === "useStairs") tryUseStairs();
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });
 });
@@ -1453,8 +1734,12 @@ canvas.addEventListener("click", (event) => {
     targeting = undefined;
     // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
     // the player's own turn to spend, same as every other verb; the HUD
-    // message comes from `outcomeText`'s own "command" case.
-    playerAct({ kind: "command", agentId, moveId, target });
+    // message comes from `outcomeText`'s own "command"/"attack" case.
+    // `agentId` undefined means this is the player's OWN targeted swing
+    // (direct ask: "change attack for player moves to also be targeted,
+    // like allies moves") rather than an order for a bonded partner.
+    if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
+    else playerAct({ kind: "command", agentId, moveId, target });
     return;
   }
   // Direct follow-up ask: "I should be able to click specific units in the
@@ -2006,6 +2291,7 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
+  if (playerMode) renderHerdStatusPanel();
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
   // is hidden, so this is cheap on every other frame.

@@ -254,6 +254,21 @@ describe("trust stages and the follower door", () => {
     expect(log.events.some((e) => e.kind === "stoppedFollowing" && e.agentId === "s")).toBe(true);
   });
 
+  it("Backlog #65: a tolerant-trust follower does not flee its own leader (trustFleeFactor('tolerant') is 0.5, not 0)", () => {
+    const world = openWorld();
+    const me = human(10, 10);
+    // Tolerant, not bonded — TRUST_TOLERANT <= score < TRUST_CURIOUS.
+    const s = prey("s", 11, 10, { rapport: { me: { score: TRUST_TOLERANT + 0.01, lastInteractionTick: 0, towardPlayer: true } }, followingId: "me" });
+    world.agents.push(me, s);
+    // The player just moved (signature x1.25) and stands adjacent — under
+    // the old rule (radius = FLEE_DETECT_RADIUS * 1.25 * 0.5 ≈ 3 tiles) this
+    // tolerant-trust creature would have fled the very leader it's following.
+    me.lastActionOutcome = { action: { kind: "move", dx: 1, dy: 0 }, ok: true } as Agent["lastActionOutcome"];
+    tickWorld(world, undefined, NO_HUNTERS);
+    expect(s.behavior).not.toBe("flee");
+    expect(s.followingId).toBe("me");
+  });
+
   it("a wary creature never follows, and one out of range is not asked", () => {
     const world = openWorld();
     const me = human(10, 10);
