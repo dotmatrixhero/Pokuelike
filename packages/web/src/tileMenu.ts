@@ -23,6 +23,13 @@ import type { TileVerb } from "@pokuelike/engine";
  * faster once you know where the wedge is; discrete taps are what you actually
  * do the first few times, and on a trackpad. Supporting only the first would
  * make the menu feel broken to anyone who releases before they mean to.
+ *
+ * **The centre is Look, not cancel.** Direct ask: "long press into the radial
+ * into no swipe always looks, since it's a non destructive action... and tap
+ * always moves. Just for consistency?" That makes the two gestures mean one
+ * thing each — tap moves, long-press looks — and everything else is a
+ * deliberate swipe away. It also means there is nothing to cancel: releasing
+ * without choosing costs no turn, because examining never did.
  */
 
 export interface TileMenuItem {
@@ -63,9 +70,22 @@ export class TileMenu {
   private readonly hub: HTMLElement;
   private wedges: { el: HTMLElement; item: TileMenuItem }[] = [];
   private armed: TileMenuItem | undefined;
+  private centre: TileMenuItem | undefined;
   private onPick: ((verb: TileVerb) => void) | undefined;
 
-  constructor(private readonly container: HTMLElement) {
+  /**
+   * `onVisibilityChange` lets the host lock map panning while the menu is up.
+   * On touch that is not a nicety: `touch-action: pan-x pan-y` on the map wrap
+   * hands the gesture to the browser's own scroller, which swallows the drag
+   * and fires `pointercancel` instead of the pointermove/pointerup the menu
+   * needs — so on a phone the radial opened and then the map slid away under
+   * it. Reported exactly that way: "Radial release on mobile not working it
+   * drags the map instead."
+   */
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly onVisibilityChange?: (open: boolean) => void
+  ) {
     this.root = document.createElement("div");
     this.root.id = "tile-menu";
     this.root.hidden = true;
@@ -79,16 +99,26 @@ export class TileMenu {
     return !this.root.hidden;
   }
 
-  /** `at` is in container-relative pixels — where the tile is on screen right now. */
-  open(at: { x: number; y: number }, items: TileMenuItem[], title: string, onPick: (verb: TileVerb) => void): void {
+  /**
+   * `at` is in container-relative pixels — where the tile is on screen right
+   * now. `centre` is what a release without swiping commits to (Look); it is
+   * deliberately NOT also given a wedge, since it is already the default.
+   */
+  open(
+    at: { x: number; y: number },
+    items: TileMenuItem[],
+    centre: TileMenuItem,
+    onPick: (verb: TileVerb) => void
+  ): void {
     this.onPick = onPick;
-    this.armed = undefined;
+    this.centre = centre;
+    this.armed = centre;
     for (const { el } of this.wedges) el.remove();
     this.wedges = [];
 
     this.root.style.left = `${at.x}px`;
     this.root.style.top = `${at.y}px`;
-    this.hub.textContent = title;
+    this.hub.textContent = centre.hint;
 
     // Evenly spaced around the ring, starting straight up. "Drag up to one
     // radial section" — so the first and most-wanted verb is the one directly
@@ -117,13 +147,19 @@ export class TileMenu {
       this.wedges.push({ el, item });
     });
 
+    // Armed from the moment it opens, not only once the pointer first moves:
+    // the centre IS the default action, so it has to look like the thing a
+    // release would commit before you have done anything.
+    this.hub.classList.add("armed");
     this.root.hidden = false;
+    this.onVisibilityChange?.(true);
   }
 
   /**
    * Arms whichever wedge the pointer is nearest, while a drag is in progress.
-   * Inside `ARM_DISTANCE` of the hub nothing is armed — that is the cancel
-   * zone, so releasing where you pressed always means "never mind".
+   * Inside `ARM_DISTANCE` of the hub the CENTRE action is armed — Look — so a
+   * long-press you never swiped out of does the harmless, informative thing
+   * rather than nothing at all.
    */
   track(pointer: { x: number; y: number }): void {
     if (!this.isOpen) return;
@@ -132,7 +168,7 @@ export class TileMenu {
     const dy = pointer.y - rootRect.top;
     const distance = Math.hypot(dx, dy);
 
-    let best: TileMenuItem | undefined;
+    let best: TileMenuItem | undefined = this.centre;
     if (distance >= ARM_DISTANCE && this.wedges.length > 0) {
       const angle = Math.atan2(dy, dx);
       let bestDelta = Infinity;
@@ -149,6 +185,7 @@ export class TileMenu {
     }
     this.armed = best;
     for (const { el, item } of this.wedges) el.classList.toggle("armed", item === best);
+    this.hub.classList.toggle("armed", best === this.centre);
     this.hub.textContent = best ? best.hint : "Release to cancel";
   }
 
@@ -171,8 +208,12 @@ export class TileMenu {
   }
 
   close(): void {
+    if (this.root.hidden) return;
     this.root.hidden = true;
     this.armed = undefined;
+    this.centre = undefined;
+    this.hub.classList.remove("armed");
     this.onPick = undefined;
+    this.onVisibilityChange?.(false);
   }
 }

@@ -11384,3 +11384,54 @@ target it with an atk. Another let's you gather from that tile."*
       but worth watching.
 - [ ] No keyboard equivalent for opening the radial on desktop. Right-click
       and hover are there; a key (Tab to the facing tile?) would complete it.
+
+## Fixed: play-mode mobile round 2 — radial release, sheet, header, gestures
+
+Six asks from a real phone session.
+
+- [x] **"Radial release on mobile not working it drags the map instead."**
+      Root cause: `#canvas-wrap` carries `touch-action: pan-x pan-y`, so the
+      browser's own scroller claimed the gesture, swallowed the drag and fired
+      `pointercancel` instead of the pointermove/pointerup the menu needs. The
+      menu opened and the map then slid out from under it. Fixed by locking
+      `touch-action: none` on the wrap while the radial is open (a visibility
+      callback on `TileMenu`), plus a `pointercancel` handler that closes
+      without committing — a cancel is the browser taking the gesture away, not
+      the player choosing.
+      Verified by computed style: `pan-x pan-y` → `none` → `pan-x pan-y`.
+- [x] **Sheet is two detents now, not three.** Direct ask: "it should just be
+      low to full and the handle should be bigger or something to easily
+      toggle." The middle stop was the state that covered the verb pad without
+      being big enough to be worth it. Measured: **74px ↔ 663px**, one tap
+      either way. Grip went 36×4px to 64×6px in a **388×30px** hit area.
+- [x] **Play mode hides the spectator header.** Seed, Watch/Play, map mode,
+      clock, Auto Camera and render settings moved into `#observer-controls`,
+      hidden in play mode behind a hamburger that slides them back in as a
+      second row. `#toggle-panel` hides too — the sheet has its own grip, and
+      a second panel button was wrapping the header onto an extra line.
+- [x] **An event ticker took its place** — the last three things that happened
+      to you and your party, newest at full opacity then 0.75 then 0.5, exactly
+      as asked. Reads the same `actionLogPanel` the You panel does, so the two
+      can never disagree; only touches the DOM when the text actually changes.
+- [x] **One gesture, one meaning.** Direct report: "I get confused between tap
+      to move vs tap to look." Now **tap always moves** (tapping a creature
+      still selects it for the Inspector, but no longer examines), and
+      **releasing the radial without swiping always Looks** — the centre is the
+      Look action, not a cancel zone. That works because examining is free: an
+      accidental long-press costs nothing, so there is nothing to cancel. The
+      Look wedge is gone, since it would be a second way to do the default.
+- [x] **Gather is a button now, not a wedge.** Direct ask: "gather I think
+      might need to be it's own button like crouch and wait." It acts on the
+      tile you are already standing on, so there is nothing to point at — the
+      mobile pad is Wait, Gather, Crouch, and the radial is only verbs that
+      target *another* tile. `verbsForTile` still reports gather: the engine
+      says what is legal, the UI decides which surface offers it.
+- [x] Hover-examine is now gated to `@media (hover: hover)` — on touch it was
+      a tooltip that appeared where you last tapped and then sat there.
+- [x] **Bug caught by measuring:** the radial centre *behaved* as Look from the
+      moment it opened but did not *look* armed until the pointer first moved,
+      because the class was only applied in `track()`. The release fired
+      correctly the whole time, so only a visual check caught it.
+- [x] Verified live at 390px: **14/14** new checks, plus the earlier suites
+      still green (radial 13/13, autosave 13/13, action log 6/6). Full suite
+      engine 1629, data 475, web build clean.

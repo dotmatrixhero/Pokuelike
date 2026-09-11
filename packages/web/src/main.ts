@@ -132,6 +132,8 @@ const youTitleEl = document.getElementById("you-title") as HTMLElement;
 const partyBodyEl = document.getElementById("party-body") as HTMLElement;
 const partyCountEl = document.getElementById("party-count") as HTMLElement;
 const sheetHandleEl = document.getElementById("sheet-handle") as HTMLElement;
+const headerToggleBtn = document.getElementById("header-toggle") as HTMLButtonElement;
+const eventTickerEl = document.getElementById("event-ticker") as HTMLElement;
 const togglePanelBtn = document.getElementById("toggle-panel") as HTMLButtonElement;
 const sidePanelEl = document.getElementById("side-panel") as HTMLElement;
 const moreMenuWrap = document.getElementById("more-menu-wrap") as HTMLElement;
@@ -523,7 +525,7 @@ function registerHerdsForFirstFrame(): void {
  * which the on-map control pad also positions itself above; change one and
  * change the other.
  */
-const SHEET_DETENTS = { peek: 74, half: 0.45, full: 0.85 } as const;
+const SHEET_DETENTS = { peek: 74, full: 0.85 } as const;
 type SheetDetent = keyof typeof SHEET_DETENTS;
 let sheetDetent: SheetDetent = "peek";
 
@@ -536,7 +538,6 @@ function sheetHeightPx(detent: SheetDetent): number {
 function setSheetDetent(detent: SheetDetent): void {
   sheetDetent = detent;
   document.body.classList.toggle("sheet-peek", detent === "peek");
-  document.body.classList.toggle("sheet-half", detent === "half");
   document.body.classList.toggle("sheet-full", detent === "full");
   document.documentElement.style.setProperty("--sheet-h", `${sheetHeightPx(detent)}px`);
 }
@@ -569,7 +570,8 @@ function initSheetDrag(): void {
     document.documentElement.style.setProperty("--sheet-h", `${Math.round(height)}px`);
     // Peek hides the tabs and sections, so it has to come off the moment the
     // sheet is dragged open — otherwise you drag up into blank space.
-    document.body.classList.toggle("sheet-peek", height < sheetHeightPx("peek") + 30);
+    document.body.classList.toggle("sheet-peek", height < sheetHeightPx("peek") + 40);
+    document.body.classList.toggle("sheet-full", height >= sheetHeightPx("peek") + 40);
   });
 
   const release = (event: PointerEvent) => {
@@ -578,14 +580,17 @@ function initSheetDrag(): void {
     sidePanelEl.classList.remove("sheet-dragging");
     if (sheetHandleEl.hasPointerCapture(event.pointerId)) sheetHandleEl.releasePointerCapture(event.pointerId);
     if (!moved) {
-      // A tap: cycle onward, so repeated taps walk peek -> half -> full.
-      setSheetDetent(sheetDetent === "peek" ? "half" : sheetDetent === "half" ? "full" : "peek");
+      // A tap toggles. Direct ask: "I think it should just be low to full and
+      // the handle should be bigger or something to easily toggle." The middle
+      // detent is gone — it was the state where the sheet covered the verb pad
+      // without being big enough to be worth it.
+      setSheetDetent(sheetDetent === "peek" ? "full" : "peek");
       return;
     }
     // Snap to whichever detent the finger ended up nearest.
     const height = sidePanelEl.getBoundingClientRect().height;
     let best: SheetDetent = "peek";
-    for (const detent of ["peek", "half", "full"] as SheetDetent[]) {
+    for (const detent of ["peek", "full"] as SheetDetent[]) {
       if (Math.abs(sheetHeightPx(detent) - height) < Math.abs(sheetHeightPx(best) - height)) best = detent;
     }
     setSheetDetent(best);
@@ -619,7 +624,11 @@ function say(text: string): void {
   actionLogPanel.say(world.tick, text);
 }
 
-const tileMenu = new TileMenu(mapAreaEl);
+const tileMenu = new TileMenu(mapAreaEl, (open) => {
+  // Stop the map panning out from under an open radial — see TileMenu's own
+  // constructor comment for why this is what made release work on touch.
+  canvasWrap.classList.toggle("menu-open", open);
+});
 const tileTipEl = document.getElementById("tile-tip") as HTMLElement;
 
 /**
@@ -743,13 +752,29 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
   }
 }
 
+/**
+ * Verbs the radial does NOT give a wedge to, even though the rules allow them
+ * here.
+ *
+ * - `examine` is the centre: a release without swiping already does it, so a
+ *   wedge would be a second way to do the default.
+ * - `gather` acts on the tile you are already standing on, not one you point
+ *   at, so it belongs with wait and crouch as a button. Direct ask: "gather I
+ *   think might need to be it's own button like crouch and wait."
+ *
+ * `verbsForTile` still reports both — the engine says what is legal, the UI
+ * decides which surface offers it.
+ */
+const WEDGELESS_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["examine", "gather"]);
+
 function openTileMenu(tile: Vec2): void {
   const me = findPlayer(world);
   if (!me || playerDead || playerWon) return;
   const verbs = verbsForTile(world, me, viewLayer(), tile);
   if (verbs.length === 0) return;
-  const report = examineTile(world, viewLayer(), tile);
-  tileMenu.open(tileScreenPos(tile), menuItemsFor(verbs), report ? (TERRAIN_WORDS[report.terrain] ?? report.terrain) : "Tile", (verb) => runTileVerb(verb, tile));
+  const wedges = menuItemsFor(verbs.filter((v) => !WEDGELESS_VERBS.has(v)));
+  const centre = menuItemsFor(["examine"])[0]!;
+  tileMenu.open(tileScreenPos(tile), wedges, centre, (verb) => runTileVerb(verb, tile));
 }
 
 /**
@@ -816,6 +841,14 @@ window.addEventListener("pointerup", (event) => {
 });
 
 // Desktop: right-click is the same menu, no press delay.
+window.addEventListener("pointercancel", (event) => {
+  if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  // Do not commit on a cancel: the player did not choose to let go, the
+  // browser took the gesture away.
+  tileMenu.close();
+  cancelPress();
+});
+
 canvas.addEventListener("contextmenu", (event) => {
   if (!playerMode) return;
   event.preventDefault();
@@ -853,6 +886,47 @@ canvas.addEventListener("mousemove", (event) => {
 canvas.addEventListener("mouseleave", () => {
   tileTipEl.hidden = true;
 });
+
+headerToggleBtn.addEventListener("click", () => {
+  const open = !document.body.classList.contains("header-open");
+  document.body.classList.toggle("header-open", open);
+  headerToggleBtn.setAttribute("aria-expanded", String(open));
+});
+
+/**
+ * The last three things that happened to you, in the space the spectator
+ * header used to take. Direct ask: "Maybe in its place you show the last three
+ * events that happened to you and your party. With the most recent fully
+ * opacity and the least recent 50%."
+ *
+ * Reads the same `actionLogPanel` the You panel does rather than keeping its
+ * own copy, so the two can never disagree about what just happened.
+ */
+let tickerSignature = "";
+
+function renderEventTicker(): void {
+  if (!playerMode) {
+    eventTickerEl.hidden = true;
+    return;
+  }
+  const recent = actionLogPanel.snapshot().slice(-3).reverse(); // newest first
+  // Rebuilding three rows every frame is wasteful; only touch the DOM when the
+  // text actually changed.
+  const signature = recent.map((e) => `${e.tick}:${e.count}:${e.text}`).join("|");
+  if (signature === tickerSignature) return;
+  tickerSignature = signature;
+
+  eventTickerEl.replaceChildren();
+  eventTickerEl.hidden = recent.length === 0;
+  recent.forEach((entry, i) => {
+    const row = document.createElement("div");
+    row.className = `ticker-row${entry.kind === "you" ? " you" : ""}`;
+    // Newest solid, oldest at half — exactly as asked.
+    row.style.opacity = String([1, 0.75, 0.5][i] ?? 0.5);
+    row.textContent = entry.count > 1 ? `${entry.text} \u00d7${entry.count}` : entry.text;
+    eventTickerEl.appendChild(row);
+  });
+}
 
 /**
  * Autosave cadence. Long enough that holding a movement key doesn't compress
@@ -1002,6 +1076,9 @@ function enterWatchMode(seed: number): void {
   runWonEl.hidden = true;
   document.body.classList.remove("player-mode");
   document.body.classList.remove("world-tabs-open");
+  document.body.classList.remove("header-open");
+  headerToggleBtn.setAttribute("aria-expanded", "false");
+  eventTickerEl.hidden = true;
   // The You page has no meaning without a player; Watch mode's own default.
   if (activeTab === "you") selectTab("inspector", false);
   enterOverworldMode(seed, "zone");
@@ -2454,10 +2531,13 @@ canvas.addEventListener("click", (event) => {
   const agent = agentAtCanvasPos(world, x, y, viewLayer());
   if (agent) {
     selectAgent(agent);
-    // Tapping a creature in Play mode is the examine verb (free, no tick).
-    const me = playerMode ? findPlayer(world) : undefined;
-    if (me && agent.id !== me.id) say(examine(world, agent, { observer: me, name: (id) => SPECIES[id]?.name ?? id }));
-    return;
+    // In play mode a tap NEVER examines any more — it walks, like every other
+    // tap. Direct report: "I get confused between tap to move vs tap to look."
+    // One gesture, one meaning: tap moves, long-press looks. Selecting still
+    // happens so the World/Inspector tab follows along.
+    if (!playerMode) return;
+    const me = findPlayer(world);
+    if (!me || agent.id === me.id) return;
   }
   // Play mode: tapping a tile walks there — direct ask: "I can't play at all
   // on mobile. Can you allow a click based control scheme?" See travelTo.
@@ -3048,6 +3128,7 @@ function frame(): void {
   if (playerMode) {
     renderPartySection();
     actionLogPanel.render();
+    renderEventTicker();
   }
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
