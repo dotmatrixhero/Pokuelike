@@ -11096,3 +11096,19 @@ Direct report: *"framerate from all the rendering is suffering lol."*
 Headless software Chromium, same harness throughout. Max sim speed gains least
 because the SIM dominates there, not rendering — worth knowing before chasing
 more draw-side wins.
+
+## Changed: top playback speed is 9x, was 32x
+
+Direct ask: *"Let's max the speed at x9 not x32."*
+
+- [x] `SPEED_STEPS` is now `[0.25, 0.5, 1, 2, 4, 6, 8, 9]`, verified live on the
+      slider. Same number of steps, so the slider range and
+      `DEFAULT_SPEED_INDEX` (1x) are untouched.
+- [x] **8 stays on the ladder deliberately**, even though 8 -> 9 is a small last
+      step. `AUTO_CAM_SLOWDOWN_SPEED` is 8, and `setSpeed` resolves a speed with
+      `indexOf` and `return`s silently on -1 — dropping 8 would have quietly
+      disabled auto-camera's slowdown instead of failing loudly. Worth knowing
+      before anyone reshuffles this ladder again: any constant that reaches
+      `setSpeed` has to be a member.
+- [x] Fixed a stale "32x" example in index.html's own comment about the
+      battle-step speed readout.

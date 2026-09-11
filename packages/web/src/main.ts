@@ -19,7 +19,15 @@ import { drawRegionThumbnail } from "./overworldMap.js";
  * comfortable pace, or blast through to see a longer-run outcome."
  */
 const BASE_TICKS_PER_SEC = 6;
-const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 8, 16, 32] as const;
+/**
+ * Direct ask: "Let's max the speed at x9 not x32."
+ *
+ * 8 stays on the ladder even though 8 -> 9 is a small last step, because
+ * `AUTO_CAM_SLOWDOWN_SPEED` is 8 and `setSpeed` resolves a speed by
+ * `indexOf` and silently no-ops on a miss — dropping 8 would quietly disable
+ * auto-camera's slowdown rather than fail loudly.
+ */
+const SPEED_STEPS = [0.25, 0.5, 1, 2, 4, 6, 8, 9] as const;
 const DEFAULT_SPEED_INDEX = 2; // 1x
 
 /**
