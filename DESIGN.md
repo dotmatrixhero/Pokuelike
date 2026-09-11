@@ -16088,3 +16088,43 @@ attempt measured a paused world at tick 0 and saw nothing): by tick 52 the
 page had fetched 32 sprite files of which **16 were walk frames** —
 `kabutops_up_1`, `kingler_left_1`, `golduck_up_1`, `omastar_left_1` and so on,
 all 200. Engine 1533/1533, data 468/468, web build clean.
+
+## The canvas was deleting one pixel row in five (and my screenshots hid it)
+
+Direct report: "Uhhh I don't think the screenshot you sent was actually full
+res... Krabbys left eye is missing a black pixel...?" Right on both counts,
+and the second half is a real rendering defect, not a screenshot artefact.
+
+**Measured on the live page.** The `#scene` canvas has a backing store of
+1800x1200 and is displayed at 1440x960 — a **0.8 CSS downscale** — while
+carrying `image-rendering: pixelated`. Pixelated means nearest-neighbour, and
+nearest-neighbour at 0.8 does not blend anything: it throws away every fifth
+row and column outright. A one-pixel feature — an eye, an outline, a
+highlight — lands on a discarded row and simply ceases to exist. At the
+default zoom that is 20% of the image deleted; zoomed further out it is worse
+(30% at 0.7, 40% at 0.6).
+
+This is the exact inverse of the earlier fidelity fix. `pixelated` is correct
+when scaling UP (it keeps pixel art crisp rather than smearing it) and
+destructive when scaling DOWN. So `setZoom` now picks per direction:
+`pixelated` at or above 1:1, `auto` below it. Below 1:1 the result is softer,
+but every source pixel contributes to the output instead of four in five
+surviving and the fifth vanishing.
+
+**The renderer itself was never at fault**, which is worth stating precisely
+because it would have been easy to go hunting in the rip. Dumping the canvas
+backing store at true 1:1 via `toDataURL` and locating a sprite in it,
+`kingler_down` is drawn with **251 of 251 opaque pixels byte-identical** to
+the PNG on disk. The art is lossless all the way to the backing store; only
+the final CSS scale to the screen was lossy.
+
+**Method note for future checks.** Playwright's `page.screenshot()` captures
+the CSS-scaled view, so at the default zoom it is an 0.8 downscale — which is
+why every screenshot in this session understated the real fidelity. Dump
+`canvas.toDataURL()` instead to inspect what was actually rendered.
+
+**Left as a decision, not taken unilaterally:** the softening below 1:1 only
+disappears if the view never scales down — e.g. defaulting to 100% zoom, or
+snapping zoom to whole ratios (1x, 2x) and letting the viewport show less of
+the map. That trades how much world fits on screen for perfect crispness,
+which is a game-feel call.

@@ -1607,6 +1607,14 @@ function setZoom(next: number): void {
   zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
   canvas.style.width = `${canvas.width * zoom}px`;
   canvas.style.height = `${canvas.height * zoom}px`;
+  // `image-rendering: pixelated` is right when scaling UP — it keeps pixel art
+  // crisp instead of smearing it. Scaling DOWN it is actively destructive:
+  // nearest-neighbour at 0.8 throws away every fifth row and column outright,
+  // so one-pixel features simply vanish. Direct report: "Krabbys left eye is
+  // missing a black pixel...?" — measured at the time as a 1800x1200 canvas
+  // displayed at 1440x960. Below 1:1, let the browser filter instead: softer,
+  // but every pixel contributes rather than one in five being deleted.
+  canvas.style.imageRendering = zoom < 1 ? "auto" : "pixelated";
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
 }
 function applyZoom(): void {

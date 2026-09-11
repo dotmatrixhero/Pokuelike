@@ -9427,3 +9427,21 @@ typecheck clean.
       can't be proven the same way — worth a look if any species seems off.
 - [ ] Walk cycle is 2 frames (stand/step). The trainer sheet has 3 frames per
       facing, so humans could use a richer cycle than Pokemon currently do.
+
+## Fixed: nearest-neighbour downscale was deleting 1 pixel row in 5 — see DESIGN.md
+
+- [x] Direct report: "Krabbys left eye is missing a black pixel...?" The
+      #scene canvas is 1800x1200 shown at 1440x960 (0.8) with
+      `image-rendering: pixelated`, so nearest-neighbour deleted every 5th
+      row/column and one-pixel features vanished. `setZoom` now uses
+      `pixelated` only at/above 1:1 and `auto` below it.
+- [x] Confirmed the renderer is lossless: dumping the canvas at true 1:1
+      shows `kingler_down` drawn with 251/251 opaque pixels byte-identical to
+      the source PNG. The loss was purely the final CSS scale.
+- [x] Method: `page.screenshot()` captures the CSS-scaled view, so every
+      screenshot this session was an 0.8 downscale. Use
+      `canvas.toDataURL()` for true-resolution checks.
+- [ ] **Game-feel call, not taken:** below 1:1 the map is now softer rather
+      than losing pixels. Perfect crispness at all times would mean never
+      scaling below 1:1 — default zoom 100%, or snapping zoom to whole ratios
+      (1x/2x) — at the cost of fitting less world on screen. Your call.
