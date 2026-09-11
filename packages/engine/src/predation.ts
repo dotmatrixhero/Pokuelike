@@ -2082,6 +2082,13 @@ export function applyPredationInstincts(
         // unarmed, still human is half the ordinary radius; a running one
         // with a club is well past it. Under 1 tile reads as no threat.
         if (other.controlledBy === "player") {
+          // Backlog: "a tolerant-trust follower can flee its own leader" —
+          // trustFleeFactor("tolerant") is 0.5, not 0, so a follower short
+          // of "bonded" still had a real (if reduced) chance to bolt from
+          // the very player it was actively following. A follower doesn't
+          // treat its own leader as a threat at all, regardless of trust
+          // stage; it can still flee anything else normally.
+          if (agent.followingId === other.id) return false;
           const radius = playerFleeRadius(world, other, baseFleeRadius, agent);
           return radius >= 1 && isDetectable(world, agent.pos, other, radius);
         }

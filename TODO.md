@@ -10039,3 +10039,43 @@ elevation "shelves" with rock-edge border art, building on the existing
 `Tile.elevation` shading system (currently just per-tile brightness, no
 distinct edge/border art). A real, separate rendering feature, not yet
 scoped — needs its own design pass before implementation.
+
+## Fixed: a follower at `tolerant` trust can flee the very player it's following
+
+Direct ask: after "Have you tried to play the game lately," went and
+actually played a real cave run (seed 77777, real keypresses throughout,
+no rigged state) before touching this. Confirmed the pacing stuff first —
+energy decay matches `DECAY_PER_TICK`, HP regens while resting, fog-of-
+war travel gating is correct — then hit the backlog bug this session's
+own logging had left undecided. Given the choice ("never flee your own
+leader" vs. "working as intended"), picked **option 1**.
+
+**The fix**: `predation.ts`'s ordinary flee/mob filter (the one that reads
+`playerFleeRadius` for any `other.controlledBy === "player"`) now returns
+`false` outright whenever `agent.followingId === other.id` — a follower
+never reads its own leader as a threat, full stop, regardless of trust
+stage. Everything else about that filter (fleeing something else, a non-
+follower's ordinary trust-scaled radius) is untouched.
+
+**A real finding from verifying this, not a hypothetical**: my first live
+check said the fix didn't work — a tolerant-trust follower fled its
+leader after ~28 real turns even with the patch applied. Turned out to be
+my own test rig, not the code: `rapport.ts`'s `decayedRapportScore` reads
+`RapportEdge.towardPlayer` to pick the decay rate, and a *real* player-
+rapport edge always has that flag set (`adjustRapport`), but my synthetic
+setup script built the edge by hand and left it unset — so it decayed at
+the fast, non-player rate, crossed under `TRUST_TOLERANT` by tick ~82,
+`tickFollowers` correctly un-followed it (stage now `wary`), and *then*
+it fled as a stranger would — nothing to do with the fix under test. Same
+"test artifact, not a real bug" shape this session already hit twice
+before with rigged fixtures. Re-ran with `towardPlayer: true` set (what a
+real edge actually looks like): the same tolerant-trust follower, boxed
+right next to a player moving back and forth for 40 real turns (tick 0→
+113), stayed `behavior: "follow"` the entire time, never flipped to
+`flee`. That's the real confirmation, live in the browser, not just the
+unit test.
+
+**Tests**: `bond.test.ts` — a tolerant-trust (not bonded) follower does
+not flee its leader even when the player's move-triggered threat
+signature would have cleared the old radius. Full engine suite:
+1564/1564. `tsc --noEmit` clean across all 4 packages.
