@@ -841,6 +841,30 @@ window.addEventListener("pointerup", (event) => {
 });
 
 // Desktop: right-click is the same menu, no press delay.
+/**
+ * The actual reason the radial's drag did not work on a phone.
+ *
+ * Flipping `touch-action` to `none` when the menu opens is too late: the
+ * browser decides whether IT owns a touch sequence at `touchstart`, from the
+ * `touch-action` in effect then, and changing the property mid-gesture does
+ * not take the gesture back. So the map kept scrolling and the drag died in
+ * `pointercancel`. Reported twice — "Radial release on mobile not working it
+ * drags the map instead", then "The map is still scrolling on drag".
+ *
+ * `preventDefault` on a NON-passive `touchmove` does take it back, because the
+ * scroll has not started yet: the press sat still for 400ms, so this is the
+ * first move of the sequence. Registering as `{ passive: false }` is the whole
+ * point — the default for touchmove is passive, where preventDefault is
+ * ignored silently.
+ */
+canvasWrap.addEventListener(
+  "touchmove",
+  (event) => {
+    if (tileMenu.isOpen) event.preventDefault();
+  },
+  { passive: false }
+);
+
 window.addEventListener("pointercancel", (event) => {
   if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   // Do not commit on a cancel: the player did not choose to let go, the

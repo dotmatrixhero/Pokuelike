@@ -11398,7 +11398,27 @@ Six asks from a real phone session.
       callback on `TileMenu`), plus a `pointercancel` handler that closes
       without committing — a cancel is the browser taking the gesture away, not
       the player choosing.
-      Verified by computed style: `pan-x pan-y` → `none` → `pan-x pan-y`.
+      **That fix did not work, and the check that said it did was worthless.**
+      Reported again: "The map is still scrolling on drag, not letting me hit
+      the radials." Flipping `touch-action` when the menu OPENS is too late —
+      the browser decides whether it owns a touch sequence at `touchstart`,
+      from the value in effect then, and changing the property mid-gesture does
+      not take the gesture back. My check read the computed property back and
+      saw "none", which only ever proved I had set it; it never proved the
+      browser honoured it for a gesture already under way. Same shape as the
+      `el.hidden` and `-s` lessons already in CLAUDE.md.
+      **Real fix:** `preventDefault()` on a NON-passive `touchmove` while the
+      menu is open. That does take the gesture back, because the press sat
+      still for 400ms so this is the sequence's first move. `{ passive: false }`
+      is the whole point — touchmove defaults to passive, where preventDefault
+      is ignored silently.
+      **Real check:** driven with actual touch events over CDP
+      (`Input.dispatchTouchEvent`), not `page.mouse` — `page.mouse` never
+      scrolls the map at all, which is exactly why the first check passed while
+      a phone kept failing. Proven to fail without the fix (map scrolled
+      982 → 1071 mid-drag, wedge never armed, nothing fired) and pass with it
+      (scroll pinned at 982, wedge armed, verb fired), with a control that a
+      plain touch drag still pans.
 - [x] **Sheet is two detents now, not three.** Direct ask: "it should just be
       low to full and the handle should be bigger or something to easily
       toggle." The middle stop was the state that covered the verb pad without
