@@ -9365,3 +9365,16 @@ typecheck clean.
 - [ ] Still no debug hook to force a wild human on screen, so the
       per-archetype sprites are verified as correct files + a total mapping,
       not watched live. Same gap flagged last round.
+
+## Built: tile art for all 15 crops — see DESIGN.md
+
+- [x] Direct ask: "Add crops." Eleven crops had no art and rendered as
+      coloured letters, four of them cooking ingredients. All 15 CROP_IDS
+      now have real tiles; extractor kept at
+      `packages/web/scripts/rip_crop_tiles.py`. Verified live: the browser
+      fetched three of the *new* crop tiles (200) while rendering.
+- [x] Pumpkin was re-picked after the first choice read as a flowering
+      plant rather than a gourd — misleading art is worse than a glyph.
+- [ ] Rice, groundnut and potato are the closest available shape on a
+      berry-plant sheet rather than exact matches. Fine at tile size, worth
+      revisiting if a real crop sheet ever turns up.

@@ -276,9 +276,11 @@ export function getFertilePatch(): HTMLImageElement | null {
  * sprites.png", a growth-stage sheet: each berry has a small/medium/ripe
  * stage) for "food"/"flora" tiles, keyed by the tile's own flavor — a
  * `crops.ts` `CropId` for "food" (CROPS_DESIGN.md; no dedicated art exists
- * yet for the real crops, so this currently always misses and falls back
- * to `FLAVOR_FG`/`FLAVOR_GLYPH`'s colored-glyph rendering, same as any
- * other flavor with no art) or `flora.ts`'s `FLORA_FLAVORS` for "flora".
+ * — all 15 now have real art, ripped from the same sheet by
+ * packages/web/scripts/rip_crop_tiles.py; before that only the four
+ * original berries did and the other eleven fell back to
+ * `FLAVOR_FG`/`FLAVOR_GLYPH`'s colored-glyph rendering) or `flora.ts`'s
+ * `FLORA_FLAVORS` for "flora".
  * Ripe (fruit-visible) stage only; renderer.ts scales opacity by the
  * tile's own stock so a depleted patch still visually fades like it did
  * before this art existed.

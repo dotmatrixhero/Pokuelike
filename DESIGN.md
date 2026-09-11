@@ -15937,3 +15937,38 @@ wild archetype human was **not** seen on screen — they are far too rare to
 wait for, and the debug hook that would force one is still the open TODO it
 was last round. What is shared with the verified player path is the whole
 draw call; what is unverified is only that specific agent reaching it.
+
+## All 15 crops have tile art
+
+Direct ask: "Add crops." The art audit found `crops.ts` defines 15 real
+crops but only the four original berries (Oran, Pecha, Sitrus, Cheri) ever
+had tiles — the other eleven fell through to `FLAVOR_GLYPH`'s coloured
+letter, including four the cooking recipes actually consume (apple, potato,
+tomato, corn).
+
+Ripped from the same `berry sprites.png` the existing four came from
+(`packages/web/scripts/rip_crop_tiles.py`): 4 bands x 16 plants, three
+growth stages each, duplicated across two adjacent columns. Only the ripe
+stage is taken, matching the existing four. Grid lines are measured, not
+assumed. Background comes off by flooding in from the cell border rather
+than keying out every white pixel, so highlights and pale petals *inside* a
+plant survive.
+
+These are fantasy berry plants, not crop photographs, so each mapping is a
+judgement about what reads as that crop at ~20 pixels. Corn (a yellow cob),
+apple (a tree hung with red fruit), wheat (tall golden blades) and mushroom
+(grey caps) are strong; rice and groundnut are the closest available shape.
+Pumpkin was picked twice — the first choice rendered as a red-and-yellow
+flowering plant, which is worse than a glyph because it actively misleads;
+swapped for a ridged golden gourd after putting five candidates side by
+side. Every tile was checked on a checkerboard against the four existing
+berries as a control, to confirm both the transparency and that the new art
+sits on the same soil-mound baseline.
+
+**Verification.** All 15 `CROP_IDS` now resolve to a real file; web build
+clean. Live in a browser (Playwright, Watch mode): the page fetched
+`food_herbs.png`, `food_mango.png` and `food_rice.png` with 200s while
+rendering, alongside the pre-existing berries — three of the new crops
+genuinely drawn on screen rather than glyph-substituted. Only 7 of 15
+appeared in that run because crop growth is biome- and season-gated, which
+is the system working, not a gap.
