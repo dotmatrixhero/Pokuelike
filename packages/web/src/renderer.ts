@@ -1,4 +1,4 @@
-import type { Agent, TerrainKind, Tile, Vision, World, Layer } from "@pokuelike/engine";
+import type { Agent, TerrainKind, Tile, Vec2, Vision, World, Layer } from "@pokuelike/engine";
 import { biomeWeightsAt, findPlayer, isLitTile, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
@@ -1358,26 +1358,69 @@ export function drawEventPopups(ctx: CanvasRenderingContext2D, popups: readonly 
 }
 
 /**
- * A quick bright square flash on whichever tile a move just hit (or missed
- * at — see moveEffects.ts's own doc comment) — direct ask: "light up the
- * square it effects." Drawn as a fading ring/glow rather than a flat fill so
- * it reads as an impact instead of just recoloring the tile.
+ * A quick, bright flash on whichever tile a move just targeted — direct
+ * ask: "light up the square it effects," sharpened later to "I cannot see
+ * what units are attacking what tiles... flash the space red." A landed
+ * hit fills the whole tile red (unmissable — this is the "something took
+ * damage here" signal); a clean miss only draws the fading ring the
+ * original version always used, dimmer, so a miss still marks the
+ * targeted tile without reading as real damage.
  */
 export function drawMoveFlashes(ctx: CanvasRenderingContext2D, flashes: readonly ActiveMoveFlash[]): void {
   if (flashes.length === 0) return;
   ctx.save();
   for (const flash of flashes) {
-    const cx = flash.pos.x * TILE_SIZE + TILE_SIZE / 2;
-    const cy = flash.pos.y * TILE_SIZE + TILE_SIZE / 2;
-    // Expands slightly as it fades — a real, brief impact pulse.
-    const radius = TILE_SIZE * (0.3 + (1 - flash.fade) * 0.35);
-    ctx.globalAlpha = Math.max(0, flash.fade) * 0.75;
-    ctx.strokeStyle = "#fff8c8";
-    ctx.lineWidth = Math.max(1, TILE_SIZE * 0.08 * flash.fade);
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.stroke();
+    const px = flash.pos.x * TILE_SIZE;
+    const py = flash.pos.y * TILE_SIZE;
+    const cx = px + TILE_SIZE / 2;
+    const cy = py + TILE_SIZE / 2;
+    if (flash.hit) {
+      // A solid red fill, fading out — the actual "you got hit here" tell.
+      ctx.globalAlpha = Math.max(0, flash.fade) * 0.55;
+      ctx.fillStyle = "#ff2d2d";
+      ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+      // A brighter, fully-opaque outline on top so the tile reads clearly
+      // even once the fill has mostly faded.
+      ctx.globalAlpha = Math.max(0, flash.fade);
+      ctx.strokeStyle = "#ff2d2d";
+      ctx.lineWidth = Math.max(1, TILE_SIZE * 0.1 * flash.fade);
+      ctx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+    } else {
+      // A miss: still real news ("something is attacking this tile"), but
+      // dimmer and outline-only so it never reads as landed damage.
+      const radius = TILE_SIZE * (0.3 + (1 - flash.fade) * 0.35);
+      ctx.globalAlpha = Math.max(0, flash.fade) * 0.5;
+      ctx.strokeStyle = "#ff8a8a";
+      ctx.lineWidth = Math.max(1, TILE_SIZE * 0.07 * flash.fade);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
+  ctx.restore();
+}
+
+/**
+ * Direct ask: "Even the targeting for allies should like show the cone or
+ * the aoe of a target." While picking a tile for a move — the player's own
+ * or a commanded ally's — this outlines every tile the move would actually
+ * resolve against (`resolveShape`'s real output for the hovered tile, not
+ * just the single tile the cursor sits on), so a cone/line/blast move's
+ * true reach is visible before it's committed, not just guessed at. A
+ * steady cyan wash, deliberately distinct from `drawMoveFlashes`'s red (a
+ * live outcome) and `drawSelectionRing`'s yellow (whose agent is
+ * inspected) — this is a preview of something not yet real.
+ */
+export function drawTargetPreview(ctx: CanvasRenderingContext2D, tiles: readonly Vec2[]): void {
+  if (tiles.length === 0) return;
+  ctx.save();
+  ctx.fillStyle = "#22d3ee";
+  ctx.globalAlpha = 0.28;
+  for (const t of tiles) ctx.fillRect(t.x * TILE_SIZE, t.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+  ctx.globalAlpha = 0.85;
+  ctx.strokeStyle = "#22d3ee";
+  ctx.lineWidth = 1.5;
+  for (const t of tiles) ctx.strokeRect(t.x * TILE_SIZE + 1, t.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
   ctx.restore();
 }
 
