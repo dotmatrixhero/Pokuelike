@@ -3,7 +3,9 @@
 A Pokémon-flavored roguelike: living ecosystems of need-driven Pokémon
 (herding, hunting, foraging) plus a grid-tactical combat system where moves
 are spec'able area shapes. See [DESIGN.md](./DESIGN.md) for the full pitch
-and architecture, [TODO.md](./TODO.md) for open design questions.
+and architecture, [TODO.md](./TODO.md) for open design questions, and
+[ART_PIPELINE.md](./ART_PIPELINE.md) for how sprite sheets get ripped and
+rendered.
 
 The original C++/libtcod prototype is archived at
 [`legacy-cpp/`](./legacy-cpp/) — this is a from-scratch rewrite in
