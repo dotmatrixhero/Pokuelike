@@ -148,11 +148,28 @@ export const RECIPES: Record<string, RecipeDef> = {
   // while near you can craft with combos of crops and berries." Each needs
   // a real nearby fire (`player.ts`'s "lightFire" action deploys one);
   // `requiresNearFire: true` is the last positional arg on every one below.
-  // Not known at start, same as every other non-trivial recipe here.
-  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, false, 1, true),
-  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, false, 1, true),
-  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, false, 1, true),
-  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, false, 1, true),
+  //
+  // Direct report, live-verified: "i dont see fire crafting or cooking
+  // recipes as an option" — a real reachability bug, not a UI glitch.
+  // These originally shipped `knownAtStart: false`, on the same footing as
+  // axe/machete/knappedFlint ("learned later... M6+: examine, being
+  // taught, a written recipe" per this file's own top doc comment) — but
+  // that discovery mechanic was never built, for ANY recipe, so
+  // `knownAtStart: false` here meant "permanently unreachable," not
+  // "reachable once you find X." Confirmed live: a fresh spawn's
+  // `knownRecipes` was `["fiber","cordage","boundHaft","torch","club",
+  // "poultice","foragePouch"]` — none of the four below, ever. Flipped to
+  // `true`, same fix and same reasoning as `foragePouch` just above: every
+  // ingredient here is a gatherable crop, nothing else gates them, and the
+  // user's own original ask ("building a fire you can deploy") reads as
+  // day-one survival kit, not a late-game unlock — axe/machete/
+  // knappedFlint are left exactly as they were; that's a real, separate,
+  // still-open gap (nothing discovers ANY non-knownAtStart recipe), not
+  // something this fix should paper over.
+  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, true, 1, true),
+  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, true, 1, true),
+  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, true, 1, true),
+  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, true, 1, true),
 };
 
 export const KNOWN_AT_START: string[] = Object.values(RECIPES).filter((r) => r.knownAtStart).map((r) => r.id);

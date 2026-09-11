@@ -9318,3 +9318,44 @@ HUD message "You cross into a new stretch of land," no console errors.
 
 Full suite: engine 1511/1511 (7 new), data 400/400, web build clean,
 runner typecheck clean.
+
+## Fixed: cooking recipes were permanently unreachable, not hidden by a UI bug
+
+Direct report: *"i dont see fire crafting or cooking recipes as an
+option."* Verified live before touching anything (per the standing rule:
+reproduce before diagnosing) — a completely fresh cave spawn's real
+`knownRecipes` was `["fiber","cordage","boundHaft","torch","club",
+"poultice","foragePouch"]`. None of the four cooking dishes were ever in
+it, on any run, ever — not a rendering/gating glitch in the pack menu,
+which correctly only lists whatever `knownRecipes` actually contains.
+
+Root cause: the cooking round shipped all four dishes with
+`knownAtStart: false`, on the same footing as axe/machete/knappedFlint —
+crafting.ts's own top doc comment frames those as "learned later (M6+:
+examine, being taught, a written recipe)." That discovery mechanic was
+never built, for any recipe, so `knownAtStart: false` has always meant
+"permanently unreachable," not "reachable once you find X" — a real,
+broader, pre-existing gap this report just happened to surface first via
+cooking specifically.
+
+Fixed the same way `foragePouch` was fixed earlier this session: flipped
+`roastedApple`/`berryStew`/`potatoMash`/`vegetableStew` to
+`knownAtStart: true`. Every one of their ingredients is a gatherable crop
+(apple, oran, pecha, potato, tomato, corn) — nothing else was gating them
+— and the user's own original ask ("building a fire you can deploy... to
+cook") read as day-one survival kit, not a late-game unlock, the same
+reasoning that justified the pouch fix. Left axe/machete/knappedFlint/
+camouflageCloak exactly as they were — that's the real, separate,
+still-open "no recipe discovery mechanic exists at all" gap, not
+something this fix should quietly paper over; noted here rather than
+fixed by default.
+
+Live-verified (Playwright, real dev server, completely fresh spawn — no
+inventory/recipe manipulation): pack menu's Make list now shows all four
+dishes with correct missing-ingredient text; separately confirmed the
+existing "needs a fire nearby" gate still fires correctly when the
+ingredient is present but no fire is (gave the player a real apple, no
+fire nearby — showed "apple · needs a fire nearby", not craftable).
+
+Full suite: data 400/400 (including the reachability test's own printed
+craft order, which now visibly includes all four dishes at the end).
