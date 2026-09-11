@@ -15,6 +15,12 @@ import type { Agent, World } from "../src/types.js";
  * you more rapport when offered. heals as well as satisfies hunger." Plus
  * the scoping follow-up: fixed named dishes, and a fire that "burns out
  * but you can feed it more wood to increase fuel."
+ *
+ * The original "torch + 2 deadwood, instant" `lightFire` verb was later
+ * superseded by a direct follow-up: "get rid of fire building as a direct
+ * action - make it a crafting thing that sets down a campfire" — a real
+ * crafted `campfire` item you place instead. This file's own "lightFire"
+ * describe block below was rewritten in place for that, not left stale.
  */
 
 function human(x: number, y: number, extra: Partial<Agent> = {}): Agent {
@@ -38,84 +44,65 @@ function openWorld(): World {
   const world = createWorld(20, 20, 1);
   world.items = {
     torch: { key: "torch", name: "Torch", weight: 2, slot: "held", light: true },
+    campfire: { key: "campfire", name: "Campfire", weight: 3 },
     roastedApple: { key: "roastedApple", name: "Roasted Apple", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
   };
   return world;
 }
 
-describe('Direct ask: "building a fire you can deploy... to cook" — lightFire', () => {
-  it("requires a held torch and 2 deadwood, consumes only the deadwood", () => {
+describe('Direct follow-up: "get rid of fire building as a direct action - make it a crafting thing that sets down a campfire" — placeCampfire', () => {
+  it("consumes one carried campfire item", () => {
     const world = openWorld();
     const me = human(5, 5);
-    addItem(me, "torch", 1, 2);
-    addItem(me, "deadwood", 2, 2);
+    addItem(me, "campfire", 1, 3);
     world.agents.push(me);
-    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(true);
-    expect(countOf(me, "deadwood")).toBe(0);
-    expect(me.equipment?.held).toBe("torch"); // the tool, not consumed
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(true);
+    expect(countOf(me, "campfire")).toBe(0);
     expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("fire");
     expect(tileAt(world, "surface", 6, 5)?.burnTicksRemaining).toBe(FIRE_BURN_TICKS);
   });
 
-  it("fails without a held torch", () => {
+  it("fails with no campfire carried", () => {
     const world = openWorld();
     const me = human(5, 5);
-    addItem(me, "deadwood", 2, 2);
     world.agents.push(me);
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(false);
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(false);
     expect(tileAt(world, "surface", 6, 5)?.terrain).not.toBe("fire");
   });
 
-  it("fails with fewer than 2 deadwood", () => {
+  it("lights on bare floor — deliberately bypasses fire.ts's own FLAMMABLE_TERRAIN gate (fueled by the kit, not the ground)", () => {
     const world = openWorld();
     const me = human(5, 5);
-    addItem(me, "torch", 1, 2);
-    addItem(me, "deadwood", 1, 2);
+    addItem(me, "campfire", 1, 3);
     world.agents.push(me);
-    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(false);
-    expect(countOf(me, "deadwood")).toBe(1);
-  });
-
-  it("lights on bare floor — deliberately bypasses fire.ts's own FLAMMABLE_TERRAIN gate (fueled by carried wood, not the ground)", () => {
-    const world = openWorld();
-    const me = human(5, 5);
-    addItem(me, "torch", 1, 2);
-    addItem(me, "deadwood", 2, 2);
-    world.agents.push(me);
-    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
     expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("floor"); // not flammable per fire.ts's own rules
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(true);
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(true);
     expect(tileAt(world, "surface", 6, 5)?.terrain).toBe("fire");
   });
 
   it("fails against water or a wall", () => {
     const world = openWorld();
     const me = human(5, 5);
-    addItem(me, "torch", 1, 2);
-    addItem(me, "deadwood", 4, 2);
+    addItem(me, "campfire", 2, 3);
     world.agents.push(me);
-    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
     setTile(world, "surface", 6, 5, "water");
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(false);
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(false);
     setTile(world, "surface", 6, 5, "wall");
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(false);
-    expect(countOf(me, "deadwood")).toBe(4); // neither attempt spent any wood
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(false);
+    expect(countOf(me, "campfire")).toBe(2); // neither attempt spent one
   });
 
-  it('feeding an already-burning tile ADDS fuel rather than just refreshing it — direct follow-up: "feed it more wood to increase fuel"', () => {
+  it('feeding an already-burning tile ADDS fuel rather than just refreshing it — the original verb\'s own follow-up, carried over: "feed it more wood to increase fuel"', () => {
     const world = openWorld();
     const me = human(5, 5);
-    addItem(me, "torch", 1, 2);
-    addItem(me, "deadwood", 4, 2);
+    addItem(me, "campfire", 2, 3);
     world.agents.push(me);
-    applyPlayerAction(world, me, { kind: "equip", itemKey: "torch" });
-    applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 });
+    applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 });
     const tile = tileAt(world, "surface", 6, 5)!;
     tile.burnTicksRemaining = 3; // let it burn down some
-    expect(applyPlayerAction(world, me, { kind: "lightFire", dx: 1, dy: 0 })).toBe(true);
+    expect(applyPlayerAction(world, me, { kind: "placeCampfire", dx: 1, dy: 0 })).toBe(true);
     expect(tile.burnTicksRemaining).toBe(3 + FIRE_BURN_TICKS); // additive, not reset to FIRE_BURN_TICKS alone
+    expect(countOf(me, "campfire")).toBe(0);
   });
 });
 

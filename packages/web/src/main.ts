@@ -604,10 +604,9 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
     }
     case "drop":
       return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
-    case "lightFire": {
-      if (ok) return "You build up a fire.";
-      if (player.equipment?.held !== "torch") return "You need a torch in hand.";
-      if (countOf(player, "deadwood") < 2) return "Not enough deadwood — you need 2.";
+    case "placeCampfire": {
+      if (ok) return "You set down a campfire.";
+      if (countOf(player, "campfire") < 1) return "You don't have a campfire to place.";
       return "Nowhere to put it there.";
     }
     case "loot":
@@ -734,6 +733,13 @@ function openPackMenu(): void {
       actions.push({ label: held ? "Put away" : "Hold", onTap: () => playerAct(held ? { kind: "stow" } : { kind: "equip", itemKey: item.itemKey }) });
     } else if (def?.slot === "worn" && !worn) {
       actions.push({ label: "Wear", onTap: () => playerAct({ kind: "equip", itemKey: item.itemKey }) });
+    } else if (item.itemKey === "campfire") {
+      // Direct ask: "get rid of fire building as a direct action - make it
+      // a crafting thing that sets down a campfire" — placing one is a
+      // per-item pack action now, same as Offer, not a raw always-there
+      // key (this exact codebase already moved Eat/Offer the same way,
+      // on the same "too many buttons" reasoning).
+      actions.push({ label: "Place", onTap: () => playerAct({ kind: "placeCampfire", dx: lastFacing.dx, dy: lastFacing.dy }) });
     }
     actions.push({ label: "Drop", onTap: () => playerAct({ kind: "drop", itemKey: item.itemKey }) });
     packMenuBodyEl.appendChild(actionsRowEl(label, actions));
@@ -1129,11 +1135,6 @@ window.addEventListener("keydown", (e) => {
     attemptAttack();
     return;
   }
-  if (e.key === "v") {
-    e.preventDefault();
-    playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
-    return;
-  }
   // Direct ask: "can't loot or butcher dead units. need to be able to -
   // maybe you need a knife to do more but that should be a thing."
   if (e.key === "o") {
@@ -1476,7 +1477,6 @@ document.querySelectorAll<HTMLButtonElement>("#hud-pad button, #hud-pack-btn").f
       runActivity();
     } else if (act === "pack") openPackMenu();
     else if (act === "attack") attemptAttack();
-    else if (act === "lightFire") playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
     else if (act === "useStairs") tryUseStairs();
     else if (act === "wait" || act === "drink" || act === "crouch") playerAct({ kind: act });
   });

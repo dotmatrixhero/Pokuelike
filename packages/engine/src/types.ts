@@ -657,22 +657,23 @@ export type PlayerAction =
   /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
   | { kind: "drop"; itemKey: string }
   /**
-   * Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
-   * something) to cook, and while near you can craft with combos of crops
-   * and berries" — and the scoping follow-up on how it burns: "burns out
-   * but you can feed it more wood to increase fuel." Requires a held torch
-   * and 2 carried deadwood (consumed — the torch itself stays equipped, as
-   * the tool, not the fuel); ignites the adjacent tile in the given
-   * direction, or — if that tile is already burning — adds another
-   * `FIRE_BURN_TICKS` worth of fuel to it rather than requiring it to burn
-   * out first. Unlike combat's own `terrainBurn`/`igniteNear` (fire.ts),
-   * this deliberately does NOT require the target tile's own terrain to be
-   * flammable: a torch-lit campfire is fueled by the wood you're carrying,
-   * not by the ground catching, so it can be lit on bare floor. Still
-   * fails against a wall, water, or anything else not walkable. Fails
-   * (still costs the turn) without a held torch or without 2 deadwood.
+   * Direct ask, superseding the original "torch + 2 deadwood, instant"
+   * `lightFire` verb: "get rid of fire building as a direct action - make
+   * it a crafting thing that sets down a campfire." The fire itself is
+   * now a real crafted item (`crafting.ts`'s `campfire` recipe/item) you
+   * carry and then place — this action just does the placing, consuming
+   * one carried `campfire` item (fails, still costs the turn, without
+   * one). Ignites the adjacent tile in the given direction, or — if
+   * that tile is already burning — adds another `FIRE_BURN_TICKS` worth
+   * of fuel to it, same "burns out but you can feed it more" shape the
+   * original verb had. Unlike combat's own `terrainBurn`/`igniteNear`
+   * (fire.ts), this deliberately does NOT require the target tile's own
+   * terrain to be flammable: a deployed campfire is fueled by the kit
+   * you're carrying, not by the ground catching, so it can be placed on
+   * bare floor. Still fails against a wall, water, or anything else not
+   * walkable.
    */
-  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  | { kind: "placeCampfire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   /**
    * Direct ask: "can't loot or butcher dead units. need to be able to."
    * Takes one item off a fainted-or-dead agent's own carried `inventory`

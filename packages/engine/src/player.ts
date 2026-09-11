@@ -319,28 +319,31 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       }
       return true;
     }
-    case "lightFire": {
-      // Direct ask: "building a fire you can deploy (ex. torch + 2x wood or
-      // something) to cook." Torch is the tool (stays equipped), deadwood
-      // is the fuel actually spent.
-      if (agent.equipment?.held !== "torch" || countOf(agent, "deadwood") < 2) return false;
+    case "placeCampfire": {
+      // Direct ask: "get rid of fire building as a direct action - make it
+      // a crafting thing that sets down a campfire." Consumes a crafted
+      // `campfire` item (`crafting.ts`) rather than a held torch + raw
+      // deadwood — the fire-starting is done by the time you're carrying
+      // one; this action just plants it.
+      if (countOf(agent, "campfire") < 1) return false;
       const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
       const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
       if (!tile || !tile.walkable || tile.terrain === "water") return false;
-      removeItem(agent, "deadwood", 2);
+      removeItem(agent, "campfire", 1);
       if (tile.terrain === "fire") {
-        // Direct follow-up: "burns out but you can feed it more wood to
-        // increase fuel" — genuinely additive, not just a refresh-to-full
-        // (fire.ts's own `igniteTile`, used by combat's terrainBurn, resets
-        // an already-burning tile rather than stacking; deliberately
-        // different here, since this is a player choosing to keep a fire
-        // going, not a second hit landing on a burning target).
+        // Direct follow-up (carried over from the original verb): "burns
+        // out but you can feed it more wood to increase fuel" —
+        // genuinely additive, not just a refresh-to-full (fire.ts's own
+        // `igniteTile`, used by combat's terrainBurn, resets an already-
+        // burning tile rather than stacking; deliberately different here,
+        // since this is a player choosing to keep a fire going, not a
+        // second hit landing on a burning target).
         tile.burnTicksRemaining = (tile.burnTicksRemaining ?? 0) + FIRE_BURN_TICKS;
       } else {
         // Deliberately bypasses fire.ts's own FLAMMABLE_TERRAIN gate — a
-        // torch-lit campfire is fueled by the wood in your pack, not by the
-        // ground catching, so (unlike a combat-caused fire) it can be lit
-        // on bare floor, not just vegetation.
+        // deployed campfire is fueled by the kit in your pack, not by the
+        // ground catching, so (unlike a combat-caused fire) it can be
+        // placed on bare floor, not just vegetation.
         const from = tile.terrain;
         setTile(world, agent.layer, targetPos.x, targetPos.y, "fire");
         tileAt(world, agent.layer, targetPos.x, targetPos.y)!.burnTicksRemaining = FIRE_BURN_TICKS;

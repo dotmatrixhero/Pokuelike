@@ -9780,3 +9780,48 @@ weren't).
 Full engine suite: 1546/1546 (unchanged — this round touched only
 `index.html`/`main.ts`). Real `pnpm --filter @pokuelike/web build`
 clean.
+
+## Built: wishlist item 5 — fire-building is a real crafted item now, not an instant swing
+
+Direct ask: *"get rid of fire building as a direct action - make it a
+crafting thing that sets down a campfire."* The original `lightFire`
+verb ('v' key / 🔥 HUD button) let a torch-holder burn 2 raw deadwood
+into an instant fire on the spot — no crafting step at all, just an
+ordinary directional swing with a resource cost. This round supersedes
+it entirely: a new `campfire` recipe (`deadwood ×3 + flint ×1`, 6
+turns, `knownAtStart: true` — day-one survival kit, same reasoning as
+the cooking recipes and `foragePouch` above) produces a real `campfire`
+item you carry; a new `{kind: "placeCampfire"}` `PlayerAction` consumes
+one to actually ignite the ground (same terrain rules as before: bare
+floor is fine, water/wall aren't, feeding an already-burning tile is
+additive not a reset).
+
+**Where placing lives.** Not a new raw key — the pack menu's per-item
+row, a new "Place" action next to Drop, the same shape "Eat"/"Offer"
+already use for a carried food item. This mirrors a real precedent
+already in this codebase: Eat/Offer used to be raw-key-adjacent too,
+until a direct ask ("we're getting too many buttons... let's make offer
+and eat only available from inventory after you gather") moved them
+into Pack-only. Placing a specific crafted item is exactly that same
+shape, so it got the same treatment — the old 'v' key, its HUD button,
+and its `#hud-keys` legend entry are gone, not just repointed.
+
+**Tests.** `cooking.test.ts`'s old `lightFire` describe block rewritten
+in place for `placeCampfire` (consumes the crafted item instead of
+torch+deadwood; same terrain/refuel cases carried over) — 5 tests, all
+passing. Full engine suite: 1545/1545 (net -1 from the old suite: 6
+`lightFire` cases became 5 `placeCampfire` ones, the torch-specific
+"fails without a held torch" case no longer applies since a torch was
+never required to place one). Data package (recipe reachability among
+them): 400/400. `tsc --noEmit` clean on engine; real
+`pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**: crafted a campfire from raw deadwood
++ flint through the pack menu's own "tap to make" flow (its normal
+auto-advancing turn loop, not a manual poke — an earlier pass of this
+same check broke the in-progress craft by sending extra `wait` inputs
+on top of that loop, since any action other than `continue` abandons an
+activity in progress; redone without interfering), then opened the pack
+again and tapped the newly-made Campfire's "Place" button — it consumed
+the item, ignited a real `fire` tile, and the HUD read "You set down a
+campfire."

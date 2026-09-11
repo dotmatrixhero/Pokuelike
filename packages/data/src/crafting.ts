@@ -103,6 +103,14 @@ export const ITEMS: Record<string, ItemDef> = {
   poultice: { key: "poultice", name: "Poultice", weight: 1 },
   foragePouch: { key: "foragePouch", name: "Forage pouch", weight: 1, capacity: 8 },
   camouflageCloak: { key: "camouflageCloak", name: "Camouflage cloak", weight: 2, slot: "worn", threat: -0.4 },
+  // Direct ask: "get rid of fire building as a direct action - make it a
+  // crafting thing that sets down a campfire." Supersedes the original
+  // "torch + 2 deadwood, instant" `lightFire` verb — the fire-starting
+  // work now happens at the crafting bench (this item), not on the spot;
+  // `player.ts`'s "placeCampfire" action just consumes one of these to
+  // plant it. No `slot` — it's a placeable kit, not something you hold
+  // or wear.
+  campfire: { key: "campfire", name: "Campfire", weight: 3 },
   // Direct ask: "you know im gonna have to add cooking lol. building a fire
   // you can deploy... to cook, and while near you can craft with combos of
   // crops and berries. cooked food gets you more rapport when offered.
@@ -143,6 +151,13 @@ export const RECIPES: Record<string, RecipeDef> = {
   axe: recipe("axe", "Axe", [["boundHaft", 1], ["knappedFlint", 2]], 14, false),
   machete: recipe("machete", "Machete", [["boundHaft", 1], ["knappedFlint", 1], ["cordage", 1]], 11, false),
   poultice: recipe("poultice", "Poultice", [["herbs", 1], ["lichen", 1]], 5, true),
+  // Direct ask: "get rid of fire building as a direct action - make it a
+  // crafting thing that sets down a campfire." `knownAtStart: true` —
+  // this is day-one survival kit (cooking already needs a deployed fire,
+  // and every input here is `knownAtStart` too), same reasoning as
+  // `foragePouch`/the cooking recipes above; deadwood for fuel, flint
+  // for the spark.
+  campfire: recipe("campfire", "Campfire", [["deadwood", 3], ["flint", 1]], 6, true),
   // Direct ask: "i also want to craft a backpack eather early on if
   // possible, if only a small one, that increases your capacity" — its
   // inputs (cordage, fiber) are both already `knownAtStart`, so this was
