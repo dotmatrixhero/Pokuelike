@@ -11065,7 +11065,34 @@ Direct report: *"framerate from all the rendering is suffering lol."*
       reported 22.4 fps, *better* than the honest 20.1, because it had stopped
       drawing the ground at all. `drawGroundBacking` now flags a pending-art
       frame and `groundLayerCanvas` refuses to store it.
-- [ ] Next candidates if it is still not enough: the main tile loop still walks
-      all 5400 tiles every frame to draw obstacles/crops/tints, and the whole
-      map is rendered regardless of what is actually on screen — a viewport
-      cull would be the big one.
+- [x] **Viewport cull** (next round). The canvas is the whole world at
+      TILE_SIZE per tile — 1800x1200 for a 90x60 map — and `#canvas-wrap`
+      scrolls it while CSS scales it, so every frame painted all 5400 tiles to
+      show a fraction of them. The browser only COMPOSITES the visible part; it
+      does not skip the paint. main.ts now hands the renderer the visible rect
+      each frame (`setVisibleRect`), and the tile loop, both scatter passes,
+      the fog loop, the agent loop, the full-canvas fills and every cached-layer
+      blit are all bounded by it.
+- [x] Margins are deliberately generous (3 tiles, 6 on top): standing sprites
+      are bottom-anchored and up to 1.7 tiles tall, scatter decals jitter half a
+      tile, and a cactus is four tiles tall — art whose own tile is off-screen
+      can still reach onto the screen.
+- [x] Verified painted, not just faster: sampled the visible region at three
+      scroll positions and counted unpainted pixels — 0.09% to 0.12%, which is
+      sprite outlines, not gaps. Checked the scrolled frame by eye for torn
+      edges, and re-checked play mode since the fog loop is culled too.
+- [ ] Still uncapped: `waterSignature` and `sandSignature` walk all tiles every
+      frame to check the caches. Measured negligible (~0.05ms) but they are the
+      last full-grid work per frame.
+
+### Render perf, cumulative
+
+| | start | + layer caches | + viewport cull |
+|---|---|---|---|
+| paused | 9.2 | 20.1 | **27.2** |
+| default speed | 7.7 | 17.7 | **22.3** |
+| max sim speed | 5.6 | 7.9 | **9.0** |
+
+Headless software Chromium, same harness throughout. Max sim speed gains least
+because the SIM dominates there, not rendering — worth knowing before chasing
+more draw-side wins.

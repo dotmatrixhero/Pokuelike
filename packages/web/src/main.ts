@@ -1,6 +1,6 @@
 import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
-import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -2417,6 +2417,16 @@ function frame(): void {
   // events happening around the map") — every other currently-tracked
   // battle, shown dimmer, clickable (see the canvas click handler above).
   refreshRegionBanner();
+  // Tell the renderer what is actually on screen before it draws. The canvas
+  // is the whole world (TILE_SIZE per tile) and `#canvas-wrap` scrolls it
+  // while CSS scales it by `zoom`, so without this every frame paints all of
+  // a 90x60 map to show a fraction of it.
+  setVisibleRect({
+    left: canvasWrap.scrollLeft / zoom,
+    top: canvasWrap.scrollTop / zoom,
+    width: canvasWrap.clientWidth / zoom,
+    height: canvasWrap.clientHeight / zoom,
+  });
   drawWorld(
     ctx,
     world,

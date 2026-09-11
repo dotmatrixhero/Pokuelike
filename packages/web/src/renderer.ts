@@ -136,7 +136,31 @@ function drawVignetteLayer(ctx: CanvasRenderingContext2D, world: World): void {
     }
     vignetteLayerCache.set(world, layer);
   }
-  ctx.drawImage(layer, 0, 0);
+  blitVisible(ctx, layer, world);
+}
+
+/** `fillRect` over the on-screen slice only — same reasoning as `blitVisible`. */
+function fillVisible(ctx: CanvasRenderingContext2D, world: World): void {
+  const view = culledBounds(world);
+  const w = (view.x1 - view.x0) * TILE_SIZE;
+  const h = (view.y1 - view.y0) * TILE_SIZE;
+  if (w <= 0 || h <= 0) return;
+  ctx.fillRect(view.x0 * TILE_SIZE, view.y0 * TILE_SIZE, w, h);
+}
+
+/**
+ * Blits only the on-screen slice of a full-map cached layer. The source and
+ * destination rects are identical — this is a crop, not a transform — it just
+ * avoids pushing 1800x1200 of pixels when a fraction of that is visible.
+ */
+function blitVisible(ctx: CanvasRenderingContext2D, layer: HTMLCanvasElement, world: World): void {
+  const view = culledBounds(world);
+  const sx = view.x0 * TILE_SIZE;
+  const sy = view.y0 * TILE_SIZE;
+  const w = (view.x1 - view.x0) * TILE_SIZE;
+  const h = (view.y1 - view.y0) * TILE_SIZE;
+  if (w <= 0 || h <= 0) return;
+  ctx.drawImage(layer, sx, sy, w, h, sx, sy, w, h);
 }
 
 /**
@@ -458,7 +482,7 @@ function drawElevationShade(ctx: CanvasRenderingContext2D, world: World): void {
  * every base is down, it survives in all four directions.
  */
 function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
-  ctx.drawImage(groundLayerCanvas(world), 0, 0);
+  blitVisible(ctx, groundLayerCanvas(world), world);
   // The scatter passes stay LIVE, outside the cache: their contact shadows and
   // golden rim track the sun, and baking them would freeze both at whatever
   // hour the cache happened to be built. They cost ~3ms of the ~40ms this
@@ -531,8 +555,9 @@ type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: numb
 
 /** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
 function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
+  const view = culledBounds(world);
+  for (let y = view.y0; y < view.y1; y++) {
+    for (let x = view.x0; x < view.x1; x++) {
       const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
       if (!decal) continue;
       const scale = TILE_SIZE / GROUND_CELL;
@@ -1089,7 +1114,7 @@ function drawWaterLayer(ctx: CanvasRenderingContext2D, world: World): void {
     perLayer[activeViewLayer] = layer;
   }
   const composed = waterLayerFrame(layer, frame, index);
-  if (composed) ctx.drawImage(composed, 0, 0);
+  if (composed) blitVisible(ctx, composed, world);
 }
 
 export type RenderStyle = "tile" | "ascii";
@@ -1265,8 +1290,9 @@ function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | u
   const explored = vision.explored[activeViewLayer];
   const underground = activeViewLayer !== "surface";
   ctx.save();
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
+  const view = culledBounds(world);
+  for (let y = view.y0; y < view.y1; y++) {
+    for (let x = view.x0; x < view.x1; x++) {
       const idx = y * world.width + x;
       if (vision.visible.has(idx)) {
         if (!underground || isLitTile(world, activeViewLayer, { x, y })) continue;
@@ -1280,6 +1306,56 @@ function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | u
     }
   }
   ctx.restore();
+}
+
+/**
+ * The slice of the map actually on screen, in TILES, set once per frame by
+ * main.ts from the scroll container and the zoom factor.
+ *
+ * The canvas is the whole world at TILE_SIZE per tile — 1800x1200 for a 90x60
+ * map — and `#canvas-wrap` scrolls it while CSS scales it. So every frame used
+ * to paint all 5400 tiles regardless of the handful actually visible. The
+ * browser only COMPOSITES the visible part; it does not skip the paint.
+ *
+ * Margins are generous on purpose. Standing sprites are bottom-anchored and up
+ * to 1.7 tiles tall, scatter decals jitter half a tile in each direction, and a
+ * cactus is four tiles tall — anything whose tile is off-screen can still have
+ * art reaching onto it, so the loop bounds are grown well past the strict rect
+ * rather than clipping something's head off at the edge.
+ */
+let visibleRect: { x0: number; y0: number; x1: number; y1: number } | undefined;
+
+/** Tiles of slack around the visible rect — see `visibleRect`. Top gets more because tall art is drawn upward from its own tile. */
+const CULL_MARGIN = 3;
+const CULL_MARGIN_TOP = 6;
+
+/** Called by main.ts each frame with the scroll container's rect in CANVAS pixels. `undefined` disables culling (used by anything that renders the whole map at once). */
+export function setVisibleRect(rect: { left: number; top: number; width: number; height: number } | undefined): void {
+  visibleRect = rect
+    ? {
+        x0: Math.floor(rect.left / TILE_SIZE) - CULL_MARGIN,
+        y0: Math.floor(rect.top / TILE_SIZE) - CULL_MARGIN_TOP,
+        x1: Math.ceil((rect.left + rect.width) / TILE_SIZE) + CULL_MARGIN,
+        y1: Math.ceil((rect.top + rect.height) / TILE_SIZE) + CULL_MARGIN,
+      }
+    : undefined;
+}
+
+/** The tile range to iterate for `world`, clamped to the map and to `visibleRect`. */
+function culledBounds(world: World): { x0: number; y0: number; x1: number; y1: number } {
+  const r = visibleRect;
+  return {
+    x0: Math.max(0, r ? r.x0 : 0),
+    y0: Math.max(0, r ? r.y0 : 0),
+    x1: Math.min(world.width, r ? r.x1 : world.width),
+    y1: Math.min(world.height, r ? r.y1 : world.height),
+  };
+}
+
+/** Whether a tile is inside the culled range — for the per-agent check, where there is no loop to bound. */
+function inView(x: number, y: number): boolean {
+  const r = visibleRect;
+  return !r || (x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1);
 }
 
 export function drawWorld(
@@ -1342,7 +1418,7 @@ function drawWorldTiles(
   goldenAmount = Math.max(0, Math.min(1, (tint[0] - tint[2]) / 120));
 
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
-  ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  fillVisible(ctx, world);
   drawGroundLayer(ctx, world);
   drawWaterLayer(ctx, world);
 
@@ -1354,8 +1430,9 @@ function drawWorldTiles(
   ctx.font = `${TILE_SIZE * 0.55}px monospace, "Segoe UI Emoji", "Noto Color Emoji"`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  for (let y = 0; y < world.height; y++) {
-    for (let x = 0; x < world.width; x++) {
+  const view = culledBounds(world);
+  for (let y = view.y0; y < view.y1; y++) {
+    for (let x = view.x0; x < view.x1; x++) {
       const tile = surface[y * world.width + x]!;
       // Plain floor is the overwhelming majority of the map — a loud solid
       // fill (and elevation shading turning it increasingly bright) per
@@ -1538,6 +1615,8 @@ function drawWorldTiles(
   pruneStaleFacings(world);
   for (const agent of world.agents) {
     if (agent.layer !== activeViewLayer) continue;
+    // Off-screen agents are skipped before anything else — see `visibleRect`.
+    if (!inView(agent.pos.x, agent.pos.y)) continue;
     // Out of sight is out of the frame entirely — not dimmed, absent. A
     // Sandshrew you cannot see is not there yet.
     if (!tileVisible(world, vision, agent.pos.x, agent.pos.y)) continue;
@@ -2328,7 +2407,7 @@ function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
   ctx.save();
   ctx.globalCompositeOperation = "multiply";
   ctx.fillStyle = rgbToCss(tint);
-  ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  fillVisible(ctx, world);
   ctx.restore();
 }
 
