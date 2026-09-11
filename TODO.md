@@ -10732,3 +10732,61 @@ great. The rest are struggling."*
       produced the same 3-biome map. Not chased down; it blocked capturing the
       other 9 biomes on screen, which were verified by data + contact sheet
       instead of live render.
+
+## Built: dynamic lighting, layer 1 (day colour) and layer 3 (elevation light)
+
+Direct ask: *"I think the reason this image looks so beautiful is that the
+lighting is so well done. If there was a way to simulate it dynamically, holy
+shit. It would be perfect."* Chose **1 and 3** off the menu.
+
+- [x] **Measured the source art first, and it ruled out the obvious idea.**
+      Per-sprite luminance, lit side minus dark side:
+
+      | sprite | right − left | top − bottom |
+      |---|---|---|
+      | tree_1 | −0.1 | +43.2 |
+      | tree_3 | −0.0 | +41.6 |
+      | bush_4 | +0.0 | +37.1 |
+      | boulder_1 | −5.7 | +37.7 |
+
+      There is **no side light** — the art is lit from straight above. A sun
+      tracking across the sky casting rotating shadows would contradict every
+      sprite's own baked highlight. So: no directional light, no moving
+      shadows.
+- [x] **Day colour grade.** Replaced a single flat `rgba(4,6,16, darkness*0.6)`
+      wash — one colour, one axis, never warm at any hour — with a keyframed
+      multiply over the ground: cold blue at midnight, amber at dawn, neutral
+      (no-op) at noon, orange at dusk. Multiply rather than an overlay so the
+      art's own blacks stay black instead of washing toward flat blue.
+- [x] Keyed off a new `dayPhase(tick)` rather than `lightLevel`, which is a
+      cosine and reads identically at dawn and dusk. Covered by tests.
+- [x] Measured across a day, same scene, tick driven directly:
+
+      | tick | phase | warmth (R−B) |
+      |---|---|---|
+      | 0 midnight | 0.00 | −46.3 |
+      | 52 dawn | 0.26 | **+38.4** |
+      | 100 noon | 0.50 | −26.4 |
+      | 148 dusk | 0.74 | **+55.1** |
+      | 180 night | 0.90 | −40.0 |
+
+- [x] **Elevation light.** The existing elevation wash only ever darkened. It
+      is now two-sided and coloured: high ground catches a warm light, hollows
+      fall into a cool one, centred on mid elevation so ordinary ground is
+      untouched. Same one-pixel-per-tile bilinear field, so it stays smooth.
+- [x] A/B against a zeroed control at noon (where the day grade is a no-op, so
+      only this layer is in play): mean |difference| 10.05 per pixel, max 39,
+      987,310 pixels changed by more than 2. Real, deliberately gentle.
+- [x] Method note: a first capture drove the sim at max speed and screenshotted
+      when the CLOCK LABEL hit a target hour. Dawn and noon came out identical,
+      because at max speed many ticks pass between rendered frames and the
+      label did not match the frame. Setting `world.tick` directly and forcing
+      two rAFs is what made the measurement trustworthy.
+- [ ] Dawn/dusk are strong (a big amber wash). `DAY_GRADE` is a plain keyframe
+      table — easy to soften if it reads as too much in motion.
+- [ ] `ELEVATION_SHADE_MAX` / `ELEVATION_LIGHT_MAX` (0.2 / 0.1) are dials. The
+      light is deliberately weaker than the shade — a washed-out highlight
+      reads as fog.
+- [ ] Not built, still on the menu: contact shadows under objects scaled by sun
+      height (layer 2), and real local lights from campfires/torches/lava
+      (layer 4, the one with actual gameplay consequence).

@@ -24,6 +24,20 @@ export function lightLevel(tick: number): number {
 }
 
 /**
+ * Where in the day/night cycle a tick falls: 0 at midnight, 0.25 at dawn,
+ * 0.5 at noon, 0.75 at dusk.
+ *
+ * `lightLevel` alone cannot answer this — it is a cosine, so it reads the
+ * same at dawn and at dusk. Anything that wants to treat the two differently
+ * (the renderer grades one amber-rising and the other orange-falling) needs
+ * the phase, not just the brightness.
+ */
+export function dayPhase(tick: number): number {
+  const t = tick % DAY_LENGTH_TICKS;
+  return (t < 0 ? t + DAY_LENGTH_TICKS : t) / DAY_LENGTH_TICKS;
+}
+
+/**
  * The single threshold everything in this feature treats as the day/night
  * split: exactly half of every cycle reads as "night" (light below this) and
  * half as "day" — deliberately simple (no separate dawn/dusk "grace" built

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DAY_LENGTH_TICKS, NIGHT_THRESHOLD, isNight, isTwilight, lightLevel } from "../src/daynight.js";
+import { DAY_LENGTH_TICKS, NIGHT_THRESHOLD, isNight, isTwilight, dayPhase, lightLevel } from "../src/daynight.js";
 
 describe("lightLevel", () => {
   it("is 0 at midnight (tick 0) and every full cycle after", () => {
@@ -76,5 +76,29 @@ describe("isTwilight", () => {
       wasTwilight = nowTwilight;
     }
     expect(twilightWindows).toBe(2);
+  });
+});
+
+describe("dayPhase", () => {
+  it("places midnight, dawn, noon and dusk where lightLevel says they are", () => {
+    expect(dayPhase(0)).toBe(0);
+    expect(dayPhase(DAY_LENGTH_TICKS / 4)).toBeCloseTo(0.25);
+    expect(dayPhase(DAY_LENGTH_TICKS / 2)).toBeCloseTo(0.5);
+    expect(dayPhase((DAY_LENGTH_TICKS * 3) / 4)).toBeCloseTo(0.75);
+    // Phase is what separates the two halves of the cycle; lightLevel cannot,
+    // because it reads identically at dawn and dusk. That is the whole reason
+    // dayPhase exists (the renderer grades one amber and the other orange).
+    expect(lightLevel(DAY_LENGTH_TICKS / 4)).toBeCloseTo(lightLevel((DAY_LENGTH_TICKS * 3) / 4));
+    expect(dayPhase(DAY_LENGTH_TICKS / 4)).not.toBeCloseTo(dayPhase((DAY_LENGTH_TICKS * 3) / 4));
+  });
+
+  it("wraps across day boundaries and stays in [0, 1)", () => {
+    expect(dayPhase(DAY_LENGTH_TICKS)).toBe(0);
+    expect(dayPhase(DAY_LENGTH_TICKS * 3 + 50)).toBeCloseTo(0.25);
+    for (let tick = 0; tick < DAY_LENGTH_TICKS * 3; tick += 7) {
+      const phase = dayPhase(tick);
+      expect(phase).toBeGreaterThanOrEqual(0);
+      expect(phase).toBeLessThan(1);
+    }
   });
 });

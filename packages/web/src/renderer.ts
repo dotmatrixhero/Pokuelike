@@ -1,5 +1,5 @@
 import type { Agent, TerrainKind, Tile, Vision, World, Layer } from "@pokuelike/engine";
-import { biomeWeightsAt, findPlayer, isLitTile, lightLevel } from "@pokuelike/engine";
+import { biomeWeightsAt, dayPhase, findPlayer, isLitTile, lightLevel } from "@pokuelike/engine";
 import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
@@ -221,8 +221,13 @@ function drawPatchCell(ctx: CanvasRenderingContext2D, patch: HTMLImageElement, x
   ctx.drawImage(patch, sx, sy, GROUND_CELL, GROUND_CELL, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
 }
 
-/** How dark the lowest-elevation ground gets. */
-const GROUND_ELEVATION_SHADE = 0.16;
+/** Elevation at which ground is neither lit nor shaded. */
+const ELEVATION_MID = 0.5;
+/** How dark the lowest hollows get, and how bright the highest ground. Light is weaker than shade on purpose — a washed-out highlight reads as fog, a slightly darker hollow reads as depth. */
+const ELEVATION_SHADE_MAX = 0.2;
+const ELEVATION_LIGHT_MAX = 0.1;
+const ELEVATION_SHADE: Rgb = [18, 26, 48];
+const ELEVATION_SUNLIT: Rgb = [255, 244, 214];
 
 /**
  * Elevation shading for the whole ground layer, as one smoothly interpolated
@@ -261,7 +266,19 @@ function drawElevationShade(ctx: CanvasRenderingContext2D, world: World): void {
     const image = sctx.createImageData(world.width, world.height);
     const tiles = world.tiles[activeViewLayer];
     for (let i = 0; i < world.width * world.height; i++) {
-      image.data[i * 4 + 3] = Math.round((1 - tiles[i]!.elevation) * GROUND_ELEVATION_SHADE * 255);
+      // Two-sided, not just a shadow. High ground catches a warm light and
+      // hollows fall into a cool one, which is what makes the source art's
+      // terrain read as having FORM rather than being a flat plane with
+      // darker patches on it. Centred on mid elevation so ordinary ground is
+      // untouched and only real relief is picked out.
+      const relief = tiles[i]!.elevation - ELEVATION_MID;
+      const lit = relief > 0;
+      const tint = lit ? ELEVATION_SUNLIT : ELEVATION_SHADE;
+      const alpha = Math.min(1, Math.abs(relief) / ELEVATION_MID) * (lit ? ELEVATION_LIGHT_MAX : ELEVATION_SHADE_MAX);
+      image.data[i * 4 + 0] = tint[0];
+      image.data[i * 4 + 1] = tint[1];
+      image.data[i * 4 + 2] = tint[2];
+      image.data[i * 4 + 3] = Math.round(alpha * 255);
     }
     sctx.putImageData(image, 0, 0);
     perLayer[activeViewLayer] = small;
@@ -1981,15 +1998,65 @@ function drawWeather(ctx: CanvasRenderingContext2D, world: World): void {
  * (no gradient, no light sources), a deliberate first-pass scope call rather
  * than an oversight; see DESIGN.md/TODO.md.
  */
+/**
+ * The day's colour, as a MULTIPLY filter over the ground.
+ *
+ * This replaced a single flat wash of `rgba(4, 6, 16, darkness * 0.6)` — one
+ * colour on one axis, so the world was either its own colour or a bit closer
+ * to black, and never warm at any hour. Direct ask, about the source art: "I
+ * think the reason this image looks so beautiful is that the lighting is so
+ * well done. If there was a way to simulate it dynamically, holy shit."
+ *
+ * Keyed off `dayPhase` rather than `lightLevel`, because lightLevel is a
+ * cosine and cannot tell dawn from dusk — the two want different colours.
+ *
+ * Multiply rather than a translucent overlay: multiplying by a dark blue
+ * darkens AND cools in one pass while leaving the art's own blacks black,
+ * whereas painting blue over the top washes everything toward flat blue and
+ * kills the contrast the pixel art depends on. Noon multiplies by white,
+ * which is a no-op, so the brightest hours cost nothing.
+ *
+ * Deliberately NOT a moving directional light. Measured on the source art:
+ * every object is lit from straight above (top-to-bottom luminance +37 to
+ * +43) with no side light at all (left-to-right within ±1). A sun that
+ * tracked across the sky would cast shadows the baked sprites contradict.
+ */
+const DAY_GRADE: readonly { phase: number; tint: Rgb }[] = [
+  { phase: 0.0, tint: [92, 104, 158] }, // midnight — deep and cold
+  { phase: 0.2, tint: [120, 120, 170] }, // the sky starts to lift
+  { phase: 0.26, tint: [255, 186, 140] }, // dawn — the warmest minute of the day
+  { phase: 0.34, tint: [255, 232, 205] },
+  { phase: 0.5, tint: [255, 255, 255] }, // noon — neutral, no-op
+  { phase: 0.66, tint: [255, 236, 212] },
+  { phase: 0.74, tint: [255, 160, 110] }, // dusk
+  { phase: 0.82, tint: [130, 116, 168] },
+  { phase: 1.0, tint: [92, 104, 158] },
+];
+
+/** The day's multiply colour at a tick, interpolated between `DAY_GRADE` keyframes. */
+function dayTint(tick: number): Rgb {
+  const phase = dayPhase(tick);
+  let previous = DAY_GRADE[0]!;
+  for (const key of DAY_GRADE) {
+    if (key.phase >= phase) {
+      const span = key.phase - previous.phase;
+      const t = span <= 0 ? 0 : (phase - previous.phase) / span;
+      return [0, 1, 2].map((i) => Math.round(previous.tint[i]! + (key.tint[i]! - previous.tint[i]!) * t)) as Rgb;
+    }
+    previous = key;
+  }
+  return previous.tint;
+}
+
 function drawDayNightTint(ctx: CanvasRenderingContext2D, world: World): void {
   // No day underground: the cave's darkness is fog-of-war's job (see
-  // `drawFog`), not the surface clock's. Before M2 the cave was drawn at
-  // whatever brightness the surface happened to be.
+  // `drawFog`), not the surface clock's.
   if (activeViewLayer !== "surface") return;
-  const darkness = 1 - lightLevel(world.tick);
-  if (darkness <= 0.02) return;
+  const tint = dayTint(world.tick);
+  if (tint[0] > 250 && tint[1] > 250 && tint[2] > 250) return; // noon: nothing to do
   ctx.save();
-  ctx.fillStyle = `rgba(4, 6, 16, ${Math.min(0.55, darkness * 0.6)})`;
+  ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = rgbToCss(tint);
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
   ctx.restore();
 }
