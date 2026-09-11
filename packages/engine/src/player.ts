@@ -11,7 +11,7 @@ import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory
 import { applyLooting, carryCapacityOf, healFromCookedFood, isTrulyDead } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
-import { applyTerrainEffectAt, resolveHit } from "./predation.js";
+import { applyTerrainEffectAt, FALLBACK_MAX_HP, resolveHit } from "./predation.js";
 import { pickBestMove, withinMoveRange } from "./combat.js";
 
 /**
@@ -435,6 +435,23 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       log?.record({ kind: "butchered", tick: world.tick, agentId: agent.id, species: agent.species, fromId: corpse.id, fromSpecies: corpse.species, itemKeys: butchered.map((b) => b.itemKey) });
       return true;
     }
+    case "usePoultice": {
+      // Direct report: "I can't apply poultice to heal units" — the item
+      // was craftable but had no use case at all. CRAFTING_REFERENCE.md's
+      // own basic-effect table: "Heal away from shelter." A bonded
+      // follower on or beside the player is preferred over the player
+      // themselves (see mostHurtHealTarget's own doc comment) so "heal
+      // units" reaches an ally first; only heals someone actually hurt.
+      if (countOf(agent, "poultice") < 1) return false;
+      const target = mostHurtHealTarget(world, agent);
+      if (!target) return false;
+      removeItem(agent, "poultice", 1);
+      const maxHp = target.maxHp ?? target.stats?.maxHp ?? FALLBACK_MAX_HP;
+      const before = target.hp ?? maxHp;
+      target.hp = Math.min(maxHp, before + maxHp * POULTICE_HEAL_FRACTION);
+      out.healed = { targetId: target.id, amount: target.hp - before };
+      return true;
+    }
   }
 }
 
@@ -449,6 +466,48 @@ function corpseWithinReach(world: World, agent: Agent, pred: (candidate: Agent) 
     }
   }
   return undefined;
+}
+
+/** Fraction of maxHp a poultice restores in one use — meaningfully more than a single tick of shelter's own passive heal-over-time (`HEAL_PER_TICK_FRACTION`, support.ts), matching its role as a portable substitute for resting at a real shelter. Sim-original; a real balance lever, not canon. */
+const POULTICE_HEAL_FRACTION = 0.3;
+
+/**
+ * Who a poultice should heal: the most-hurt (lowest hp fraction) eligible
+ * target within reach, where "eligible" is the player themselves or a
+ * bonded follower (`followingId === agent.id`) standing on or beside the
+ * player's own tile — the same 8-neighbor reach `corpseWithinReach` already
+ * scans. A follower is checked first in the candidate list so a tie (both
+ * at the same hp fraction) favors healing an ally over the player, matching
+ * the direct report's own wording, "heal units" — plural, not just self.
+ * Returns undefined if nobody in reach is actually hurt (`hp < maxHp`), so
+ * a poultice is never wasted (and never consumed) on a full-health target.
+ */
+function mostHurtHealTarget(world: World, agent: Agent): Agent | undefined {
+  const candidates: Agent[] = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      const follower = world.agents.find((a) => a.id !== agent.id && a.layer === agent.layer && a.pos.x === x && a.pos.y === y && a.followingId === agent.id && a.alive !== false);
+      if (follower) candidates.push(follower);
+    }
+  }
+  candidates.push(agent);
+
+  let best: Agent | undefined;
+  let bestFraction = 1;
+  for (const candidate of candidates) {
+    const maxHp = candidate.maxHp ?? candidate.stats?.maxHp ?? FALLBACK_MAX_HP;
+    const hp = candidate.hp ?? maxHp;
+    if (hp >= maxHp) continue; // not hurt — never a valid target
+    const fraction = hp / maxHp;
+    if (fraction < bestFraction) {
+      bestFraction = fraction;
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 /**

@@ -10370,6 +10370,106 @@ terrain (same stale-fixture shape hit before with `"stone"`). `cave.test.ts`/
 suite: engine 1567/1567, data 400/400. `tsc --noEmit` clean and a real
 `pnpm --filter @pokuelike/web build` clean across all 4 packages.
 
+## Fixed/Built: combat feedback round — poultice, hit flash, damage news, AOE preview
+
+Direct report, four items in one message: *"1. I can't apply poultice to
+heal units. 2. I cannot see what units are attacking what tiles. I need to
+see like a particle effect or something showing when an attack is
+targeting a space. Flash the space red. 3. I don't see what damaged me or
+what move was used. 4. When I command a unit to attack a tile it's not
+really clear if it's hitting the tile or the Pokémon or what."* Plus a
+mid-turn follow-up while this was in flight: *"Even the targeting for
+Allies should like show the cone or the aoe of a target."*
+
+**1) Poultice had no use at all.** Craftable (herbs + lichen) since early
+in the project, but nothing in `player.ts` ever consumed it —
+CRAFTING_REFERENCE.md's own basic-effect table names it "Heal away from
+shelter," and that basic use was simply never wired up (the bigger
+"Rescue — heal what you saved" use in the same table stays unbuilt, a
+separate M7+ feature). New `usePoultice` PlayerAction: heals the
+most-hurt eligible target within reach — a bonded follower on or beside
+the player, preferred over the player themselves so "heal units" (their
+own plural wording) reaches an ally first, falling back to the player if
+no follower nearby is hurt. `POULTICE_HEAL_FRACTION = 0.3` (sim-original,
+a real lever); fails cleanly (no consumption) with nothing carried or
+nobody actually hurt. Web: pack menu gets a real "Apply" action on the
+poultice row (was silently falling through to Drop only). Engine tests:
+`poultice.test.ts`, 6 cases (self-heal, prefers a hurt follower over
+self, clamps to maxHp, fails with none carried, fails when nobody's
+hurt, a non-follower nearby is never a target). Live-verified: hurt the
+player to 9 hp, tapped Apply in a real browser session — "You apply the
+poultice to yourself, healing 7 HP," hp actually rose.
+
+**2) No visible tell for an attack landing or even being attempted.** A
+flash effect already existed (`moveEffects.ts`/`drawMoveFlashes`,
+built earlier for "light up the square it effects") but only fired on a
+LANDED hit, and drew a pale cream ring — easy to miss, and didn't cover a
+miss at all despite the ask being about seeing an attack *target* a
+space, hit or not. Fixed: `MoveEffects.ingest` now also tracks `"missed"`
+events, tagging each flash `hit: boolean`; `drawMoveFlashes` fills the
+whole tile solid red (with a bright outline) for a landed hit, a dimmer
+reddish ring-only for a miss — unmissable for real damage, still visibly
+different from "nothing happened."
+
+**3/4) The player never heard about a hit they took, or a bonded
+follower's own fight — commanded or unprompted.** `renderPlayerHud`
+always overwrites the HUD line with the player's OWN action outcome
+(`outcomeText`) every call; there was no path at all for "someone else's
+turn just hurt you" or "your ally's order landed." The engine already
+logs everything needed (`"fought"`/`"missed"` events carry attacker,
+defender, move, damage, crit) — this was a pure web-side gap. New
+`combatNoticeFor` in main.ts scans each tick's new events for anything
+involving the player (as defender — as attacker is already covered by
+their own outcome text) or a bonded follower (`followingId === player.id`,
+attacker or defender), and `playerAct` applies it as the final word after
+`renderPlayerHud`, so real combat news always wins over a routine "You
+move." This directly resolves #4 too: a commanded attack's actual
+hit/miss/damage now surfaces in plain language the moment it happens,
+same mechanism as #3, no separate code needed.
+
+**A real bug found only by live-testing this, not by reading the diff**:
+first pass picked "whichever qualifying event came last" in a tick's
+batch, which silently buried a landed hit under a same-tick follow-up
+miss — confirmed live (a commanded ally's real hit read as "misses" on
+screen because a miss happened a couple of ticks later in the same
+player-turn advance). Fixed to prefer a hit over a miss in each tier
+(player news over follower news), tracking both separately rather than
+just overwriting. Also had to fix my OWN test rig twice while chasing
+this down — a synthetic ally with `followingId` set but no
+`rapport.towardPlayer` decayed to "wary" and got auto-unfollowed within
+the same tick window (same shape as the bug fixed in the follower-flee
+entry above), and a synthetic move missing `shape`/`range: {min,max}`
+(used a bare `range: 1`) crashed `deriveRangeFromShape` — both test-
+fixture artifacts, not engine bugs, fixed in the throwaway script, not
+the product.
+
+**5) Mid-turn add: AOE/cone preview while targeting.** *"Even the
+targeting for Allies should like show the cone or the aoe of a target."*
+Tile-targeting (the player's own move, or a commanded ally's) used to
+resolve and commit on the very first click with zero preview — you
+learned a cone or line move's real reach only after committing to it.
+New `drawTargetPreview` (renderer.ts) outlines every tile `resolveShape`
+would actually resolve against for the currently-hovered tile, recomputed
+on `mousemove` while `targeting` is active (`updateTargetPreview` in
+main.ts, reusing predation.ts's own private `facingToward` logic
+re-derived locally since it isn't exported) — a steady cyan wash,
+deliberately distinct from the red hit-flash (a live outcome) and the
+yellow selection ring (inspector focus). Works identically for the
+player's own moves and a bonded partner's, since both go through the
+same `targeting: {agentId?, moveId}` state. Desktop-only for now (mouse
+hover); doesn't regress the existing tap-to-commit flow on touch, just
+doesn't preview there. Live-verified: gave the player a synthetic Cone
+move, opened targeting, hovered 2 tiles east — the real 3-wide cone
+fan lit up in cyan exactly matching `resolveShape`'s own output, screenshotted.
+
+**Tests**: engine `poultice.test.ts` (new, 6 tests). Full suite: engine
+1573/1573, data 400/400. `tsc --noEmit` clean and `pnpm --filter
+@pokuelike/web build` clean across all 4 packages. Web has no unit test
+suite (established convention this session: typecheck + build + live
+Playwright verification for UI-only changes) — all four fixes plus the
+AOE preview were exercised live in a real browser session, not just
+read from the diff.
+
 ## Built: wild humans feel like a threat despite weak stats, plus valuable loot — see DESIGN.md
 
 - [x] Direct ask: "make the humans feel a little more like a threat
@@ -10732,6 +10832,55 @@ great. The rest are struggling."*
       produced the same 3-biome map. Not chased down; it blocked capturing the
       other 9 biomes on screen, which were verified by data + contact sheet
       instead of live render.
+
+## Built: never-expiring player-only event log
+
+Direct ask: *"Can we get event logs like for just player as well? And don't
+make em. Expire. Always have em. Stored."*
+
+- [x] **Root cause of the expiry complaint**: `EventLogPanel`'s main `buffer`
+      is capped at `MAX_BUFFER = 4000` events, oldest trimmed first — a
+      deliberate memory cap for long runs, but it meant the player's own early
+      history could silently age out once a busy run pushed enough later
+      noise past it. There was already a precedent for a never-trimmed subset
+      (`headlineCache`, built earlier this session for quiet-mode births/
+      deaths) — this reuses the same shape for the player specifically.
+- [x] New `playerCache: SimEvent[]`, populated in `ingest()` alongside
+      `headlineCache` whenever an event names the current `playerId`
+      (`setPlayerId` called once per world load, right before `selectAgent`)
+      — never trimmed, regardless of `buffer`'s cap.
+- [x] New "My log" filter chip (`index.html`, `#my-log-only`) — a dedicated
+      one-click "just my history" view that reads `playerCache` directly, not
+      dependent on the map selection still pointing at the player (examining
+      any other creature, a routine player action, moves `filterAgentId` away
+      with no previous way back short of re-selecting the player agent).
+      Still respects the existing `hideNoise`/`hideLevelUps` display
+      toggles — those are view preferences, not a storage decision.
+- [x] The ordinary per-agent filter also benefits: `eventsForAgent(agentId)`
+      now routes to `playerCache` (not the trimmable `buffer`) whenever
+      `agentId === playerId`, so simply clicking back onto the player on the
+      map already gets the never-expiring history, "My log" checkbox or not.
+- [x] Live-verified end to end via Playwright against a real dev server
+      (forced a water tile next to the player, pressed the real drink key 3x
+      to generate genuine `consumed` events — no synthetic event injection):
+      - Default player filter showed all 3 real drink events
+        (`playerCacheLen: 3` via a temporary debug hook, matching the 3 real
+        actions taken).
+      - Selecting a different, wild agent correctly moved the log to show
+        *their* events instead (`filterAgentId` changed, the venonat's own
+        `behaviorChanged` event appeared).
+      - Checking "My log" while that other agent was still selected snapped
+        the log straight back to the same 3 player drink events — confirming
+        it reads `playerCache` independent of the current map selection, not
+        just at the moment the player happens to be selected.
+      - One real test-methodology wrinkle, not a product bug: `consumed`
+        (drink/eat) is in `NOISE_KINDS`, and the "Pokémon only" checkbox is
+        checked by default — so the first pass showed "no events" until
+        `hide-noise` was unchecked in the test, which was correct, expected
+        filtering, not a missing-cache bug.
+      - Temporary debug hooks (`EventLogPanel.__debugState()`,
+        `window.__pokuelike.eventLogDebug`/`selectAgentDebug`) used only to
+        drive this verification, removed afterward; not shipped.
 
 ## Built: dynamic lighting, layer 1 (day colour) and layer 3 (elevation light)
 

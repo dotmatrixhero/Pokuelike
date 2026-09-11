@@ -30,6 +30,20 @@ export class EventLogPanel {
    */
   private headlineCache: SimEvent[] = [];
   /**
+   * Direct ask: "Can we get event logs like for just player as well? And
+   * don't make em expire. Always have em stored." Same shape as
+   * `headlineCache` just above (and the same efficiency argument: the
+   * player's own events are a small fraction of total volume) — every
+   * event naming the player, kept forever, regardless of how far
+   * `buffer`'s 4000-event cap has rolled past them. `setPlayerId` is
+   * called once main.ts knows who the player is; `undefined` (no game in
+   * progress, or observer mode) means nothing gets cached here at all.
+   */
+  private playerCache: SimEvent[] = [];
+  private playerId: string | undefined;
+  /** Direct ask, same report — a dedicated one-click "just my history" view, not dependent on the map selection still pointing at the player (tapping any other creature to examine it moves `filterAgentId` away). Reads from `playerCache`, never `buffer`, so it is also never trimmed. */
+  private myLogOnly = false;
+  /**
    * The most recently ticked world — used so a `fought`/`missed` row can
    * show the attacker's currently-built move (see `formatEvent`'s `world`
    * param). Always the live reference, not a per-event snapshot: rows show
@@ -80,6 +94,7 @@ export class EventLogPanel {
     if (overflow > 0) this.buffer.splice(0, overflow);
     for (const event of events) {
       if (HEADLINE_KINDS.has(event.kind)) this.headlineCache.push(event);
+      if (this.playerId && eventNamesAgent(event, this.playerId)) this.playerCache.push(event);
     }
     this.dirty = true;
   }
@@ -87,6 +102,17 @@ export class EventLogPanel {
   setFilter(agentId: string | undefined): void {
     if (this.filterAgentId === agentId) return;
     this.filterAgentId = agentId;
+    this.dirty = true;
+  }
+
+  /** Who counts as "the player" for `playerCache`/`myLogOnly` — call once main.ts knows (a fresh game, a new player agent). Does NOT retroactively backfill `playerCache` from `buffer`'s own history — only events ingested from here on are cached, same as `headlineCache` never claimed to reconstruct the past either. */
+  setPlayerId(agentId: string | undefined): void {
+    this.playerId = agentId;
+  }
+
+  setMyLogOnly(myLogOnly: boolean): void {
+    if (this.myLogOnly === myLogOnly) return;
+    this.myLogOnly = myLogOnly;
     this.dirty = true;
   }
 
@@ -123,13 +149,23 @@ export class EventLogPanel {
   reset(): void {
     this.buffer = [];
     this.headlineCache = [];
+    this.playerCache = [];
+    this.playerId = undefined;
     this.filterAgentId = undefined;
     this.dirty = true;
     this.render();
   }
 
-  /** All buffered events naming `agentId`, before the noise filter is applied in `render`. */
+  /**
+   * All events naming `agentId`, before the noise filter is applied in
+   * `render`. Reads from the never-trimmed `playerCache` when `agentId` is
+   * the player — same underlying data `myLogOnly` uses, just reached by
+   * selecting the player's own agent (on the map, or via the inspector)
+   * instead of the dedicated checkbox — otherwise falls back to filtering
+   * the ordinary (trimmable) `buffer`.
+   */
   eventsForAgent(agentId: string): SimEvent[] {
+    if (agentId === this.playerId) return this.playerCache;
     return this.buffer.filter((event) => eventNamesAgent(event, agentId));
   }
 
@@ -148,6 +184,19 @@ export class EventLogPanel {
       // right before a kill is `behaviorChanged`, ordinarily NOISE_KINDS,
       // but it's exactly the context a followed battle should show).
       source = this.buffer.filter((event) => eventNamesAnyOf(event, this.autoCamIds!));
+    } else if (this.myLogOnly) {
+      // Direct ask: "event logs like for just player as well... don't
+      // make em expire." Wins over headlinesOnly/the manual per-agent
+      // filter — a dedicated, always-available "my own history" view,
+      // reading from playerCache (never trimmed) regardless of what's
+      // currently selected on the map. Still respects hideNoise/
+      // hideLevelUps, same as the ordinary per-agent filter below — those
+      // are display preferences, not a storage decision, and leaving them
+      // inert here would make the same two checkboxes mean different
+      // things depending on whether "My log" happens to be checked too.
+      source = this.playerCache;
+      if (this.hideNoise) source = source.filter((event) => !NOISE_KINDS.has(event.kind));
+      if (this.hideLevelUps) source = source.filter((event) => event.kind !== "leveledUp");
     } else if (this.headlinesOnly) {
       source = this.filterAgentId ? this.headlineCache.filter((event) => eventNamesAgent(event, this.filterAgentId!)) : this.headlineCache;
     } else {
@@ -169,7 +218,13 @@ export class EventLogPanel {
     if (shown.length === 0) {
       const empty = document.createElement("div");
       empty.className = "log-empty";
-      empty.textContent = this.autoCamIds ? "No events yet for this moment." : this.filterAgentId ? "No events yet for this agent." : "No events yet — press Play.";
+      empty.textContent = this.autoCamIds
+        ? "No events yet for this moment."
+        : this.myLogOnly
+          ? "No events yet for the player."
+          : this.filterAgentId
+            ? "No events yet for this agent."
+            : "No events yet — press Play.";
       this.container.appendChild(empty);
       return;
     }

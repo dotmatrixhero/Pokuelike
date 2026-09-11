@@ -1,7 +1,7 @@
-import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
-import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
-import { eventNamesAgent, formatEvent } from "./eventText.js";
+import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
+import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
@@ -93,9 +93,11 @@ const panelBodyEl = document.getElementById("panel-body") as HTMLElement;
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
 const hideLevelUpsCheckbox = document.getElementById("hide-levelups") as HTMLInputElement;
 const headlinesOnlyCheckbox = document.getElementById("headlines-only") as HTMLInputElement;
+const myLogOnlyCheckbox = document.getElementById("my-log-only") as HTMLInputElement;
 const chipHideNoise = document.getElementById("chip-hide-noise") as HTMLElement;
 const chipHideLevelUps = document.getElementById("chip-hide-levelups") as HTMLElement;
 const chipHeadlinesOnly = document.getElementById("chip-headlines-only") as HTMLElement;
+const chipMyLogOnly = document.getElementById("chip-my-log") as HTMLElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
@@ -198,6 +200,19 @@ let playerDead = false;
 let playerWon = false;
 let lastLoggedEventCount = 0;
 /**
+ * Direct report: "I don't see what damaged me or what move was used" /
+ * "when I command a unit to attack a tile it's not really clear if it's
+ * hitting the tile or the Pokémon." `renderPlayerHud` already overwrites
+ * `hudMessageEl` with the player's own action outcome every call
+ * (`outcomeText`) — that message says nothing about a hit the player took
+ * from someone ELSE's turn, or about a bonded ally's own commanded attack
+ * landing/missing on its own later tick. `afterTick` computes this from
+ * the real `fought`/`missed` events and stashes it here; `playerAct`
+ * applies it as the FINAL word after `renderPlayerHud` runs, so real
+ * combat news always wins over a routine "You move."
+ */
+let pendingCombatNotice: string | undefined;
+/**
  * MOVES_AND_TOOLS.md's `attack` needs a direction, and there's no on-screen
  * cursor to aim one with — reused the last direction the player MOVED
  * (attempted or not; bumping into a wall still points you at it) as "which
@@ -219,6 +234,15 @@ let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
  * `{kind: "attack", target, moveId}` instead of `{kind: "command", ...}`.
  */
 let targeting: { agentId?: string; moveId: string } | undefined;
+/**
+ * Direct ask: "Even the targeting for allies should like show the cone or
+ * the aoe of a target." The real resolved tiles (`resolveShape`) a move
+ * would hit if committed at the currently-hovered tile — recomputed on
+ * every `mousemove` while `targeting` is active (see the canvas listener
+ * below), drawn by `drawTargetPreview` in `frame()`. Empty outside
+ * targeting mode.
+ */
+let targetPreviewTiles: Vec2[] = [];
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -457,6 +481,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   seedChipLabel.textContent = String(seed);
   const player = findPlayer(world);
   if (player) {
+    eventLogPanel.setPlayerId(player.id);
     selectAgent(player);
     focusCameraOn(player.pos);
   }
@@ -632,6 +657,12 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const parts = outcome.butchered?.map((b) => `${itemName(b.itemKey).toLowerCase()}${b.count > 1 ? ` ×${b.count}` : ""}`) ?? [];
       return `You butcher it: ${parts.join(", ")}.`;
     }
+    case "usePoultice": {
+      if (!ok) return countOf(player, "poultice") < 1 ? "You don't have a poultice." : "Nobody hurt nearby.";
+      const healed = outcome.healed;
+      const who = healed?.targetId === player.id ? "yourself" : (SPECIES[world.agents.find((a) => a.id === healed?.targetId)?.species ?? ""]?.name ?? "it");
+      return `You apply the poultice to ${who}, healing ${Math.round(healed?.amount ?? 0)} HP.`;
+    }
   }
 }
 
@@ -791,6 +822,11 @@ function openPackMenu(): void {
       // key (this exact codebase already moved Eat/Offer the same way,
       // on the same "too many buttons" reasoning).
       actions.push({ label: "Place", onTap: () => playerAct({ kind: "placeCampfire", dx: lastFacing.dx, dy: lastFacing.dy }) });
+    } else if (item.itemKey === "poultice") {
+      // Direct report: "I can't apply poultice to heal units" — it had no
+      // action at all before this (fell through to just Drop). Same
+      // per-item pack action pattern as Eat/Offer/Place.
+      actions.push({ label: "Apply", onTap: () => playerAct({ kind: "usePoultice" }) });
     }
     actions.push({ label: "Drop", onTap: () => playerAct({ kind: "drop", itemKey: item.itemKey }) });
     packMenuBodyEl.appendChild(actionsRowEl(label, actions));
@@ -990,7 +1026,30 @@ commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
 function cancelTargeting(): void {
   if (!targeting) return;
   targeting = undefined;
+  targetPreviewTiles = [];
   hudMessageEl.textContent = "";
+}
+
+/** Same "whichever axis has the larger displacement wins, ties resolve south" facing rule `predation.ts`'s own (private) `facingToward` uses for `resolveAreaHit` — the preview has to derive the same facing an actual commit would, or it would show the wrong cells for a directional shape. */
+function facingToward(from: Vec2, to: Vec2): Direction {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "E" : "W";
+  return dy > 0 ? "S" : "N";
+}
+
+/** Recomputes `targetPreviewTiles` for the tile under the cursor, using whichever agent (player or bonded partner) `targeting` names as the one about to act. No-op outside targeting mode. */
+function updateTargetPreview(hovered: Vec2): void {
+  if (!targeting) return;
+  const me = findPlayer(world);
+  if (!me) return;
+  const actor = targeting.agentId ? world.agents.find((a) => a.id === targeting!.agentId) : me;
+  const move = actor?.moves?.find((m) => m.id === targeting!.moveId);
+  if (!actor || !move) {
+    targetPreviewTiles = [];
+    return;
+  }
+  targetPreviewTiles = resolveShape(move.shape, actor.pos, facingToward(actor.pos, hovered));
 }
 
 /**
@@ -1118,7 +1177,7 @@ function playerAct(action: PlayerAction): void {
       afterTick();
       focusCameraOn(player.pos);
       renderPlayerHud();
-      hudMessageEl.textContent = "You cross into a new stretch of land.";
+      hudMessageEl.textContent = pendingCombatNotice ?? "You cross into a new stretch of land.";
       return;
     }
   }
@@ -1126,6 +1185,10 @@ function playerAct(action: PlayerAction): void {
   afterTick();
   focusCameraOn(player.pos);
   renderPlayerHud();
+  // Real combat news — the player got hit, or a bonded follower landed or
+  // missed one — outranks the routine "You move."/"You wait." outcome
+  // message `renderPlayerHud` just set, so it applies last.
+  if (pendingCombatNotice) hudMessageEl.textContent = pendingCombatNotice;
   if (!findPlayer(world)) showGameOver(player.id);
   else checkWinCondition(player);
 }
@@ -1297,6 +1360,54 @@ function step(): void {
 }
 
 /**
+ * Direct report: "I don't see what damaged me or what move was used" /
+ * "when I command a unit to attack a tile it's not really clear if it's
+ * hitting the tile or the Pokémon." Plain-sentence news for any `fought`/
+ * `missed` this tick that the player wasn't already told about via their
+ * own `outcomeText` — either they took the hit themselves, or a bonded
+ * follower (commanded or just fighting on its own) did the hitting or the
+ * taking. Skips anything with the player as ATTACKER: that's already
+ * covered by outcomeText's own "You strike X!" line. Picks the single
+ * most relevant event in a busy tick — the player getting hit outranks a
+ * follower's own fight, so a real threat to the player is never buried
+ * under a routine ally skirmish.
+ */
+function combatNoticeFor(events: readonly SimEvent[], world: World, player: Agent): string | undefined {
+  const followerIds = new Set(world.agents.filter((a) => a.followingId === player.id).map((a) => a.id));
+  const name = (id: string, species: string) => (id === player.id ? "You" : SPECIES[species]?.name ?? species);
+  // A busy tick can carry several relevant events (a follower's earlier
+  // hit, then a later miss) — a real, sampled bug: picking whichever came
+  // LAST silently buried a landed hit under a follow-up miss. Two tiers
+  // (player outranks follower), each preferring a landed hit over a miss —
+  // real damage is always more informative than "nothing happened."
+  let playerHit: string | undefined;
+  let playerMiss: string | undefined;
+  let followerHit: string | undefined;
+  let followerMiss: string | undefined;
+  for (const event of events) {
+    if (event.kind !== "fought" && event.kind !== "missed") continue;
+    if (event.attackerId === player.id) continue; // already told via outcomeText
+    const involvesPlayer = event.defenderId === player.id;
+    const involvesFollower = followerIds.has(event.attackerId) || followerIds.has(event.defenderId);
+    if (!involvesPlayer && !involvesFollower) continue;
+    const move = findMoveUsed(event, world);
+    const moveName = move?.name ?? event.moveId;
+    const attacker = name(event.attackerId, event.attackerSpecies);
+    const defender = event.defenderId === player.id ? "you" : name(event.defenderId, event.defenderSpecies);
+    if (event.kind === "missed") {
+      const notice = `${attacker}'s ${moveName} misses ${defender}.`;
+      if (involvesPlayer) playerMiss ??= notice;
+      else followerMiss ??= notice;
+    } else {
+      const notice = `${attacker}'s ${moveName} hits ${defender} for ${event.damage}${event.critical ? " (crit!)" : ""}.`;
+      if (involvesPlayer) playerHit = notice; // last landed hit on the player wins — the most recent damage is the most relevant
+      else followerHit = notice;
+    }
+  }
+  return playerHit ?? playerMiss ?? followerHit ?? followerMiss;
+}
+
+/**
  * Everything `step()` does after the world has advanced — feeding the new
  * events to every display consumer and dirtying the inspector. Split out so
  * the player turn gate (`playerAct`, ROADMAP.md M0) can advance the world by
@@ -1316,6 +1427,8 @@ function afterTick(): void {
   // needs these repeats; the eventual death event already keeps a battle
   // engagement alive/concluded without them.
   const displayEvents = newEvents.filter((e) => !(e.kind === "fought" && e.finishingBlow));
+  const noticePlayer = findPlayer(world);
+  pendingCombatNotice = noticePlayer ? combatNoticeFor(displayEvents, world, noticePlayer) : undefined;
   eventLogPanel.ingest(displayEvents, world);
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);
@@ -1732,6 +1845,7 @@ canvas.addEventListener("click", (event) => {
     const target = { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
     const { agentId, moveId } = targeting;
     targeting = undefined;
+    targetPreviewTiles = [];
     // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
     // the player's own turn to spend, same as every other verb; the HUD
     // message comes from `outcomeText`'s own "command"/"attack" case.
@@ -1785,6 +1899,18 @@ canvas.addEventListener("click", (event) => {
   selectAgent(undefined);
 });
 
+// Direct ask: "Even the targeting for allies should like show the cone or
+// the aoe of a target." Recomputes the preview on every hover while a
+// move-target pick is in progress — the click handler above still does
+// the actual committing, this only ever changes what's drawn.
+canvas.addEventListener("mousemove", (event) => {
+  if (!targeting) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  updateTargetPreview({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
+});
+
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
 
 // Direct ask: "the actual battle log... needs to be scrollable on mobile.
@@ -1826,12 +1952,19 @@ headlinesOnlyCheckbox.addEventListener("change", () => {
   eventLogPanel.setHeadlinesOnly(headlinesOnlyCheckbox.checked);
   eventLogPanel.render();
 });
+
+myLogOnlyCheckbox.addEventListener("change", () => {
+  syncChip(myLogOnlyCheckbox, chipMyLogOnly);
+  eventLogPanel.setMyLogOnly(myLogOnlyCheckbox.checked);
+  eventLogPanel.render();
+});
 // Reflect each checkbox's own `checked` default (both "on" checkboxes are
 // checked by default in index.html) the moment the page loads, not just on
 // the next manual toggle.
 syncChip(hideNoiseCheckbox, chipHideNoise);
 syncChip(hideLevelUpsCheckbox, chipHideLevelUps);
 syncChip(headlinesOnlyCheckbox, chipHeadlinesOnly);
+syncChip(myLogOnlyCheckbox, chipMyLogOnly);
 
 function setRenderStyle(style: RenderStyle): void {
   renderStyle = style;
@@ -2295,6 +2428,7 @@ function frame(): void {
     focusGroupIds(),
     viewLayer()
   );
+  drawTargetPreview(ctx, targetPreviewTiles);
   drawEventPopups(ctx, eventPopups.active());
   drawMoveFlashes(ctx, moveEffects.activeFlashes());
   const autoCamText = autoCamera.currentLabel() ?? (autoCamera.isEnabled() ? "watching…" : "");

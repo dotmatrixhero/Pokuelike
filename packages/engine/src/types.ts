@@ -753,7 +753,22 @@ export type PlayerAction =
    * butcherable corpse within reach, or with no carry headroom for any of
    * what it would yield.
    */
-  | { kind: "butcher" };
+  | { kind: "butcher" }
+  /**
+   * Direct report: "I can't apply poultice to heal units." Poultice
+   * (crafting.ts: herbs + lichen) was craftable but had no use at all —
+   * CRAFTING_REFERENCE.md's own table names its basic effect: "Heal away
+   * from shelter." Consumes one carried poultice to heal the most-hurt
+   * eligible target in reach — a bonded follower (`followingId === this
+   * player's id`) on or beside the player's own tile, preferred over the
+   * player themselves so "heal units" (plural) reaches an ally first;
+   * falls back to healing the player if no follower nearby is hurt.
+   * Fails (still costs the turn) with no poultice carried, or nobody in
+   * reach actually hurt. The bigger "Rescue — heal what you saved" use
+   * this same table lists stays unbuilt (ROADMAP.md M7+), same as the
+   * carry/rescue mechanic itself.
+   */
+  | { kind: "usePoultice" };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -778,6 +793,8 @@ export interface PlayerActionOutcome {
   filledWater?: number;
   /** `butcher` succeeding: what the corpse actually yielded (capacity-trimmed — see player.ts's own case). */
   butchered?: { itemKey: string; count: number }[];
+  /** `usePoultice` succeeding: who got healed (the player's own id, or a bonded follower's) and by how much (post-clamp-to-maxHp, so the UI can say a real number). */
+  healed?: { targetId: string; amount: number };
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
