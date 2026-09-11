@@ -93,9 +93,11 @@ const panelBodyEl = document.getElementById("panel-body") as HTMLElement;
 const hideNoiseCheckbox = document.getElementById("hide-noise") as HTMLInputElement;
 const hideLevelUpsCheckbox = document.getElementById("hide-levelups") as HTMLInputElement;
 const headlinesOnlyCheckbox = document.getElementById("headlines-only") as HTMLInputElement;
+const myLogOnlyCheckbox = document.getElementById("my-log-only") as HTMLInputElement;
 const chipHideNoise = document.getElementById("chip-hide-noise") as HTMLElement;
 const chipHideLevelUps = document.getElementById("chip-hide-levelups") as HTMLElement;
 const chipHeadlinesOnly = document.getElementById("chip-headlines-only") as HTMLElement;
+const chipMyLogOnly = document.getElementById("chip-my-log") as HTMLElement;
 const styleTileBtn = document.getElementById("style-tile") as HTMLButtonElement;
 const styleAsciiBtn = document.getElementById("style-ascii") as HTMLButtonElement;
 const zoomOutBtn = document.getElementById("zoom-out") as HTMLButtonElement;
@@ -479,6 +481,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   seedChipLabel.textContent = String(seed);
   const player = findPlayer(world);
   if (player) {
+    eventLogPanel.setPlayerId(player.id);
     selectAgent(player);
     focusCameraOn(player.pos);
   }
@@ -1949,12 +1952,19 @@ headlinesOnlyCheckbox.addEventListener("change", () => {
   eventLogPanel.setHeadlinesOnly(headlinesOnlyCheckbox.checked);
   eventLogPanel.render();
 });
+
+myLogOnlyCheckbox.addEventListener("change", () => {
+  syncChip(myLogOnlyCheckbox, chipMyLogOnly);
+  eventLogPanel.setMyLogOnly(myLogOnlyCheckbox.checked);
+  eventLogPanel.render();
+});
 // Reflect each checkbox's own `checked` default (both "on" checkboxes are
 // checked by default in index.html) the moment the page loads, not just on
 // the next manual toggle.
 syncChip(hideNoiseCheckbox, chipHideNoise);
 syncChip(hideLevelUpsCheckbox, chipHideLevelUps);
 syncChip(headlinesOnlyCheckbox, chipHeadlinesOnly);
+syncChip(myLogOnlyCheckbox, chipMyLogOnly);
 
 function setRenderStyle(style: RenderStyle): void {
   renderStyle = style;

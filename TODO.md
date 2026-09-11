@@ -10832,3 +10832,52 @@ great. The rest are struggling."*
       produced the same 3-biome map. Not chased down; it blocked capturing the
       other 9 biomes on screen, which were verified by data + contact sheet
       instead of live render.
+
+## Built: never-expiring player-only event log
+
+Direct ask: *"Can we get event logs like for just player as well? And don't
+make em. Expire. Always have em. Stored."*
+
+- [x] **Root cause of the expiry complaint**: `EventLogPanel`'s main `buffer`
+      is capped at `MAX_BUFFER = 4000` events, oldest trimmed first — a
+      deliberate memory cap for long runs, but it meant the player's own early
+      history could silently age out once a busy run pushed enough later
+      noise past it. There was already a precedent for a never-trimmed subset
+      (`headlineCache`, built earlier this session for quiet-mode births/
+      deaths) — this reuses the same shape for the player specifically.
+- [x] New `playerCache: SimEvent[]`, populated in `ingest()` alongside
+      `headlineCache` whenever an event names the current `playerId`
+      (`setPlayerId` called once per world load, right before `selectAgent`)
+      — never trimmed, regardless of `buffer`'s cap.
+- [x] New "My log" filter chip (`index.html`, `#my-log-only`) — a dedicated
+      one-click "just my history" view that reads `playerCache` directly, not
+      dependent on the map selection still pointing at the player (examining
+      any other creature, a routine player action, moves `filterAgentId` away
+      with no previous way back short of re-selecting the player agent).
+      Still respects the existing `hideNoise`/`hideLevelUps` display
+      toggles — those are view preferences, not a storage decision.
+- [x] The ordinary per-agent filter also benefits: `eventsForAgent(agentId)`
+      now routes to `playerCache` (not the trimmable `buffer`) whenever
+      `agentId === playerId`, so simply clicking back onto the player on the
+      map already gets the never-expiring history, "My log" checkbox or not.
+- [x] Live-verified end to end via Playwright against a real dev server
+      (forced a water tile next to the player, pressed the real drink key 3x
+      to generate genuine `consumed` events — no synthetic event injection):
+      - Default player filter showed all 3 real drink events
+        (`playerCacheLen: 3` via a temporary debug hook, matching the 3 real
+        actions taken).
+      - Selecting a different, wild agent correctly moved the log to show
+        *their* events instead (`filterAgentId` changed, the venonat's own
+        `behaviorChanged` event appeared).
+      - Checking "My log" while that other agent was still selected snapped
+        the log straight back to the same 3 player drink events — confirming
+        it reads `playerCache` independent of the current map selection, not
+        just at the moment the player happens to be selected.
+      - One real test-methodology wrinkle, not a product bug: `consumed`
+        (drink/eat) is in `NOISE_KINDS`, and the "Pokémon only" checkbox is
+        checked by default — so the first pass showed "no events" until
+        `hide-noise` was unchecked in the test, which was correct, expected
+        filtering, not a missing-cache bug.
+      - Temporary debug hooks (`EventLogPanel.__debugState()`,
+        `window.__pokuelike.eventLogDebug`/`selectAgentDebug`) used only to
+        drive this verification, removed afterward; not shipped.
