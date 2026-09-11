@@ -622,6 +622,38 @@ function worldTilePattern(patch: HTMLImageElement): HTMLCanvasElement {
   return scaled;
 }
 
+/**
+ * A field at `scale` pixels per tile, as a canvas to be drawn up to map size
+ * with smoothing on.
+ *
+ * The scale is how you control how far the smoothing spreads, and it is the
+ * only knob that does so without distorting the field's own values. Upscaling
+ * one pixel per tile by 20 ramps every edge over a whole tile; at 5 pixels per
+ * tile the same bilinear upscale is 4x, so the ramp is ~4px. Interior pixels
+ * are surrounded by their own value either way, so the plateaus stay exact —
+ * which matters for fog, where the three depths are levels, not a gradient,
+ * and must not bleed into each other.
+ */
+function fieldCanvasAt(world: World, scale: number, alphaAt: (index: number) => number): HTMLCanvasElement {
+  const small = document.createElement("canvas");
+  small.width = world.width * scale;
+  small.height = world.height * scale;
+  const sctx = small.getContext("2d")!;
+  const image = sctx.createImageData(small.width, small.height);
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      const alpha = alphaAt(y * world.width + x);
+      if (alpha <= 0) continue;
+      for (let sy = 0; sy < scale; sy++) {
+        let p = ((y * scale + sy) * small.width + x * scale) * 4 + 3;
+        for (let sx = 0; sx < scale; sx++, p += 4) image.data[p] = alpha;
+      }
+    }
+  }
+  sctx.putImageData(image, 0, 0);
+  return small;
+}
+
 /** One pixel per tile, as a canvas ready to be drawn up to map size with smoothing on. `upscaleField`'s sibling, for callers that want to composite the field rather than read its pixels. */
 function fieldCanvas(world: World, alphaAt: (index: number) => number): HTMLCanvasElement {
   const small = document.createElement("canvas");
@@ -1451,6 +1483,14 @@ const FOG_UNSEEN = 1;
 const FOG_REMEMBERED = 0.66;
 /** Underground only: visible but unlit, so a chamber reads as *lit* and a corridor as merely *seen*. */
 const FOG_UNLIT = 0.32;
+/**
+ * Roughly how many pixels the fog edge fades over. A SLIGHT FEATHER, not a
+ * blur — the first version rasterised the field one pixel per tile and let the
+ * 20x upscale spread every edge over a whole tile, which came back as too
+ * much: "lower the blur significantly, just make it a slight feather, not a
+ * deep blur."
+ */
+const FOG_FEATHER_PX = 4;
 
 const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElement }>();
 
@@ -1462,12 +1502,12 @@ const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElemen
  * never drawn at all, see those passes). Underground, tiles the player can see
  * but that no sunbeam lights get a lighter wash too.
  *
- * Drawn as one smoothly interpolated field, not a fill per tile. Per tile it
- * is a hard-edged circle of squares around the player and a stepped rectangle
+ * Drawn as one interpolated field, not a fill per tile. Per tile it is a
+ * hard-edged circle of squares around the player and a stepped rectangle
  * around everything remembered — the same quantisation the elevation shading,
  * the ground textures, the biome tints and the mountain mass all had. Depth is
- * rasterised one pixel per tile and bilinearly upscaled, so the light falls
- * off over about a tile instead of switching at a tile border.
+ * rasterised at `FOG_FEATHER_PX`-sized blocks and bilinearly upscaled, so the
+ * edge feathers over a few pixels instead of switching at a tile border.
  *
  * Cached and keyed on the vision sets plus `world.tick`: this runs every
  * frame, but in player mode the clock only advances when the player acts, so
@@ -1495,7 +1535,7 @@ function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | u
     lctx.fillRect(0, 0, width, height);
     lctx.globalCompositeOperation = "destination-in";
     lctx.imageSmoothingEnabled = true;
-    lctx.drawImage(fieldCanvas(world, (i) => {
+    lctx.drawImage(fieldCanvasAt(world, Math.max(1, Math.round(TILE_SIZE / FOG_FEATHER_PX)), (i) => {
       if (vision.visible.has(i)) {
         if (!underground) return 0;
         const x = i % world.width;

@@ -11477,10 +11477,22 @@ tile and filled a rectangle with it. Per tile, fog is a hard-edged circle of
 squares around the player and a stepped rectangle around everything
 remembered.
 
-`drawFog` now rasterises fog DEPTH one pixel per tile and bilinearly upscales
-it, so the light falls off over about a tile instead of switching at a tile
-border. Same technique as the elevation shading, the ground textures, the
-biome tints and the mountain mass.
+`drawFog` now rasterises fog DEPTH as a field and bilinearly upscales it, so
+the edge feathers instead of switching at a tile border. Same technique as the
+elevation shading, the ground textures, the biome tints and the mountain mass.
+
+**Corrected once, on their call.** The first version rasterised one pixel per
+tile and let the 20x upscale spread every edge over a whole tile: *"I was
+wrong. Can you lower the blur significantly, just make it a slight feather, not
+a deep blur."* The field is now rasterised in `FOG_FEATHER_PX`-sized blocks
+(4px, so 5 samples per tile) and upscaled 4x, which puts the ramp at about four
+pixels.
+
+Scale is the right knob for this and a threshold curve is not: the three fog
+depths are LEVELS, not a gradient, and steepening a combined field around 0.5
+would push "remembered" (0.66) up toward "unseen" (1.0). Supersampling leaves
+every interior pixel surrounded by its own value, so the plateaus stay exact
+and only the boundary ramps. `fieldCanvasAt` carries that reasoning.
 
 - The three depths used to be three slightly different colours as well —
   (5,6,10) opaque, (4,6,14) at 0.66, (4,6,16) at 0.32. At those alphas the hue
@@ -11490,7 +11502,7 @@ biome tints and the mountain mass.
   layer this runs every frame, but in player mode the clock only advances when
   the player acts, so the field rebuilds about once per turn instead of 60
   times a second.
-- Measured in player mode in the cave: median **16.6 ms, 60 fps**, p95 18.0 ms
+- Measured in player mode in the cave: median **16.6 ms, 60 fps**, p95 17.4 ms
   — no measurable cost. (The before/after here is honest-only on the after
   number: the "before" dev server had already hot-reloaded the restored code by
   the time it was measured, so both readings are the new build. The screenshots
