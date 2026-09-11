@@ -9449,6 +9449,25 @@ second change site. Live-verified (Playwright, real dev server): a fresh
 spawn's real stats matched the new formula (small deltas from a random
 nature roll, exactly as expected for any spawned agent — not a bug).
 
+**Immediate follow-up redirect on the first pass's split:** *"Yeah I'm
+okay with low attack generally, but higher hp and speed would be nice."*
+Kept defense/spDefense exactly where they landed (that's the actual lever
+against one-shots), pulled attack/spAttack down further, and pushed
+hp/speed past the first pass: `{ hp: 70, attack: 28, defense: 50,
+spAttack: 25, spDefense: 50, speed: 90 }` (BST 313, right around a real
+starter's own total). Same real-formula re-check:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 159% | 89% | 59% |
+| Haunter (28) | Sludge | 356% | 198% | 128% |
+| Haunter (28) | Psybeam | 235% | 133% | 84% |
+
+Speed 90 now beats Zubat/Golbat/Onix outright at moderate levels and
+closes most of the gap to Haunter — a level-20 human's speed (41) is up
+from an original 21, against Haunter's fixed 58. Data suite re-run:
+400/400.
+
 This is a numbers change to a stated design pillar (DESIGN.md/
 CAMPAIGN_DESIGN.md's "frailest thing in the ecosystem"), done on a
 direct, explicit ask rather than my own initiative — flagging that

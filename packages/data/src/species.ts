@@ -209,18 +209,20 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // human is still slower (21) than Golbat (32), Onix (35), or Haunter
     // (58) at every level tested, so the human always acts last.
     //
-    // Bumped to BST 280 (still meaningfully below a starter's ~310-320 —
-    // "the frailest thing in the ecosystem" premise holds, this isn't
-    // making the human a powerhouse) — the SAME damage check against this
-    // new block: Onix's Earthquake drops to 68-180% of maxHp (survivable
-    // at levels 15-20, still a real threat below that), Haunter's Sludge
-    // to 98-403% (Haunter is the level-5 cave's own final boss — staying
-    // genuinely dangerous there is intentional, not a miss). Speed 65 now
-    // beats Golbat (32) and is close behind Onix (35); Haunter (58) still
-    // outpaces a low-level human, matching its role as the hardest fight
-    // in the climb. Never unilaterally retuned before this — this exact
-    // ask, with the numbers behind it, is in TODO.md.
-    baseStats: { hp: 50, attack: 35, defense: 50, spAttack: 30, spDefense: 50, speed: 65 },
+    // First pass bumped to BST 280 (hp50/atk35/def50/spA30/spD50/spe65).
+    // Direct follow-up, redirecting that first pass: "Yeah I'm okay with
+    // low attack generally, but higher hp and speed would be nice" — kept
+    // defense/spDefense where they landed (that's what actually stops the
+    // one-shots), pulled attack/spAttack back down further, and pushed
+    // hp/speed higher than the first pass. Same real-formula check: Onix's
+    // Earthquake now 59-159% of maxHp across levels 10-20 (was 113-276% at
+    // the original BST-183 block), Haunter's Sludge 128-356% (still the
+    // level-5 cave's own final boss — staying dangerous there is
+    // intentional). Speed 90 now beats Zubat/Golbat/Onix outright at
+    // moderate levels and closes most of the gap to Haunter (58) by level
+    // 20 (41, up from an original 21) — matches the direct ask exactly:
+    // low attack is fine, hp and speed needed the room.
+    baseStats: { hp: 70, attack: 28, defense: 50, spAttack: 25, spDefense: 50, speed: 90 },
     types: ["normal"],
     moves: ["tackle"],
     activityPattern: "diurnal",
