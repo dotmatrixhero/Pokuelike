@@ -558,10 +558,13 @@ export type RenderStyle = "tile" | "ascii";
  */
 const lastFacing = new Map<string, SpriteDirection>();
 const lastPos = new Map<string, { x: number; y: number }>();
+/** Set by `facingOf` each frame: did this agent change tile since the last draw? Read by `walkFrameOf`. */
+const movedThisFrame = new Map<string, boolean>();
 
 function facingOf(agent: Agent): SpriteDirection {
   const prev = lastPos.get(agent.id);
   lastPos.set(agent.id, { x: agent.pos.x, y: agent.pos.y });
+  movedThisFrame.set(agent.id, !!prev && (prev.x !== agent.pos.x || prev.y !== agent.pos.y));
   if (!prev) return lastFacing.get(agent.id) ?? "down";
 
   const dx = agent.pos.x - prev.x;
@@ -573,6 +576,35 @@ function facingOf(agent: Agent): SpriteDirection {
   return direction;
 }
 
+/**
+ * Which walk frame an agent is on. Every species now has a standing pose and
+ * one step frame per facing (see packages/web/scripts/rip_pokemon_frames.py),
+ * so the cycle is simply stand/step alternating on each tile the agent
+ * actually enters — the sim moves agents a whole tile at a time, so tile
+ * changes ARE the footfalls, and driving the animation off a wall clock
+ * instead would have everything paddling in place at the same rate regardless
+ * of how fast it is really moving.
+ *
+ * An agent that has stopped settles back to standing rather than freezing
+ * mid-stride, but the timeout is measured in MILLISECONDS, not render frames:
+ * the canvas redraws at ~60fps while agents move on much slower sim ticks, so
+ * a frame-counted timeout expired between every footfall and the step pose was
+ * only ever on screen for a single frame — i.e. invisible.
+ */
+const walkPhase = new Map<string, { parity: number; lastMoveMs: number }>();
+const WALK_REST_MS = 400;
+
+function walkFrameOf(agent: Agent, moved: boolean): number {
+  const now = performance.now();
+  const state = walkPhase.get(agent.id) ?? { parity: 0, lastMoveMs: 0 };
+  if (moved) {
+    state.parity ^= 1;
+    state.lastMoveMs = now;
+  }
+  walkPhase.set(agent.id, state);
+  return now - state.lastMoveMs > WALK_REST_MS ? 0 : state.parity;
+}
+
 /** Drops facing/position memory for agent ids no longer in the world (dead, despawned) so the maps don't grow forever. */
 function pruneStaleFacings(world: World): void {
   const liveIds = new Set(world.agents.map((a) => a.id));
@@ -581,6 +613,8 @@ function pruneStaleFacings(world: World): void {
       lastPos.delete(id);
       lastFacing.delete(id);
       renderPos.delete(id);
+      walkPhase.delete(id);
+      movedThisFrame.delete(id);
     }
   }
 }
@@ -1223,7 +1257,7 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     agent.species === "human"
       ? humanSpriteKey(agent.controlledBy === "player", agent.archetype)
       : (def?.spriteKey ?? agent.species);
-  const sprite = getSprite(spriteKey, direction);
+  const sprite = getSprite(spriteKey, direction, walkFrameOf(agent, movedThisFrame.get(agent.id) ?? false));
   const isCorpse = agent.alive === false;
 
   // Faux drop shadow — direct ask: "faux shadows under the Pokémon, just

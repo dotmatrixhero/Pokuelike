@@ -9406,3 +9406,24 @@ typecheck clean.
       point-sample. Cleanest fix is an offline one-time area-resample to
       exactly 20px, but the water EDGE strips are cropped by math that may
       assume a 32px source — check that before touching them.
+
+## Built: all 151 Pokemon re-ripped with walk frames — see DESIGN.md
+
+- [x] Direct ask: "Do the Pokémon too. And make sure they aren't compressed."
+      1208 frames (151 species x 4 facings x 2 frames) from the never-touched
+      `kanto sprites.png`, at native 32x32 drawn 1:1. Extractor kept at
+      `packages/web/scripts/rip_pokemon_frames.py`.
+- [x] **Not compressed, confirmed by measurement**: shipped sprites were
+      already native 32x32 drawing at exactly 1:1. The real blur was the
+      canvas filter fixed in the previous commit.
+- [x] **Found a real pre-existing bug**: `nidoranf` was showing Sandslash art
+      and `sandslash` was showing Sandshrew — an off-by-one in the old rip,
+      proven by exact pixel match. Fixed by the re-rip.
+- [x] Two wrong mapping approaches were caught and thrown away (a computed
+      grid pitch, then a greedy assignment that put Arcanine on Venusaur's
+      block) before landing on the verified dex formula. Both written up.
+- [ ] Only the 2 mislabels above are *proven*. Others in that stretch looked
+      wrong by eye but their old art came from a different sheet, so they
+      can't be proven the same way — worth a look if any species seems off.
+- [ ] Walk cycle is 2 frames (stand/step). The trainer sheet has 3 frames per
+      facing, so humans could use a richer cycle than Pokemon currently do.

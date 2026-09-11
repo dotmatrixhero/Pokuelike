@@ -16020,3 +16020,71 @@ land/water boundary is a hard 90-degree staircase, and plain ground still
 shows a faint lattice of lighter/darker 20px squares, because floor decals
 are tile-sized stamps drawn at the tile origin. Those are a separate piece
 of work from fidelity — see TODO.md.
+
+## Pokemon: re-ripped from one sheet, with walk frames — and two were the wrong species
+
+Direct ask: "Do the Pokémon too. And make sure they aren't compressed."
+
+**On "compressed": they weren't, and now nothing is.** The 604 shipped sprites
+measure native 32x32 (their 2x2-block uniformity is 0.62-0.81, nowhere near
+the ~1.0 that would mean an upscale from 16x16) and they draw at
+`TILE_SIZE * SPRITE_SCALE` = 32, i.e. exactly 1:1. The real fidelity loss was
+the canvas filter documented in the previous entry, which was blurring art
+that needed no resampling at all; with `imageSmoothingEnabled = false` these
+now land pixel-exact.
+
+**Why a full re-rip rather than just adding frames.** `kanto sprites.png` —
+never touched before — holds all 151 species as per-species blocks of 4
+facings x 2 frames at native 32x32. But only 27 of the 151 shipped sprites
+match it pixel-for-pixel, so most came from a different sheet; walk frames
+taken from here would have jittered against those stand poses. Taking both
+frames from one sheet keeps every species internally consistent.
+
+**Mapping the sheet took three attempts, and the first two were wrong.**
+1. A computed block pitch. The grid drifts (real starts are
+   `0,65,130,195,259,324,389,...`), so a constant pitch was a pixel off on
+   most columns — enough that only Bulbasaur, sitting at offset 0, matched
+   exactly. That one anomaly is what exposed it.
+2. A greedy best-match assignment over silhouette+palette features. It
+   reproduced all 27 exact anchors, which looked like success — but it still
+   mis-assigned elsewhere, because once a block is taken the loser silently
+   gets its next best option. Arcanine ended up on Venusaur's spare block.
+   Ranking assignments by confidence and *looking* at the worst ones is what
+   caught it.
+3. What shipped: dex order with two inserted blocks — a spare Venusaur at
+   index 3, and Pikachu holding two (25 male, 26 female; adjacent-block
+   similarity 16.6 against 159 for the next closest pair). So
+   `block = (dex - 1) + (dex >= 4) + (dex >= 26)`. Verified by reading blocks
+   22-45 and 143-157 straight off the sheet: every one matches its predicted
+   species, through the ambiguous Pikachu/Nidoran stretch and out to Mew.
+
+**Two shipped sprites were the wrong species, and had been all along.**
+Measured by exact pixel comparison of old art against new: 26 species are
+byte-identical, 123 are a different artist's version of the same creature,
+and **2 were plain mislabels** — `nidoranf` was showing Sandslash and
+`sandslash` was showing Sandshrew, a run of off-by-one in the old rip. The
+sheet is unambiguous (Raichu at 27, Sandshrew at 28, Sandslash at 29), so the
+re-rip corrects them. Worth being precise about the limit here: those two are
+*proven* by exact match; neighbouring species in that stretch looked wrong by
+eye too, but since their old art came from another sheet entirely they cannot
+be proven the same way, so they are not claimed.
+
+The emitted `_left`/`_right` files deliberately keep the existing convention
+(the roles were read off cells that shipped files matched at score 0.0), so
+`getSprite`'s long-standing deliberate left/right swap keeps working untouched.
+
+**Animation.** `getSprite` takes a frame; frame 0 keeps the plain
+`<key>_<dir>.png` name every sprite has always used, walk frames are `_1`, and
+a missing walk frame falls back to standing so nothing can break. The cycle
+alternates stand/step on each tile an agent actually enters — the sim moves a
+whole tile at a time, so tile changes are the footfalls; driving it off a wall
+clock would have everything paddling in place at one rate no matter how fast
+it was really moving. The rest timeout is in MILLISECONDS, not render frames:
+a frame-counted version expired between every footfall at 60fps against slow
+sim ticks, leaving the step pose on screen for a single frame — invisible.
+
+**Verification.** Live in a browser with the sim actually running (the first
+attempt measured a paused world at tick 0 and saw nothing): by tick 52 the
+page had fetched 32 sprite files of which **16 were walk frames** —
+`kabutops_up_1`, `kingler_left_1`, `golduck_up_1`, `omastar_left_1` and so on,
+all 200. Engine 1533/1533, data 468/468, web build clean.

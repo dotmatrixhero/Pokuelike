@@ -40,7 +40,7 @@ function loadSprite(cacheKey: string, src: string): HTMLImageElement | null {
   return null;
 }
 
-export function getSprite(spriteKey: string, direction: SpriteDirection = "down"): HTMLImageElement | null {
+export function getSprite(spriteKey: string, direction: SpriteDirection = "down", frame = 0): HTMLImageElement | null {
   // Real finding, checked at full resolution (a first pass mistakenly
   // judged these from tiny scaled-down thumbnails and got it backwards —
   // see DESIGN.md): "_left.png" and "_right.png" ARE genuine, correctly
@@ -52,8 +52,13 @@ export function getSprite(spriteKey: string, direction: SpriteDirection = "down"
   // canvas mirroring needed, the art is already correct once you ask for
   // the right file.
   const resolvedDirection = direction === "left" ? "right" : direction === "right" ? "left" : direction;
-  const direct = loadSprite(`${spriteKey}_${resolvedDirection}`, `/sprites/${spriteKey}_${resolvedDirection}.png`);
+  // frame 0 is the standing pose and keeps the plain `<key>_<dir>.png` name
+  // every sprite has always used; walk frames are `_1`. A missing walk frame
+  // just falls back to standing, so a species with no animation still draws.
+  const suffix = frame > 0 ? `_${frame}` : "";
+  const direct = loadSprite(`${spriteKey}_${resolvedDirection}${suffix}`, `/sprites/${spriteKey}_${resolvedDirection}${suffix}.png`);
   if (direct) return direct;
+  if (frame > 0) return getSprite(spriteKey, direction, 0);
   if (resolvedDirection === "down") return null;
   // Still loading, or this species has no art for `direction` specifically
   // (an incomplete set) — the "down" sprite is always the safest fallback
