@@ -11019,3 +11019,53 @@ the bushes"*.
 - [ ] Ferns read slightly MORE lit than trees — their flat tops put more area
       in the gradient's strong zone. Looks like foliage catching light, so
       left alone.
+
+## Built: render perf — cached the two static layers
+
+Direct report: *"framerate from all the rendering is suffering lol."*
+
+- [x] **Profiled per pass before changing anything.** At 113ms/frame:
+
+      | pass | ms/frame |
+      |---|---|
+      | ground base (per-tile) | **36.5** |
+      | `drawTileVignette` (per-tile) | **30.1** |
+      | scatter fine | 2.1 |
+      | scatter features | 0.9 |
+      | water layer (already cached) | 0.11 |
+
+      Two passes were 66ms of a 113ms frame, and **both were redrawing
+      identical pixels every frame**.
+- [x] **Ground layer cached** to an offscreen canvas. Its inputs (biome ground
+      patch, elevation field) are functions of position only. Keyed per world
+      and layer by a signature over which tiles are `sand` — deliberately NOT a
+      hash of all terrain, since crops grow and fires burn every tick and that
+      would invalidate it every frame for changes it does not draw.
+- [x] The scatter passes stay OUTSIDE the cache: their contact shadows and
+      golden rim track the sun, and baking them would freeze both at whatever
+      hour the cache was built. They are ~3ms, so there was nothing to win.
+- [x] **Vignette layer cached.** `tileLight` is a pure hash of (x, y), so the
+      whole ambient vignette never changes — one blit now instead of a
+      save/globalAlpha/drawImage/restore per tile, 5400 times a frame, for a
+      0.03-alpha gradient.
+- [x] Frame rate, headless software Chromium (same harness throughout):
+
+      | | before | after |
+      |---|---|---|
+      | paused | 9.2 | **20.1** |
+      | default speed | 7.7 | **17.7** |
+      | max sim speed | 5.6 | 7.9 |
+
+      Max speed barely moves because the SIM dominates there, not rendering.
+- [x] **A bug this nearly shipped, caught only by looking.** The first version
+      of the ground cache ran on frame one, before any ground PNG had decoded,
+      so every tile took the not-loaded fallback and the cache baked a whole
+      map of dark fill — and since the cache key never changed, kept it
+      forever. The map rendered entirely black. The profiler cheerfully
+      reported 22.4 fps, *better* than the honest 20.1, because it had stopped
+      drawing the ground at all. `drawGroundBacking` now flags a pending-art
+      frame and `groundLayerCanvas` refuses to store it.
+- [ ] Next candidates if it is still not enough: the main tile loop still walks
+      all 5400 tiles every frame to draw obstacles/crops/tints, and the whole
+      map is rendered regardless of what is actually on screen — a viewport
+      cull would be the big one.
