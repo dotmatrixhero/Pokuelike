@@ -25,7 +25,7 @@ import {
   strengthenRapportMutual,
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
-import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
+import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, takeWholeOffering, tendSoil, thirstReliefFactor } from "./flora.js";
 import { FOOD_MATERIAL_IDS, MATERIALS, foodNutritionMultiplierOf, harvestableAt, takeHarvest, thirstReliefOf } from "./harvest.js";
 import { addItem, carriedWeight, removeItem } from "./inventory.js";
 import { pickBestMove, tickCooldowns, useMove, withinMoveRange } from "./combat.js";
@@ -1427,13 +1427,18 @@ export function applyTreatSeeking(world: World, agent: Agent, log?: EventLog, rn
     // Direct ask: "cooked food... heals as well as satisfies hunger" —
     // whatever this treat's flavor names, a cooked dish's own healFraction.
     healFromCookedFood(world, agent, tile.flavor);
-    tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
-    recordGrazing(tile);
     const giver = world.agents.find((a) => a.id === tile.offeredBy);
     // "cooked food gets you more rapport when offered" — the same tile
     // flavor's own cooked.rapportMultiplier, 1 (unchanged) for anything else.
     if (giver) applyPlayerFeedingBonus(world, agent, giver, rng, tile.flavor ? (world.items?.[tile.flavor]?.cooked?.rapportMultiplier ?? 1) : 1);
-    tile.offeredBy = undefined;
+    // A gift is taken whole, and the tile goes with it — see
+    // flora.ts's `takeWholeOffering`. Ordinary wild food is grazed down a
+    // bite at a time as before. Read BEFORE the clear, since clearing wipes
+    // `flavor` and `offeredBy`.
+    if (!takeWholeOffering(world, tile)) {
+      tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+      recordGrazing(tile);
+    }
     log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
     return true;
   }
@@ -2384,7 +2389,11 @@ export function tickAgentAction(
           if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
           // Direct ask: "cooked food... heals as well as satisfies hunger."
           healFromCookedFood(world, agent, targetTile?.flavor);
-          if (targetTile?.stock !== undefined) {
+          // The offering branch below reads `targetTile.offeredBy` and
+          // `flavor`, so the whole-gift clear has to happen after it — see
+          // the `takeWholeOffering` call at the end of this block.
+          const wasOffering = targetTile?.offeredBy !== undefined && targetTile.terrain === "food";
+          if (!wasOffering && targetTile?.stock !== undefined) {
             targetTile.stock = Math.max(0, targetTile.stock - CONSUME_STOCK_AMOUNT);
             recordGrazing(targetTile); // real self-feeding grazing event — see flora.ts's "Grazing scars"
           }
@@ -2406,6 +2415,10 @@ export function tickAgentAction(
             }
             targetTile.offeredBy = undefined;
           }
+          // A gift is taken whole: the tile goes with it rather than leaving
+          // half a berry patch behind. Direct report: "when I offer a crop it
+          // gets eaten but never fades away."
+          if (wasOffering) takeWholeOffering(world, targetTile);
           // Herbs' own real hook (CROPS_DESIGN.md): "the humble remedy" — a
           // short status-immunity grant on eat, well under Safeguard's own
           // 60-tick/herd-radius grant (self-only here, no aura), reusing the

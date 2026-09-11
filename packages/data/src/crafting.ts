@@ -147,6 +147,12 @@ export const ITEMS: Record<string, ItemDef> = {
   coinPouch: { key: "coinPouch", name: "Coin Pouch", weight: 1 },
 };
 
+/**
+ * How many units one cooking recipe yields. See the cooked dishes in RECIPES
+ * for the ask this comes from.
+ */
+export const COOKED_SERVINGS = 3;
+
 function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1, requiresNearFire = false): RecipeDef {
   return { id, name, inputs: inputs.map(([itemKey, count]) => ({ itemKey, count })), output: { itemKey: id, count: outputCount }, turns, knownAtStart, requiresNearFire };
 }
@@ -203,10 +209,17 @@ export const RECIPES: Record<string, RecipeDef> = {
   // knappedFlint are left exactly as they were; that's a real, separate,
   // still-open gap (nothing discovers ANY non-knownAtStart recipe), not
   // something this fix should paper over.
-  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, true, 1, true),
-  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, true, 1, true),
-  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, true, 1, true),
-  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, true, 1, true),
+  //
+  // Direct ask: "For cooked food can you have them be like you get 3x units
+  // of the item when cooking? That way you could feasibly share a meal."
+  // `COOKED_SERVINGS` is the `outputCount` on every dish below — a cooked
+  // meal is a meal for the party, not a single bite, which is what makes
+  // cooking worth the fire and the turns over just eating the crop raw.
+  // Three servings weigh three, so it is a real pack cost, not free value.
+  roastedApple: recipe("roastedApple", "Roasted Apple", [["apple", 1]], 4, true, COOKED_SERVINGS, true),
+  berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, true, COOKED_SERVINGS, true),
+  potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, true, COOKED_SERVINGS, true),
+  vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, true, COOKED_SERVINGS, true),
   // `knownAtStart: true` — same reachability reasoning as the crop dishes
   // above (CLAUDE.md's own lesson: a recipe with `knownAtStart: false` is
   // permanently unreachable today, no discovery mechanic exists), and
@@ -214,7 +227,7 @@ export const RECIPES: Record<string, RecipeDef> = {
   // available — gating the recipe behind an unlock nothing can grant
   // would make it exactly the "exists in the data, never fires" bug this
   // project keeps finding and fixing.
-  roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, 1, true),
+  roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, COOKED_SERVINGS, true),
   // Waterskin: known at start, same tier as torch/club — water is core
   // survival, not a discovery-gated craft.
   waterskin: recipe("waterskin", "Waterskin", [["cordage", 1], ["fiber", 2]], 6, true),

@@ -12040,6 +12040,74 @@ stairs here."
       part of why a level change read as the whole game resetting. Play mode
       now stays on the You panel.
 
-- [x] Full suite green: engine **1658**, data **477**, web build clean.
+- [x] Full suite green at that commit: engine **1653**, data **476**, web build clean.
       Live-verified through the real UI: both Venonat cross and are standing
       beside the player on level 2, still bonded, on a freshly dark map.
+
+## Round: cooked meals feed the party, gifts fade, the ticker reads downward
+
+Three of the eight asks in one message, each small and each verified through
+the real UI rather than only by unit test.
+
+### Cooked food is three servings
+
+Direct ask: *"For cooked food can you have them be like you get 3x units of
+the item when cooking? That way you could feasibly share a meal."*
+
+- [x] `COOKED_SERVINGS = 3` is the `outputCount` on all five cooked recipes
+      (roasted apple, berry stew, potato mash, vegetable stew, roasted meat).
+      Non-cooked recipes are untouched — torch and poultice still yield 1.
+- [x] Three servings weigh three, so it is a real pack cost rather than free
+      value, and that is what makes cooking worth the fire and the turns over
+      eating the crop raw.
+- [x] Live through the app, not just the data table: 2 apples in, craft
+      Roasted Apple, pack comes out `apple ×1, roastedApple ×3`.
+
+### An offering is one gift
+
+Direct report: *"Also when I offer a crop it gets eaten but never fades away.
+That's weird."*
+
+- [x] **Not a rendering bug.** `OFFERED_FOOD_STOCK` was
+      `CONSUME_STOCK_AMOUNT * 2`, so one feeding ate half the offering and left
+      the other half on the ground as an ordinary food tile — which
+      `growFlora` will even let SPREAD into neighbours. The gift outlived the
+      moment it was given for.
+- [x] The revert-to-floor machinery was already fine on both layers; I checked
+      that before touching it, and both of those probes passed on the
+      unmodified code.
+- [x] `flora.ts`'s `takeWholeOffering` now clears the tile outright the instant
+      an offering is eaten — terrain, stock, flavor, offeredBy, all of it —
+      rather than decrementing. Immediate, not "next tick": the player is
+      watching the tile they just gave away.
+- [x] Wired into both eat paths (`applyTreatSeeking` and `seekFood`'s own
+      offered-berry branch). Ordinary wild food is still grazed a bite at a
+      time — the guard is `offeredBy`.
+- [x] The giver's rapport is read BEFORE the clear, so feeding still pays. A
+      test covers exactly that ordering, because getting it backwards would
+      silently delete the whole point of the verb.
+- [x] 5 tests; proved they fail without the fix (2 failed / 3 passed with the
+      change stashed).
+
+### The event ticker reads top to bottom
+
+Direct ask: *"I want the excerpt of log to be top to bottom for the one at top
+of screen."*
+
+- [x] Dropped the `.reverse()`. Oldest at the top, newest at the bottom, so
+      the newest line sits closest to the map.
+- [x] The opacity ramp had to flip with it, and is indexed from the BOTTOM
+      rather than the top — a short log is missing its OLDEST entries, so
+      with two rows the newer one is still fully opaque instead of the ramp
+      starting in the wrong place.
+- [x] Live: five markers pushed in order render as `marker 3` (0.5) / `marker
+      4` (0.75) / `marker 5` (1.0), reading down the screen.
+
+### Also
+
+- [x] The dev-only `window.__pokuelike` debug surface gained `playerAct` and
+      `say`, so a check can drive a real turn instead of poking engine state.
+      Dev build only, same as the rest of that object.
+- [x] Corrected a test-count line I got wrong in the stairs entry above
+      (engine 1653 / data 476 at that commit, not 1658 / 477).
+- [x] Full suite green: engine **1658**, data **476**, web build clean.

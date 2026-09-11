@@ -1096,7 +1096,11 @@ function renderEventTicker(): void {
     eventTickerEl.hidden = true;
     return;
   }
-  const recent = actionLogPanel.snapshot().slice(-3).reverse(); // newest first
+  // Direct ask: "I want the excerpt of log to be top to bottom for the one at
+  // top of screen." Oldest at the top, newest at the bottom — you read down
+  // the strip the way you read anything else, and the newest line sits
+  // closest to the map you are looking at.
+  const recent = actionLogPanel.snapshot().slice(-3);
   // Rebuilding three rows every frame is wasteful; only touch the DOM when the
   // text actually changed.
   const signature = recent.map((e) => `${e.tick}:${e.count}:${e.text}`).join("|");
@@ -1108,8 +1112,12 @@ function renderEventTicker(): void {
   recent.forEach((entry, i) => {
     const row = document.createElement("div");
     row.className = `ticker-row${entry.kind === "you" ? " you" : ""}`;
-    // Newest solid, oldest at half — exactly as asked.
-    row.style.opacity = String([1, 0.75, 0.5][i] ?? 0.5);
+    // Newest solid, oldest at half. The strip now reads oldest-first, so the
+    // fade runs the other way: index 0 is the OLDEST row. Sliced from the end,
+    // a short log is missing its oldest entries, so the ramp is indexed from
+    // the bottom rather than the top — with two entries the newer one is still
+    // fully opaque.
+    row.style.opacity = String([1, 0.75, 0.5][recent.length - 1 - i] ?? 0.5);
     row.textContent = entry.count > 1 ? `${entry.text} \u00d7${entry.count}` : entry.text;
     eventTickerEl.appendChild(row);
   });
@@ -3297,6 +3305,18 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
   (window as unknown as { __pokuelike: unknown }).__pokuelike = {
     get world() {
       return world;
+    },
+    /**
+     * Drive a real player turn from a check, so a verification exercises the
+     * same path a tap does instead of poking engine state directly. CLAUDE.md's
+     * standing rule: run the real thing, don't reason from the source.
+     */
+    playerAct(action: PlayerAction): void {
+      playerAct(action);
+    },
+    /** Push a line into the action log, for checks that need a known sequence of entries. */
+    say(text: string): void {
+      say(text);
     },
     /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
     biomeAt(x: number, y: number): string | undefined {

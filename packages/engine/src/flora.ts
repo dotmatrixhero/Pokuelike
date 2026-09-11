@@ -95,6 +95,34 @@ export const MATURATION_TICKS = 20;
  * for the actual before/after migration-event counts this produced.
  */
 export const CONSUME_STOCK_AMOUNT = 0.35;
+
+/**
+ * An offering the player put down (`Tile.offeredBy`) is a single gift, not a
+ * patch. Direct report: "when I offer a crop it gets eaten but never fades
+ * away. That's weird."
+ *
+ * It wasn't a rendering bug — an offering went down with `CONSUME_STOCK_AMOUNT
+ * * 2` stock, so one feeding ate half of it and left the other half sitting
+ * on the ground as an ordinary food tile, which can even spread. Now the
+ * whole thing goes when it is taken: you hand over a berry, they eat the
+ * berry, the berry is gone. Returns true if this was an offering and the tile
+ * was cleared, so the caller can skip the ordinary partial-stock decrement.
+ *
+ * Deliberately immediate rather than leaving `growFlora` to revert it on the
+ * next tick: the player is watching the tile they just gave away, and a tick
+ * of empty-but-still-drawn food is exactly the "never fades" they reported.
+ */
+export function takeWholeOffering(world: World, tile: Tile | undefined): boolean {
+  if (!tile?.offeredBy || tile.terrain !== "food") return false;
+  tile.terrain = "floor";
+  tile.stock = undefined;
+  tile.offeredBy = undefined;
+  tile.flavor = undefined;
+  tile.quality = undefined;
+  tile.fertility = harvestRecoveryFertility(tile);
+  invalidateResourceIndex(world);
+  return true;
+}
 /**
  * How much stock a freshly-matured (or worldgen-placed) "food" tile starts
  * with — was an implicit 1 everywhere; now a real, named knob. Direct ask:
