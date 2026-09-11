@@ -125,6 +125,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.agentId, event.species)} recovered consciousness at ${event.hp} hp`;
     case "looted":
       return `${idLabel(world, event.looterId, event.looterSpecies)} looted ${event.itemKey} from ${idLabel(world, event.fromId, event.fromSpecies)}`;
+    case "butchered":
+      return `${idLabel(world, event.agentId, event.species)} butchered ${idLabel(world, event.fromId, event.fromSpecies)} for ${event.itemKeys.join(", ")}`;
     case "foodDelivered":
       return `${idLabel(world, event.carrierId, event.carrierSpecies)} delivered food to ${idLabel(world, event.receiverId, event.receiverSpecies)}`;
     case "carrying":

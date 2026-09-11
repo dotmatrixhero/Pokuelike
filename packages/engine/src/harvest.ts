@@ -28,7 +28,16 @@ import { CROP_IDS, FOOD_CROPS, type CropId } from "./crops.js";
  * defensive fallback for the rare tile that somehow has no flavor set.
  */
 
-export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | CropId;
+/**
+ * `"meat"`/`"hide"` (direct ask: "can't loot or butcher dead units...
+ * maybe you need a knife to do more") aren't gathered off a tile at all —
+ * `player.ts`'s "butcher" action yields them directly off a truly-dead
+ * corpse's own body — but they live in this same table/union since
+ * everything else that names an inventory-stack item does (itemName/
+ * itemWeight in the data package's crafting.ts fall back to `MATERIALS`
+ * for exactly this reason).
+ */
+export type MaterialId = "lichen" | "deadwood" | "flint" | "food" | "meat" | "hide" | CropId;
 
 const CROP_MATERIALS = Object.fromEntries(CROP_IDS.map((id) => [id, { name: FOOD_CROPS[id].name, weight: 1 }])) as Record<CropId, { name: string; weight: number }>;
 
@@ -37,18 +46,25 @@ export const MATERIALS: Record<MaterialId, { name: string; weight: number }> = {
   deadwood: { name: "Deadwood", weight: 2 },
   flint: { name: "Flint", weight: 1 },
   food: { name: "Berries", weight: 1 },
+  meat: { name: "Meat", weight: 2 },
+  hide: { name: "Hide", weight: 2 },
   ...CROP_MATERIALS,
 };
 
 /**
  * Every material a gathered/offered food tile can actually be — the plain
  * `"food"` fallback plus every real crop (`crops.ts`'s `CROP_IDS`, herbs
- * included). What `player.ts`'s `eat`/`offer` treat as "a berry in the
- * pack" now that gathering hands back a specific crop instead of always
- * generic Berries — checking a bare `itemKey === "food"` would silently
- * stop recognizing anything else in the pack as edible.
+ * included) — plus `"meat"`, a butchered corpse's own real yield, edible
+ * raw straight out of the pack same as any berry (no engine changes
+ * needed beyond this list: `foodNutritionMultiplierOf`/`thirstReliefOf`
+ * below already default to a neutral 1x/0 for anything not a real crop).
+ * `"hide"` deliberately is NOT here — it's a crafting material, not food.
+ * What `player.ts`'s `eat`/`offer` treat as "a berry in the pack" now that
+ * gathering hands back a specific crop instead of always generic Berries
+ * — checking a bare `itemKey === "food"` would silently stop recognizing
+ * anything else in the pack as edible.
  */
-export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", ...CROP_IDS];
+export const FOOD_MATERIAL_IDS: readonly MaterialId[] = ["food", "meat", ...CROP_IDS];
 
 /**
  * The nutrition multiplier for a carried food item with no tile to read

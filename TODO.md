@@ -9656,3 +9656,70 @@ tree) at a named tile. Full engine suite: 1536/1536. `tsc --noEmit`
 (engine) and the real `pnpm --filter @pokuelike/web build` (not just
 `tsc --noEmit` on its own — CLAUDE.md's own lesson on why that
 specifically matters for this package) both clean.
+
+## Built: wishlist item 8 — loot and butcher dead units, a knife does more
+
+Direct ask: *"can't loot or butcher dead units. need to be able to -
+maybe you need a knife to do more but that should be a thing."*
+
+**Two distinct verbs, not one.** Loot was already a real engine
+mechanism (`support.ts`'s `applyLooting`) — any wild agent's own behavior
+tree can already take an item off a fainted-or-dead agent's carried
+`inventory`. It just had no player-facing action to trigger it on
+demand. New `{kind: "loot"}` `PlayerAction` (key `o`) reuses that
+function completely unmodified — "the player is just another agent to
+the sim" applies here too, so there was nothing player-specific to
+write. Butcher is genuinely new: a one-time real-material harvest off a
+TRULY dead corpse's own body (not its inventory) — `meat` bare-handed;
+`meat ×2` and `hide` with a held `flintKnife` (`{kind: "butcher"}`, key
+`p`). A new `Agent.butchered` flag marks a corpse used up so it can't be
+re-harvested for infinite materials before `CORPSE_PERSIST_TICKS` prunes
+it; wild scavenging is untouched — an animal still eating from an
+already-butchered body isn't a loophole this needed to close, just an
+ordinary thing to happen to a corpse.
+
+**Respected an existing ruling instead of re-deciding it.** DESIGN.md
+already draws a fainted-vs-truly-dead line for eating ("only true death
+is consumable"). Loot works on either (matches `applyLooting`'s existing
+behavior); butcher only works on a true kill (`isTrulyDead`) — a merely
+fainted agent can be looted mid-fight but not carved up.
+
+**New materials, made reachable immediately, not left dangling.**
+`meat`/`hide` (harvest.ts's `MaterialId`/`MATERIALS`) — `meat` added to
+`FOOD_MATERIAL_IDS` so it's directly edible raw with zero extra code
+(its nutrition/thirst-relief functions already default to a neutral
+1x/0 for anything that isn't a real crop). `hide` is crafting-only, no
+recipe yet — same situation flint/deadwood were in before their own
+consuming recipes existed, not a hidden dead end. Also added a real
+`roastedMeat` cooked recipe (data package only, zero engine changes —
+the cooking machinery is fully generic over `ItemDef.cooked`) so a
+knife's richer yield has an immediate payoff beyond "heavier raw food."
+`knownAtStart: true` on it, deliberately — this project has hit the
+"recipe exists, nothing can ever discover it" bug twice already
+(cooking recipes, TODO.md above; axe/machete/knappedFlint, still open);
+meat only ever enters the pack via `butcher`, itself always available,
+so gating the recipe behind a discovery mechanic that doesn't exist yet
+would be the exact same mistake a third time.
+
+**Tests.** New `test/lootButcher.test.ts`, 10 cases: loot from a truly
+dead AND a merely fainted corpse, loot failing with nothing to take;
+bare-handed butcher (meat only), knife butcher (meat ×2 + hide), fainted-
+not-dead refusing butcher, an already-butchered corpse refusing a second
+harvest, no corpse in reach failing, no carry headroom failing outright,
+and a partial-capacity case (takes what fits, still marks the corpse
+used up). Full engine suite: 1546/1546. Data package (crafting/recipe
+reachability tests among them): 400/400. `tsc --noEmit` clean on engine,
+data, and runner; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**, not just read from the test file: a
+real corpse placed on the player's tile, looted (took its carried
+flint), then butchered bare-handed (1 meat) — a second butcher attempt
+on the same corpse correctly refused ("Nothing nearby to butcher — a
+knife would get you more"). Separately, with a `flintKnife` equipped,
+butchering yielded `meat ×2` and `hide` as designed. Confirmed the raw
+meat this produces is genuinely eatable (hunger 0.497 → 0.895 on a real
+`eat`), and confirmed `roastedMeat` actually shows up in the pack menu's
+Make list next to a deployed fire ("Roasted Meat · meat · 6 turns · tap
+to make") — not just present in the recipe table, actually reachable
+from a real inventory state, the same live-reachability bar this
+project's cooking-recipe fix above insists on.

@@ -115,6 +115,12 @@ export const ITEMS: Record<string, ItemDef> = {
   berryStew: { key: "berryStew", name: "Berry Stew", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
   potatoMash: { key: "potatoMash", name: "Potato Mash", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.2 } },
   vegetableStew: { key: "vegetableStew", name: "Vegetable Stew", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.5 } },
+  // Direct ask: "can't loot or butcher dead units... maybe you need a
+  // knife to do more" — `player.ts`'s "butcher" action puts real `meat` in
+  // the pack; a heavier cooked payoff than the crop dishes above (real
+  // protein, not a berry) is the reason to actually carry it back to a
+  // fire instead of just eating it raw.
+  roastedMeat: { key: "roastedMeat", name: "Roasted Meat", weight: 1, cooked: { healFraction: 0.25, rapportMultiplier: 2.5 } },
 };
 
 function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1, requiresNearFire = false): RecipeDef {
@@ -170,6 +176,14 @@ export const RECIPES: Record<string, RecipeDef> = {
   berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, true, 1, true),
   potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, true, 1, true),
   vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, true, 1, true),
+  // `knownAtStart: true` — same reachability reasoning as the crop dishes
+  // above (CLAUDE.md's own lesson: a recipe with `knownAtStart: false` is
+  // permanently unreachable today, no discovery mechanic exists), and
+  // meat itself only ever enters the pack via `butcher`, already always
+  // available — gating the recipe behind an unlock nothing can grant
+  // would make it exactly the "exists in the data, never fires" bug this
+  // project keeps finding and fixing.
+  roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, 1, true),
 };
 
 export const KNOWN_AT_START: string[] = Object.values(RECIPES).filter((r) => r.knownAtStart).map((r) => r.id);

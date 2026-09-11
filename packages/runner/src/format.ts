@@ -56,6 +56,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) recovered consciousness at ${event.hp} hp`;
     case "looted":
       return `[tick ${event.tick}] ${speciesDisplayName(event.looterSpecies)} (${event.looterId}) looted ${event.itemKey} from ${speciesDisplayName(event.fromSpecies)} (${event.fromId})`;
+    case "butchered":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) butchered ${speciesDisplayName(event.fromSpecies)} (${event.fromId}) for ${event.itemKeys.join(", ")}`;
     case "foodDelivered":
       return `[tick ${event.tick}] ${speciesDisplayName(event.carrierSpecies)} (${event.carrierId}) delivered food to ${speciesDisplayName(event.receiverSpecies)} (${event.receiverId})`;
     case "carrying":

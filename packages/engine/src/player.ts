@@ -8,7 +8,7 @@ import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
 import { FOOD_MATERIAL_IDS, GATHER_TURNS, MATERIALS, foodNutritionMultiplierOf, harvestLeft, harvestableAt, takeHarvest, thirstReliefOf, type MaterialId } from "./harvest.js";
 import { addItem, carriedWeight, countOf, hasAll, removeItem } from "./inventory.js";
-import { carryCapacityOf, healFromCookedFood } from "./support.js";
+import { applyLooting, carryCapacityOf, healFromCookedFood, isTrulyDead } from "./support.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, resolveHit } from "./predation.js";
@@ -349,7 +349,57 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       invalidateResourceIndex(world);
       return true;
     }
+    case "loot": {
+      // Direct ask: "can't loot or butcher dead units." Reuses
+      // support.ts's `applyLooting` unmodified — the player is just
+      // another agent to the sim (this file's own doc comment), and that
+      // function already has no relationship restriction ("predator,
+      // rival, even the victim's own herd" per its own doc comment), so
+      // there's nothing player-specific to add here at all.
+      return applyLooting(world, agent, log);
+    }
+    case "butcher": {
+      // Direct follow-up, same report: "maybe you need a knife to do more
+      // but that should be a thing." Only a TRULY dead corpse — DESIGN.md's
+      // "only true death is consumable" ruling, the same line `eat`/
+      // `applyScavenging` already draw between fainted (lootable, not
+      // eatable) and truly dead (both).
+      const corpse = corpseWithinReach(world, agent, (a) => isTrulyDead(a) && !a.isEgg && !a.butchered);
+      if (!corpse) return false;
+      const capacity = carryCapacityOf(world, agent);
+      const knifeEquipped = agent.equipment?.held === "flintKnife";
+      const yields: MaterialId[] = knifeEquipped ? ["meat", "meat", "hide"] : ["meat"];
+      const butchered: { itemKey: string; count: number }[] = [];
+      for (const m of yields) {
+        if (carriedWeight(agent) + MATERIALS[m].weight > capacity) continue;
+        addItem(agent, m, 1, MATERIALS[m].weight);
+        const existing = butchered.find((b) => b.itemKey === m);
+        if (existing) existing.count++;
+        else butchered.push({ itemKey: m, count: 1 });
+      }
+      // Nothing fit at all — leave the corpse un-butchered so a fuller
+      // pack later (or dropping something first) can still come back for
+      // it, same "no room, nothing happened" shape `gather` already has.
+      if (butchered.length === 0) return false;
+      corpse.butchered = true;
+      out.butchered = butchered;
+      log?.record({ kind: "butchered", tick: world.tick, agentId: agent.id, species: agent.species, fromId: corpse.id, fromSpecies: corpse.species, itemKeys: butchered.map((b) => b.itemKey) });
+      return true;
+    }
   }
+}
+
+/** A truly-dead, not-yet-butchered corpse (or anything else `pred` names) on the player's own tile or one of the 8 around it — same reach `waterWithinReach`/`nearFire` already scan. */
+function corpseWithinReach(world: World, agent: Agent, pred: (candidate: Agent) => boolean): Agent | undefined {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = agent.pos.x + dx;
+      const y = agent.pos.y + dy;
+      const found = world.agents.find((a) => a.id !== agent.id && a.layer === agent.layer && a.pos.x === x && a.pos.y === y && pred(a));
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 /**

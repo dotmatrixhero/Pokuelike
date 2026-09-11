@@ -602,6 +602,13 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       if (countOf(player, "deadwood") < 2) return "Not enough deadwood — you need 2.";
       return "Nowhere to put it there.";
     }
+    case "loot":
+      return ok ? "You loot the body." : "Nothing nearby to loot.";
+    case "butcher": {
+      if (!ok) return player.equipment?.held === "flintKnife" ? "Nothing nearby left to butcher." : "Nothing nearby to butcher — a knife would get you more.";
+      const parts = outcome.butchered?.map((b) => `${itemName(b.itemKey).toLowerCase()}${b.count > 1 ? ` ×${b.count}` : ""}`) ?? [];
+      return `You butcher it: ${parts.join(", ")}.`;
+    }
   }
 }
 
@@ -1059,6 +1066,18 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "v") {
     e.preventDefault();
     playerAct({ kind: "lightFire", dx: lastFacing.dx, dy: lastFacing.dy });
+    return;
+  }
+  // Direct ask: "can't loot or butcher dead units. need to be able to -
+  // maybe you need a knife to do more but that should be a thing."
+  if (e.key === "o") {
+    e.preventDefault();
+    playerAct({ kind: "loot" });
+    return;
+  }
+  if (e.key === "p") {
+    e.preventDefault();
+    playerAct({ kind: "butcher" });
     return;
   }
   if (e.key === ">" || e.key === "<") {

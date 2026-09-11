@@ -287,6 +287,21 @@ export type SimEvent =
       itemKey: string;
     }
   | {
+      /**
+       * Direct ask: "can't loot or butcher dead units... maybe you need a
+       * knife to do more." A real material harvest off a truly-dead
+       * corpse's own body (not an item transfer — see `"looted"` above for
+       * that), one-time per corpse (`Agent.butchered`).
+       */
+      kind: "butchered";
+      tick: number;
+      agentId: string;
+      species: string;
+      fromId: string;
+      fromSpecies: string;
+      itemKeys: string[];
+    }
+  | {
       kind: "foodDelivered";
       tick: number;
       carrierId: string;

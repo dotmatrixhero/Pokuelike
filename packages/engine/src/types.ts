@@ -672,7 +672,29 @@ export type PlayerAction =
    * fails against a wall, water, or anything else not walkable. Fails
    * (still costs the turn) without a held torch or without 2 deadwood.
    */
-  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 };
+  | { kind: "lightFire"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
+  /**
+   * Direct ask: "can't loot or butcher dead units. need to be able to."
+   * Takes one item off a fainted-or-dead agent's own carried `inventory`
+   * (support.ts's `applyLooting`, already used by any wild agent's own
+   * behavior tree — reused unmodified here, "just another agent to the
+   * sim" applies to this verb too) within `LOOT_RADIUS`. Fails (still
+   * costs the turn) with nothing fainted/dead nearby, nothing left in its
+   * inventory, or no carry headroom for the next item.
+   */
+  | { kind: "loot" }
+  /**
+   * Direct ask, same report: "maybe you need a knife to do more but that
+   * should be a thing." A one-time real-material harvest off a TRULY dead
+   * (not merely fainted — DESIGN.md's "only true death is consumable"
+   * ruling, same line `eat`/`applyScavenging` already draw) corpse's own
+   * body, distinct from `loot`'s item-transfer: bare-handed yields meat
+   * only; a held `flintKnife` yields more (meat and hide). One-time per
+   * corpse — see `Agent.butchered`. Fails (still costs the turn) with no
+   * butcherable corpse within reach, or with no carry headroom for any of
+   * what it would yield.
+   */
+  | { kind: "butcher" };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -693,6 +715,8 @@ export interface PlayerActionOutcome {
   attackedId?: string;
   /** `attack` resolving as a terrain-directed swing (axe/machete) instead — MoveSpec.terrainEffect's own before/after. */
   felled?: { from: TerrainKind; to: TerrainKind; yields?: MaterialId };
+  /** `butcher` succeeding: what the corpse actually yielded (capacity-trimmed — see player.ts's own case). */
+  butchered?: { itemKey: string; count: number }[];
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -1249,6 +1273,20 @@ export interface Agent {
   finishingPool?: number;
   /** World.tick a true kill happened, for the corpse-persistence pruning window in simulation.ts. */
   diedAtTick?: number;
+  /**
+   * Direct ask: "can't loot or butcher dead units. need to be able to."
+   * `player.ts`'s "butcher" action is a one-time real-material harvest off
+   * a truly-dead corpse's own body (meat, plus hide with a knife held) —
+   * distinct from looting, which takes items the corpse was already
+   * carrying and can happen more than once (one item per visit, until its
+   * `inventory` runs out). Set the instant a butcher succeeds so the same
+   * corpse can't be re-butchered for infinite materials before
+   * `CORPSE_PERSIST_TICKS` prunes it; wild scavenging (support.ts's
+   * `applyScavenging`) is unaffected — an animal eating directly from an
+   * already-butchered body is a separate, ordinary thing to happen to a
+   * corpse, not a loophole this flag needs to close.
+   */
+  butchered?: boolean;
   /**
    * The one major status condition this agent currently carries, if any —
    * see `StatusKind` and status.ts. `ticksRemaining` only matters for
