@@ -10975,3 +10975,38 @@ Direct ask: *"We will need contact shadows... And highlights."*
       as golden hour, but they are plain dials if it is too much in motion.
 - [ ] Still on the menu: real local lights from campfires/torches/lava (layer
       4), the one with actual gameplay consequence rather than mood.
+
+## Fixed: shadows and highlights were real but nearly invisible
+
+Direct reports: *"I don't really see the contact shadows that distinctly. And
+certainly not highlight?"* then *"Love it on the trees. But not seeing much on
+the bushes"*.
+
+- [x] Both effects were working and both were far too weak. A/B'd against
+      zeroed controls at a fixed tick, share of the frame actually changed:
+
+      | | before | after |
+      |---|---|---|
+      | contact shadow @ noon (px changed >4) | 8,555 (0.4%) | 30,310 (1.4%) |
+      | golden rim @ dusk (px changed >4) | 53,503 (2.5%) | 265,984 (12%) |
+      | golden rim mean Δ per pixel | 0.95 | 4.51 |
+
+- [x] **Contact shadow** was 0.9 of a tile wide, so the ellipse sat almost
+      entirely BEHIND the sprite casting it. Now 1.45, spilling past the
+      silhouette, and darker (0.42 sun / 0.12 ambient).
+- [x] **The rim needed bracketing, not just raising.** At the original strength
+      it was invisible; at 0.85 with warm light running most of the way down
+      every tree went solid peach — light stops reading as light once it eats
+      the object's own colour. Landed on a pale gold at 0.5, real strength only
+      in the top third, gone by two thirds.
+- [x] **The "bushes" were scatter decals.** Ferns, tufts, moss and the whole
+      landmark layer are drawn in `drawScatterPass`, not through
+      `drawStandingSprite`, so they were getting neither shadow nor rim while
+      the trees beside them lit up. Both passes are lit now; only the landmark
+      layer casts a shadow, since a shadow under every grass tuft is noise.
+      (Real `bush` TERRAIN was always fine — it goes through the sprite path.)
+- [x] Frame rate 9.2 paused, against 10.0 before this work and 8.2 on the
+      original pre-lighting baseline. Noise.
+- [ ] Ferns read slightly MORE lit than trees — their flat tops put more area
+      in the gradient's strong zone. Looks like foliage catching light, so
+      left alone.

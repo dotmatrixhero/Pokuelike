@@ -228,8 +228,8 @@ let sunHeight = 1;
 let goldenAmount = 0;
 
 /** Shadow opacity with the sun overhead, and the residue left at midnight (ambient contact darkening never fully disappears — an object still occludes the sky). */
-const CONTACT_SHADOW_SUN = 0.26;
-const CONTACT_SHADOW_AMBIENT = 0.07;
+const CONTACT_SHADOW_SUN = 0.42;
+const CONTACT_SHADOW_AMBIENT = 0.12;
 
 /**
  * The soft dark ellipse that sits an object ON the ground instead of letting
@@ -266,8 +266,13 @@ function drawContactShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number
   if (alpha <= 0.01) return;
   // A low sun spreads and softens the contact patch; a high one pulls it in.
   const spread = 1.3 - 0.35 * sunHeight;
-  const w = footprint * 0.9 * spread;
-  const h = w * 0.4;
+  // Wider than the tile on purpose. At 0.9 of a tile the ellipse sat almost
+  // entirely BEHIND the sprite casting it and changed 0.4% of the frame —
+  // measured against a zeroed control, and reported as "I don't really see
+  // the contact shadows that distinctly". A shadow has to spill past the
+  // silhouette to read as one.
+  const w = footprint * 1.45 * spread;
+  const h = w * 0.42;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.drawImage(contactShadowStamp(), cx - w / 2, cy - h / 2, w, h);
@@ -275,7 +280,7 @@ function drawContactShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number
 }
 
 /** How strongly golden-hour light rims an object at its warmest. */
-const GOLDEN_RIM_MAX = 0.4;
+const GOLDEN_RIM_MAX = 0.5;
 /** Golden amount is quantised into this many buckets so the rim variants can be cached per sprite instead of rebuilt every draw. */
 const GOLDEN_BUCKETS = 6;
 
@@ -301,9 +306,17 @@ function goldenRimStamp(sprite: CanvasImageSource, key: string, srcW: number, sr
   rctx.drawImage(sprite, 0, 0, srcW, srcH);
   rctx.globalCompositeOperation = "source-atop";
   const grad = rctx.createLinearGradient(0, 0, 0, srcH);
-  grad.addColorStop(0, "rgba(255, 196, 132, 1)");
-  grad.addColorStop(0.55, "rgba(255, 150, 90, 0.25)");
-  grad.addColorStop(1, "rgba(255, 120, 70, 0)");
+  // Two rejected settings bracket this one. Fading to a quarter strength by
+  // the halfway mark was invisible — 2.5% of the frame against a zeroed
+  // control, reported as "certainly not highlight?". Running warm light most
+  // of the way down at 0.85 went the other way and turned every tree solid
+  // peach: light stops reading as light once it eats the object's own colour.
+  // So a pale gold rather than an orange, real strength only in the top
+  // third, gone by two thirds.
+  grad.addColorStop(0, "rgba(255, 226, 178, 0.95)");
+  grad.addColorStop(0.32, "rgba(255, 198, 136, 0.45)");
+  grad.addColorStop(0.62, "rgba(255, 170, 110, 0.08)");
+  grad.addColorStop(1, "rgba(255, 160, 100, 0)");
   rctx.fillStyle = grad;
   rctx.fillRect(0, 0, srcW, srcH);
   goldenRimCache.set(key, canvas);
@@ -423,16 +436,16 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
     }
   }
   drawElevationShade(ctx, world);
-  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA);
+  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA, false);
   // Landmarks go down after the fine detail so a boulder sits ON the tufts,
   // not under them.
-  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1);
+  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1, true);
 }
 
 type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => { image: HTMLImageElement; jitterX: number; jitterY: number } | null;
 
 /** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
-function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
+function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number, standing: boolean): void {
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
@@ -440,19 +453,23 @@ function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: Deca
       const scale = TILE_SIZE / GROUND_CELL;
       const w = decal.image.width * scale;
       const h = decal.image.height * scale;
-      ctx.save();
-      ctx.globalAlpha = alpha;
       // Bottom-anchored like every other standing art: a cactus three tiles
       // tall should have its base on its own tile, not be centred across the
       // two tiles above it.
-      ctx.drawImage(
-        decal.image,
-        (x + decal.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2,
-        (y + decal.jitterY + 1) * TILE_SIZE - h,
-        w,
-        h
-      );
+      const dx = (x + decal.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2;
+      const dy = (y + decal.jitterY + 1) * TILE_SIZE - h;
+      // Only the landmark layer is an OBJECT standing on the ground, so only
+      // it casts a contact shadow. One under every grass tuft would be noise.
+      if (standing) drawContactShadow(ctx, dx + w / 2, dy + h - TILE_SIZE * 0.1, Math.min(w, TILE_SIZE * 1.6));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(decal.image, dx, dy, w, h);
       ctx.restore();
+      // Light lands on ground detail too. Skipping it here is why ferns, tufts
+      // and the landmark decals stayed flat while the trees lit up — they are
+      // drawn in this pass, not through `drawStandingSprite`. Direct report:
+      // "Love it on the trees. But not seeing much on the bushes".
+      drawGoldenRim(ctx, decal.image, decal.image.width, decal.image.height, dx, dy, w, h);
     }
   }
 }
