@@ -3,6 +3,10 @@ import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, c
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
+import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
+import { examineTile, verbsForTile, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { ActionLogPanel } from "./actionLog.js";
+import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
@@ -121,6 +125,15 @@ const tabChronicleBtn = document.getElementById("tab-chronicle") as HTMLButtonEl
 const chronicleEl = document.getElementById("chronicle-page") as HTMLElement;
 const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
+const tabYouBtn = document.getElementById("tab-you") as HTMLButtonElement;
+const tabWorldBtn = document.getElementById("tab-world") as HTMLButtonElement;
+const youPageEl = document.getElementById("you-page") as HTMLElement;
+const youTitleEl = document.getElementById("you-title") as HTMLElement;
+const partyBodyEl = document.getElementById("party-body") as HTMLElement;
+const partyCountEl = document.getElementById("party-count") as HTMLElement;
+const sheetHandleEl = document.getElementById("sheet-handle") as HTMLElement;
+const headerToggleBtn = document.getElementById("header-toggle") as HTMLButtonElement;
+const eventTickerEl = document.getElementById("event-ticker") as HTMLElement;
 const togglePanelBtn = document.getElementById("toggle-panel") as HTMLButtonElement;
 const sidePanelEl = document.getElementById("side-panel") as HTMLElement;
 const moreMenuWrap = document.getElementById("more-menu-wrap") as HTMLElement;
@@ -158,10 +171,6 @@ const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLEl
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
 // Direct ask: "have herd hp and status bars like easy to pin so you can
 // see all; at once."
-const herdStatusPanelEl = document.getElementById("herd-status-panel") as HTMLElement;
-const herdStatusBodyEl = document.getElementById("herd-status-body") as HTMLElement;
-const herdStatusHideBtn = document.getElementById("herd-status-hide") as HTMLButtonElement;
-const hudPartyBtn = document.getElementById("hud-party-btn") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -295,9 +304,15 @@ let autoCamLastScroll: { left: number; top: number } | undefined;
  * measure (e.g. `focusPos`'s own `fallbackPos` case, no living agent left
  * to bound).
  */
-function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>): void {
+function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>, keepZoom = false): void {
   const bounds = ids ? highlightBounds(world, ids) : undefined;
-  if (bounds) {
+  if (keepZoom) {
+    // Recentre without re-framing. Play mode passes this when the world
+    // changed under the player (a new cave level, a zone crossing) so the
+    // old scroll offsets are meaningless — but the zoom the player chose
+    // is still theirs, and resetting it is the bug `keepPlayerInView`
+    // below exists to avoid.
+  } else if (bounds) {
     const spanX = bounds.right - bounds.left;
     const spanY = bounds.bottom - bounds.top;
     const fit = Math.min(canvasWrap.clientWidth / Math.max(1, spanX), canvasWrap.clientHeight / Math.max(1, spanY)) * 0.8;
@@ -310,6 +325,69 @@ function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>): void {
   autoCamLastScroll = { left: targetLeft, top: targetTop };
   canvasWrap.scrollLeft = targetLeft;
   canvasWrap.scrollTop = targetTop;
+}
+
+/**
+ * How close to the viewport edge the player may get before the camera follows,
+ * as a fraction of the viewport — roughly two tiles at default zoom, leaving
+ * the middle ~76% of the screen as a dead zone the camera ignores entirely.
+ *
+ * Deliberately small. A generous dead zone (0.3 was tried and measured) parks
+ * the player exactly ON the boundary whenever the camera does correct, so the
+ * very next pan in that direction is immediately undone and panning feels
+ * stuck — the same complaint, from the opposite cause. Small margin = the
+ * camera only steps in when you are about to genuinely lose sight of yourself.
+ */
+const CAMERA_DEADZONE = 0.12;
+
+/**
+ * Play mode's camera follow, and deliberately NOT `focusCameraOn`.
+ *
+ * Direct ask: "On Mobile I don't like how hard it is to scroll around the
+ * screen." The cause, measured live on a 390px viewport: `focusCameraOn` ran
+ * after *every* `playerAct`, and it both re-centres and calls
+ * `setZoom(AUTO_CAM_ZOOM)` unconditionally. So one step threw away whatever
+ * the player had just done — zooming out to 0.96 snapped back to 1.5, and a
+ * 300px pan snapped back to centre. Pinch-zoom was effectively inoperable:
+ * you could zoom, but not zoom *and then play*.
+ *
+ * This leaves the view exactly where the player put it as long as they can
+ * still see themselves, and only scrolls the minimum needed to pull them back
+ * inside the dead zone. It never touches zoom at all.
+ */
+function keepPlayerInView(pos: Vec2): void {
+  const w = canvasWrap.clientWidth;
+  const h = canvasWrap.clientHeight;
+  const px = (pos.x + 0.5) * TILE_SIZE * zoom;
+  const py = (pos.y + 0.5) * TILE_SIZE * zoom;
+  const marginX = w * CAMERA_DEADZONE;
+  const marginY = h * CAMERA_DEADZONE;
+
+  const clamp = (value: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(value, lo), hi));
+  const maxScrollLeft = Math.max(0, canvasWrap.scrollWidth - w);
+  const maxScrollTop = Math.max(0, canvasWrap.scrollHeight - h);
+
+  // Two different corrections, because one size does not fit both cases.
+  // Lost the player entirely (a zoom change, or a big deliberate pan)? Centre
+  // them properly — a minimal nudge would park them hard against the screen
+  // edge, which then makes the very next pan feel stuck. Merely drifted out
+  // of the dead zone by walking? Nudge the minimum, so following reads as the
+  // camera easing along with you rather than snapping.
+  const onScreenX = px - canvasWrap.scrollLeft;
+  const onScreenY = py - canvasWrap.scrollTop;
+  const lost = onScreenX < 0 || onScreenX > w || onScreenY < 0 || onScreenY > h;
+  const desiredLeft = lost ? px - w / 2 : clamp(canvasWrap.scrollLeft, px - w + marginX, px - marginX);
+  const desiredTop = lost ? py - h / 2 : clamp(canvasWrap.scrollTop, py - h + marginY, py - marginY);
+  const left = clamp(desiredLeft, 0, maxScrollLeft);
+  const top = clamp(desiredTop, 0, maxScrollTop);
+
+  // Don't touch the scroll (or `autoCamLastScroll`) when nothing needs to
+  // move — a redundant write would register as our own scroll and pointlessly
+  // suppress the next genuine manual-pan notification.
+  if (Math.abs(left - canvasWrap.scrollLeft) < 1 && Math.abs(top - canvasWrap.scrollTop) < 1) return;
+  autoCamLastScroll = { left, top };
+  canvasWrap.scrollLeft = left;
+  canvasWrap.scrollTop = top;
 }
 
 const autoCamHost: AutoCameraHost = {
@@ -402,6 +480,7 @@ function resetUiForNewWorld(): void {
   applyZoom();
 
   eventLogPanel.reset();
+  actionLogPanel.reset();
   eventLogPanel.setFilter(undefined);
   battleScreenPanel.reset();
   eventPopups.reset();
@@ -411,8 +490,6 @@ function resetUiForNewWorld(): void {
   lastAutoSwitchedBattleSeq = undefined;
   selectTab("inspector", false);
   updateStatusLabels();
-  herdPanelPinned = true;
-  herdStatusPanelEl.hidden = true;
 }
 
 /**
@@ -437,6 +514,489 @@ function registerHerdsForFirstFrame(): void {
   tickHerds(world, log);
 }
 
+/**
+ * The mobile bottom sheet's three resting heights. Direct ask: "one sidebar
+ * with my player status, and my party members at a glance. Then expandable",
+ * and "Need it to be easier to navigate with buttons either easily
+ * dismissable or off to the side so it doesn't make the ui obscured."
+ *
+ * Peek is deliberately tiny — four vitals bars and nothing else — so the map
+ * owns the screen by default. `peek` matches `--sheet-peek` in index.html,
+ * which the on-map control pad also positions itself above; change one and
+ * change the other.
+ */
+const SHEET_DETENTS = { peek: 74, full: 0.85 } as const;
+type SheetDetent = keyof typeof SHEET_DETENTS;
+let sheetDetent: SheetDetent = "peek";
+
+/** A detent's height in real pixels — the fractional ones are of the viewport. */
+function sheetHeightPx(detent: SheetDetent): number {
+  const value = SHEET_DETENTS[detent];
+  return value > 1 ? value : Math.round(window.innerHeight * value);
+}
+
+function setSheetDetent(detent: SheetDetent): void {
+  sheetDetent = detent;
+  document.body.classList.toggle("sheet-peek", detent === "peek");
+  document.body.classList.toggle("sheet-full", detent === "full");
+  document.documentElement.style.setProperty("--sheet-h", `${sheetHeightPx(detent)}px`);
+}
+
+/**
+ * Drag the grip to resize, or tap it to cycle. Both, because a tap is faster
+ * when you know where you are going and a drag is better when you don't —
+ * and on a phone the grip is the only part of the sheet always in reach.
+ */
+function initSheetDrag(): void {
+  let startY = 0;
+  let startH = 0;
+  let dragging = false;
+  let moved = false;
+
+  sheetHandleEl.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    moved = false;
+    startY = event.clientY;
+    startH = sidePanelEl.getBoundingClientRect().height;
+    sheetHandleEl.setPointerCapture(event.pointerId);
+    sidePanelEl.classList.add("sheet-dragging");
+  });
+
+  sheetHandleEl.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    const delta = startY - event.clientY; // up is taller
+    if (Math.abs(delta) > 4) moved = true;
+    const height = Math.max(SHEET_DETENTS.peek, Math.min(window.innerHeight * 0.92, startH + delta));
+    document.documentElement.style.setProperty("--sheet-h", `${Math.round(height)}px`);
+    // Peek hides the tabs and sections, so it has to come off the moment the
+    // sheet is dragged open — otherwise you drag up into blank space.
+    document.body.classList.toggle("sheet-peek", height < sheetHeightPx("peek") + 40);
+    document.body.classList.toggle("sheet-full", height >= sheetHeightPx("peek") + 40);
+  });
+
+  const release = (event: PointerEvent) => {
+    if (!dragging) return;
+    dragging = false;
+    sidePanelEl.classList.remove("sheet-dragging");
+    if (sheetHandleEl.hasPointerCapture(event.pointerId)) sheetHandleEl.releasePointerCapture(event.pointerId);
+    if (!moved) {
+      // A tap toggles. Direct ask: "I think it should just be low to full and
+      // the handle should be bigger or something to easily toggle." The middle
+      // detent is gone — it was the state where the sheet covered the verb pad
+      // without being big enough to be worth it.
+      setSheetDetent(sheetDetent === "peek" ? "full" : "peek");
+      return;
+    }
+    // Snap to whichever detent the finger ended up nearest.
+    const height = sidePanelEl.getBoundingClientRect().height;
+    let best: SheetDetent = "peek";
+    for (const detent of ["peek", "full"] as SheetDetent[]) {
+      if (Math.abs(sheetHeightPx(detent) - height) < Math.abs(sheetHeightPx(best) - height)) best = detent;
+    }
+    setSheetDetent(best);
+  };
+  sheetHandleEl.addEventListener("pointerup", release);
+  sheetHandleEl.addEventListener("pointercancel", release);
+
+  // A fractional detent is a fraction of a viewport that just changed.
+  window.addEventListener("resize", () => {
+    if (playerMode) setSheetDetent(sheetDetent);
+  });
+}
+initSheetDrag();
+
+const actionLogPanel = new ActionLogPanel(document.getElementById("action-log") as HTMLElement);
+
+/**
+ * Tell the player something, and keep it.
+ *
+ * Every line the player reads used to go straight to `hudMessageEl`, which is
+ * one line that the next message overwrote — so the result of looking at a
+ * creature or gathering a tile existed for exactly one action. Direct ask: "I
+ * want one place to see like results of look, gather, like actions."
+ *
+ * Transient UI prompts ("Targeting … tap a tile") still write to
+ * `hudMessageEl` directly, because they are a mode indicator rather than
+ * something that happened.
+ */
+function say(text: string): void {
+  hudMessageEl.textContent = text;
+  actionLogPanel.say(world.tick, text);
+}
+
+const tileMenu = new TileMenu(mapAreaEl, (open) => {
+  // Stop the map panning out from under an open radial — see TileMenu's own
+  // constructor comment for why this is what made release work on touch.
+  canvasWrap.classList.toggle("menu-open", open);
+});
+const tileTipEl = document.getElementById("tile-tip") as HTMLElement;
+
+/**
+ * A tile the radial already chose, waiting for the command menu to say which
+ * move to use on it. Undefined during the ordinary verb-first flow, where the
+ * move is picked first and the tile tapped afterwards.
+ */
+let pendingTargetTile: Vec2 | undefined;
+
+/** Issuing an order is the player's own turn to spend, same as every other verb — `agentId` undefined means the player's own swing. */
+function commitMove(agentId: string | undefined, moveId: string, target: Vec2): void {
+  if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
+  else playerAct({ kind: "command", agentId, moveId, target });
+}
+
+const TERRAIN_WORDS: Partial<Record<string, string>> = {
+  floor: "Bare floor",
+  wall: "Solid wall",
+  water: "Water",
+  food: "Food growing",
+  flora: "Plants",
+  sunbeam: "A shaft of light",
+  seedling: "A seedling",
+  tree: "A tree",
+  boulder: "A boulder",
+  bush: "Thick bush",
+  sand: "Sand",
+  mud: "Mud",
+  shelter: "Shelter",
+  sludge: "Fouled ground",
+  stone: "Rock outcrop",
+  fire: "Fire",
+  ice: "Ice",
+  stairsDown: "Stairs down",
+  stairsUp: "Stairs up",
+  exit: "The way out",
+};
+
+/**
+ * What a tile is, in the player's own voice. Direct ask: "seeing what items
+ * are harvestabls, what kind of terrain and what effects standing on it does."
+ *
+ * Two sentences at most, per the house style — the first says what the ground
+ * is and what it does to you, the second what you could take from it. Vague
+ * words are a bug here: if there is nothing to say about a tile, say "Nothing
+ * grows here", not "not much".
+ */
+function describeTile(report: TileReport): string {
+  const name = TERRAIN_WORDS[report.terrain] ?? report.terrain;
+  const effects: string[] = [];
+  if (report.poisons) effects.push("it poisons what stands in it");
+  if (report.conceals) effects.push("you are hidden here");
+  if (!report.walkable) effects.push("you cannot pass");
+  if (report.lit) effects.push("it is lit");
+  const first = effects.length > 0 ? `${name} — ${effects.join(", ")}.` : `${name}.`;
+
+  if (report.occupantId) {
+    const who = world.agents.find((a) => a.id === report.occupantId);
+    if (who) return `${first} ${SPECIES[who.species]?.name ?? who.species} stands here.`;
+  }
+  if (report.corpseId) {
+    const body = world.agents.find((a) => a.id === report.corpseId);
+    if (body) return `${first} A dead ${SPECIES[body.species]?.name ?? body.species} lies here.`;
+  }
+  if (report.harvestable.length > 0 && report.harvestsLeft > 0) {
+    return `${first} ${report.harvestable.map((m: string) => itemName(m)).join(" and ")} here.`;
+  }
+  return `${first} Nothing to take.`;
+}
+
+/** Where a tile currently sits inside #map-area, accounting for zoom and the wrap's scroll. */
+function tileScreenPos(tile: Vec2): { x: number; y: number } {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const areaRect = mapAreaEl.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+  const scale = canvasRect.width / canvas.width;
+  return {
+    x: canvasRect.left - areaRect.left + (tile.x + 0.5) * TILE_SIZE * scale,
+    y: canvasRect.top - areaRect.top + (tile.y + 0.5) * TILE_SIZE * scale,
+  };
+}
+
+function runTileVerb(verb: TileVerb, tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  switch (verb) {
+    case "examine": {
+      // Free: costs no turn, which is what makes looking before you commit a
+      // real option rather than a tax on not already knowing.
+      const report = examineTile(world, viewLayer(), tile);
+      if (report) say(describeTile(report));
+      return;
+    }
+    case "moveHere":
+      travelTo(tile);
+      return;
+    case "gather":
+      playerAct({ kind: "gather" });
+      runActivity();
+      return;
+    case "drink":
+      playerAct({ kind: "drink" });
+      return;
+    case "loot":
+      playerAct({ kind: "loot" });
+      return;
+    case "butcher":
+      playerAct({ kind: "butcher" });
+      return;
+    case "useStairs":
+      tryUseStairs();
+      return;
+    case "attack":
+    case "command":
+      // Both need a move picked, and the command menu is where moves live —
+      // but the tile is already decided, so it commits on the pick instead of
+      // asking for a target again.
+      pendingTargetTile = tile;
+      openCommandMenu();
+      return;
+  }
+}
+
+/**
+ * Verbs the radial does NOT give a wedge to, even though the rules allow them
+ * here.
+ *
+ * - `examine` is the centre: a release without swiping already does it, so a
+ *   wedge would be a second way to do the default.
+ * - `gather` acts on the tile you are already standing on, not one you point
+ *   at, so it belongs with wait and crouch as a button. Direct ask: "gather I
+ *   think might need to be it's own button like crouch and wait."
+ *
+ * `verbsForTile` still reports both — the engine says what is legal, the UI
+ * decides which surface offers it.
+ */
+const WEDGELESS_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["examine", "gather"]);
+
+function openTileMenu(tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me || playerDead || playerWon) return;
+  const verbs = verbsForTile(world, me, viewLayer(), tile);
+  if (verbs.length === 0) return;
+  const wedges = menuItemsFor(verbs.filter((v) => !WEDGELESS_VERBS.has(v)));
+  const centre = menuItemsFor(["examine"])[0]!;
+  tileMenu.open(tileScreenPos(tile), wedges, centre, (verb) => runTileVerb(verb, tile));
+}
+
+/**
+ * Long-press opens the radial on touch; a drag opens nothing, because a drag
+ * is how you pan the map. `LONG_PRESS_MS` is the usual ~400ms: shorter and an
+ * ordinary tap-to-walk starts triggering menus.
+ */
+const LONG_PRESS_MS = 400;
+const DRAG_SLOP = 10;
+let pressTimer: number | undefined;
+let pressStart: { x: number; y: number } | undefined;
+/** A long-press ends with a click event the browser still delivers; without this it would also walk the player to the tile. */
+let suppressNextClick = false;
+
+function cancelPress(): void {
+  if (pressTimer !== undefined) window.clearTimeout(pressTimer);
+  pressTimer = undefined;
+  pressStart = undefined;
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!playerMode || event.button !== 0) return;
+  if (tileMenu.isOpen) return;
+  pressStart = { x: event.clientX, y: event.clientY };
+  const tile = tileAtPointer(event);
+  const pointerId = event.pointerId;
+  pressTimer = window.setTimeout(() => {
+    pressTimer = undefined;
+    suppressNextClick = true;
+    openTileMenu(tile);
+    // Capture, or the drag half of press-drag-release simply does not work:
+    // the radial's wedges sit above the canvas, so once the menu is open every
+    // pointermove lands on a wedge and never reaches the canvas listener that
+    // arms them. Measured — the wedge never armed and the hub never changed
+    // until this was added. Released on pointerup below.
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      /* the pointer may already be gone; the click-a-wedge path still works */
+    }
+  }, LONG_PRESS_MS);
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (tileMenu.isOpen) {
+    tileMenu.track({ x: event.clientX, y: event.clientY });
+    return;
+  }
+  if (!pressStart) return;
+  // Moved far enough to be a pan, not a press.
+  if (Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > DRAG_SLOP) cancelPress();
+});
+
+// On the window, not the canvas: a drag that ends outside the canvas still has
+// to resolve the menu rather than leaving it stuck open.
+window.addEventListener("pointerup", (event) => {
+  if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  if (tileMenu.isOpen) {
+    // Only a genuine drag-release commits. A press-and-release in place leaves
+    // the menu up so the wedges can be tapped one at a time instead.
+    if (tileMenu.release()) suppressNextClick = true;
+  }
+  cancelPress();
+});
+
+// Desktop: right-click is the same menu, no press delay.
+/**
+ * The actual reason the radial's drag did not work on a phone.
+ *
+ * Flipping `touch-action` to `none` when the menu opens is too late: the
+ * browser decides whether IT owns a touch sequence at `touchstart`, from the
+ * `touch-action` in effect then, and changing the property mid-gesture does
+ * not take the gesture back. So the map kept scrolling and the drag died in
+ * `pointercancel`. Reported twice — "Radial release on mobile not working it
+ * drags the map instead", then "The map is still scrolling on drag".
+ *
+ * `preventDefault` on a NON-passive `touchmove` does take it back, because the
+ * scroll has not started yet: the press sat still for 400ms, so this is the
+ * first move of the sequence. Registering as `{ passive: false }` is the whole
+ * point — the default for touchmove is passive, where preventDefault is
+ * ignored silently.
+ */
+canvasWrap.addEventListener(
+  "touchmove",
+  (event) => {
+    if (tileMenu.isOpen) event.preventDefault();
+  },
+  { passive: false }
+);
+
+window.addEventListener("pointercancel", (event) => {
+  if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  // Do not commit on a cancel: the player did not choose to let go, the
+  // browser took the gesture away.
+  tileMenu.close();
+  cancelPress();
+});
+
+canvas.addEventListener("contextmenu", (event) => {
+  if (!playerMode) return;
+  event.preventDefault();
+  openTileMenu(tileAtPointer(event));
+});
+
+// Clicking anywhere else dismisses an open radial, the way every other menu
+// in this app behaves.
+mapAreaEl.addEventListener("pointerdown", (event) => {
+  if (tileMenu.isOpen && !(event.target as HTMLElement).closest("#tile-menu")) tileMenu.close();
+});
+
+/**
+ * Desktop hover: examine for free. Direct ask: "hover and right click on
+ * desktop to do stuff." Knowing what a tile is should not cost a turn or even
+ * a click — this is the "informed decisions" pillar made ambient.
+ */
+canvas.addEventListener("mousemove", (event) => {
+  if (!playerMode || tileMenu.isOpen || targeting) {
+    tileTipEl.hidden = true;
+    return;
+  }
+  const tile = tileAtPointer(event);
+  const report = examineTile(world, viewLayer(), tile);
+  if (!report) {
+    tileTipEl.hidden = true;
+    return;
+  }
+  tileTipEl.textContent = describeTile(report);
+  const areaRect = mapAreaEl.getBoundingClientRect();
+  tileTipEl.style.left = `${event.clientX - areaRect.left + 14}px`;
+  tileTipEl.style.top = `${event.clientY - areaRect.top + 14}px`;
+  tileTipEl.hidden = false;
+});
+canvas.addEventListener("mouseleave", () => {
+  tileTipEl.hidden = true;
+});
+
+headerToggleBtn.addEventListener("click", () => {
+  const open = !document.body.classList.contains("header-open");
+  document.body.classList.toggle("header-open", open);
+  headerToggleBtn.setAttribute("aria-expanded", String(open));
+});
+
+/**
+ * The last three things that happened to you, in the space the spectator
+ * header used to take. Direct ask: "Maybe in its place you show the last three
+ * events that happened to you and your party. With the most recent fully
+ * opacity and the least recent 50%."
+ *
+ * Reads the same `actionLogPanel` the You panel does rather than keeping its
+ * own copy, so the two can never disagree about what just happened.
+ */
+let tickerSignature = "";
+
+function renderEventTicker(): void {
+  if (!playerMode) {
+    eventTickerEl.hidden = true;
+    return;
+  }
+  const recent = actionLogPanel.snapshot().slice(-3).reverse(); // newest first
+  // Rebuilding three rows every frame is wasteful; only touch the DOM when the
+  // text actually changed.
+  const signature = recent.map((e) => `${e.tick}:${e.count}:${e.text}`).join("|");
+  if (signature === tickerSignature) return;
+  tickerSignature = signature;
+
+  eventTickerEl.replaceChildren();
+  eventTickerEl.hidden = recent.length === 0;
+  recent.forEach((entry, i) => {
+    const row = document.createElement("div");
+    row.className = `ticker-row${entry.kind === "you" ? " you" : ""}`;
+    // Newest solid, oldest at half — exactly as asked.
+    row.style.opacity = String([1, 0.75, 0.5][i] ?? 0.5);
+    row.textContent = entry.count > 1 ? `${entry.text} \u00d7${entry.count}` : entry.text;
+    eventTickerEl.appendChild(row);
+  });
+}
+
+/**
+ * Autosave cadence. Long enough that holding a movement key doesn't compress
+ * and write the whole world on every step, short enough that what you lose to
+ * a crash is a second of play rather than an hour of it. A pending save is
+ * never queued twice — the timer already covers everything that happened
+ * before it fires.
+ */
+const SAVE_DEBOUNCE_MS = 1200;
+let saveTimer: number | undefined;
+
+function saveNow(): void {
+  if (!playerMode || playerDead || playerWon) return;
+  // KNOWN GAP, deliberately not silent: once the player graduates out of the
+  // cave, `world` is one zone of a macro grid held in `macroWorld`, and the
+  // grid is not part of the payload. Saving the zone alone would restore a
+  // world with no grid behind it — zone crossings would break — so the
+  // overworld simply isn't autosaved yet rather than being saved wrongly.
+  if (macroWorld) return;
+  const player = findPlayer(world);
+  if (!player) return;
+  void saveRun(world, log, { seed: playerSeed, scenario: playerScene === "cave" ? "cave" : "surface", playerId: player.id }, actionLogPanel.snapshot());
+}
+
+function scheduleSave(): void {
+  if (!playerMode || playerDead || playerWon) return;
+  if (saveTimer !== undefined) return;
+  saveTimer = window.setTimeout(() => {
+    saveTimer = undefined;
+    saveNow();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * A backgrounded tab can be evicted without ever getting another timer tick,
+ * which on iOS is a routine way to lose a run rather than an edge case — so
+ * flush any pending save the moment the page stops being visible. `pagehide`
+ * covers the same ground for a real navigation away; `beforeunload` is
+ * deliberately not used, since it is unreliable on mobile precisely where
+ * this matters most.
+ */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveNow();
+});
+window.addEventListener("pagehide", () => saveNow());
+
 function loadWorld(seed: number): void {
   macroWorld = undefined;
   world = createDemoWorld(seed);
@@ -457,7 +1017,7 @@ function loadWorld(seed: number): void {
  * macro grid is deliberately off here: M0 proves the turn gate against a
  * world already known to be alive, and one new thing at a time is the point.
  */
-function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): void {
+function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface", restored?: RestoredRun): void {
   macroWorld = undefined;
   playerMode = true;
   setPlaying(false);
@@ -477,12 +1037,15 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   canvasWrap.classList.remove("force-hide");
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
-  world = scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
+  // A restored run brings its own world and its own history; generating a
+  // fresh one here and then discarding it would burn a full cave-run worth
+  // of worldgen on every reload.
+  world = restored ? restored.world : scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
   playerScene = scene;
   playerSeed = seed;
   playerDead = false;
   playerWon = false;
-  log = new EventLog();
+  log = restored ? restored.log : new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
   seedInput.value = String(seed);
@@ -498,8 +1061,20 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   playerHudEl.hidden = false;
   packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
+  // Your own state is what the panel is for in play mode, so it opens on You
+  // with the spectator tabs folded away. resetUiForNewWorld above selected
+  // Inspector, which is the right default for Watch mode and the wrong one
+  // here.
+  document.body.classList.remove("world-tabs-open");
+  if (restored) actionLogPanel.restore(restored.actionLog);
+  selectTab("you", false);
+  setSheetDetent(sheetDetent);
   cancelTravel();
-  hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere. Tap a tile to walk." : "";
+  hudMessageEl.textContent = restored
+    ? "Your run continues."
+    : scene === "cave"
+      ? "It is dark. There is light somewhere. Tap a tile to walk."
+      : "";
   renderPlayerHud();
   syncModeButtons();
   const url = new URL(location.href);
@@ -524,6 +1099,12 @@ function enterWatchMode(seed: number): void {
   gameOverEl.hidden = true;
   runWonEl.hidden = true;
   document.body.classList.remove("player-mode");
+  document.body.classList.remove("world-tabs-open");
+  document.body.classList.remove("header-open");
+  headerToggleBtn.setAttribute("aria-expanded", "false");
+  eventTickerEl.hidden = true;
+  // The You page has no meaning without a player; Watch mode's own default.
+  if (activeTab === "you") selectTab("inspector", false);
   enterOverworldMode(seed, "zone");
   syncModeButtons();
   const url = new URL(location.href);
@@ -567,12 +1148,34 @@ function renderPlayerHud(): void {
   bar("hunger", player.needs.hunger, `${Math.round(player.needs.hunger * 100)}%`);
   bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
   bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
+  // Who you are, at the top of your own panel. The row under it is depth,
+  // which reads as "Level 1 of 5" and is emphatically not your level.
+  const speciesName = SPECIES[player.species]?.name ?? player.species;
+  youTitleEl.textContent = player.level ? `${speciesName} · Lv ${player.level}` : speciesName;
   const outcome = player.lastActionOutcome;
-  if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
+  if (outcome && outcome.tick === world.tick) {
+    // A multi-turn gather or craft reports "you start…" then a progress tick
+    // per turn then the result. All of that belongs on the HUD line, which is
+    // live status — but logging it turned a single gather into four rows
+    // ("You start gathering berries." / "Gathering… 2 turns left." /
+    // "Gathering… 1 turn left." / "You gather berries."), which is a table
+    // with commas rather than a history. Only the outcome is kept.
+    // `outcome.ok` matters: a gather that FAILED ("Nothing to gather here.")
+    // is a real result and belongs in the log — only a gather that actually
+    // started an activity is progress. Dropping that check swallowed every
+    // failed gather, which a live check caught.
+    const midActivity =
+      outcome.ok && (outcome.action.kind === "gather" || outcome.action.kind === "craft" || (outcome.action.kind === "continue" && !outcome.completed));
+    if (midActivity) hudMessageEl.textContent = outcomeText(player, outcome);
+    else say(outcomeText(player, outcome));
+  }
   renderPack(player);
   // ROADMAP.md M7: mechanics visible on the map, not hidden in a meter — the
   // player should always know how deep they are, same reasoning as the HP bar.
-  hudDepthEl.textContent = world.depth ? `Level ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
+  // "Depth", not "Level": it sits directly under the player's own "Lv N" line
+  // in the You panel, and two adjacent rows both reading "Level … 5" meant
+  // two different fives.
+  hudDepthEl.textContent = world.depth ? `Depth ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
 }
 
 /** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
@@ -585,7 +1188,7 @@ function renderPack(player: Agent): void {
   });
   hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(world, player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
   if (player.lastNotice) {
-    if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
+    if (player.lastNotice.kind === "torchBurnedOut") say("Your torch burns out.");
     player.lastNotice = undefined;
   }
 }
@@ -697,7 +1300,7 @@ function runActivity(): void {
       if (!seenBefore.has(id)) {
         const who = world.agents.find((a) => a.id === id);
         playerAct({ kind: "cancel" });
-        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        say(who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.");
         return;
       }
     }
@@ -868,28 +1471,33 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
- * Direct ask: "have herd hp and status bars like easy to pin so you can
- * see all; at once." Shows itself automatically once the player has a
- * bonded follower — the ✕ button (herdStatusHideBtn) dismisses it,
- * hud-party-btn brings it back; both just flip `herdPanelPinned`, no
- * persistence across a reload (this codebase's only other show/hide UI
- * state — the side panel's collapse/expand toggles — works the same way).
- * Rebuilds every frame (`EventLogPanel`'s own shape), not
- * `BattleScreenPanel`'s persistent-per-agent-chip pattern — a handful of
- * rows read once a frame is cheap, and the smooth HP-transition polish
- * that pattern buys isn't what this ask is actually about.
+ * Every bonded follower's HP, order and current behaviour, rendered into the
+ * You panel. Direct ask: "I want one sidebar with my player status, and my
+ * party members at a glance."
+ *
+ * This used to be a floating panel over the map with its own pin/dismiss
+ * state and a HUD button to bring it back. All of that is gone: it lives in
+ * the sidebar now, so there is nothing to dismiss it from and nothing to
+ * restore. Two overlapping floating panels was the thing being complained
+ * about.
+ *
+ * Rebuilds every frame (`EventLogPanel`'s own shape) rather than keeping
+ * persistent per-agent rows — a handful of rows read once a frame is cheap,
+ * and the smooth HP-transition polish the other pattern buys is not what
+ * this ask is about.
  */
-let herdPanelPinned = true;
-
-function renderHerdStatusPanel(): void {
+function renderPartySection(): void {
   const me = findPlayer(world);
   const followers = me ? bondedPartnersInZone(me) : [];
-  if (!herdPanelPinned || followers.length === 0) {
-    herdStatusPanelEl.hidden = true;
+  partyCountEl.textContent = followers.length ? `(${followers.length})` : "";
+  partyBodyEl.replaceChildren();
+  if (followers.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "you-empty";
+    empty.textContent = "No one follows you yet.";
+    partyBodyEl.appendChild(empty);
     return;
   }
-  herdStatusPanelEl.hidden = false;
-  herdStatusBodyEl.replaceChildren();
   for (const a of followers) {
     const name = SPECIES[a.species]?.name ?? a.species;
     const maxHp = a.maxHp ?? 1;
@@ -916,18 +1524,9 @@ function renderHerdStatusPanel(): void {
     fill.style.width = `${Math.round(fraction * 100)}%`;
     bar.appendChild(fill);
     row.append(nameRow, bar);
-    herdStatusBodyEl.appendChild(row);
+    partyBodyEl.appendChild(row);
   }
 }
-
-herdStatusHideBtn.addEventListener("click", () => {
-  herdPanelPinned = false;
-  renderHerdStatusPanel();
-});
-hudPartyBtn.addEventListener("click", () => {
-  herdPanelPinned = true;
-  renderHerdStatusPanel();
-});
 
 /**
  * Direct asks: "under the attack option a sub menu show up to select your
@@ -980,6 +1579,15 @@ function openCommandMenu(): void {
       row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
         if (onCooldown) return;
         closeCommandMenu();
+        // The radial already asked "what do you want to do to THIS tile", so
+        // there is nothing left to target — go straight to the swing rather
+        // than asking for a tile the player just picked.
+        if (pendingTargetTile) {
+          const target = pendingTargetTile;
+          pendingTargetTile = undefined;
+          commitMove(undefined, move.id, target);
+          return;
+        }
         targeting = { moveId: move.id };
         hudMessageEl.textContent = `Targeting with ${move.name} — tap a tile. Esc to cancel.`;
       })
@@ -1016,6 +1624,12 @@ function openCommandMenu(): void {
         row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
           if (onCooldown) return;
           closeCommandMenu();
+          if (pendingTargetTile) {
+            const target = pendingTargetTile;
+            pendingTargetTile = undefined;
+            commitMove(partner.id, move.id, target);
+            return;
+          }
           targeting = { agentId: partner.id, moveId: move.id };
           hudMessageEl.textContent = `Targeting for ${name}'s ${move.name} — tap a tile. Esc to cancel.`;
         })
@@ -1028,6 +1642,7 @@ function openCommandMenu(): void {
 
 function closeCommandMenu(): void {
   commandMenuEl.hidden = true;
+  pendingTargetTile = undefined;
 }
 commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
 
@@ -1067,6 +1682,10 @@ function updateTargetPreview(hovered: Vec2): void {
  */
 function showGameOver(playerId: string): void {
   playerDead = true;
+  // The run is over, so the autosave has nothing left to protect — and
+  // leaving it would restore straight back into this death screen on the
+  // next load, which reads as the game being stuck rather than finished.
+  clearSavedRun();
   let cause = "";
   for (let i = log.events.length - 1; i >= 0; i--) {
     const e = log.events[i]!;
@@ -1111,6 +1730,10 @@ function enterOverworldFromCaveWin(): void {
   if (!player) return;
   playerWon = false;
   runWonEl.hidden = true;
+  // The cave run is finished. Drop its save rather than leave one that a
+  // later reload would happily restore, dropping the player back underground
+  // at the state they were in just before they won.
+  clearSavedRun();
   macroWorld = createDemoMacroWorld(playerSeed);
   const startWorld = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   world.agents = world.agents.filter((a) => a !== player);
@@ -1121,9 +1744,9 @@ function enterOverworldFromCaveWin(): void {
   world = startWorld;
   resetUiForNewWorld();
   registerHerdsForFirstFrame();
-  hudMessageEl.textContent = "You emerge into the wider world.";
+  say("You emerge into the wider world.");
   renderPlayerHud();
-  focusCameraOn(player.pos);
+  focusCameraOn(player.pos, undefined, true);
 }
 
 runWonContinueBtn.addEventListener("click", () => enterOverworldFromCaveWin());
@@ -1141,7 +1764,7 @@ function tryUseStairs(): void {
   const fromDepth = world.depth;
   const next = useStairs(world, player, log);
   if (!next) {
-    hudMessageEl.textContent = "There are no stairs here.";
+    say("There are no stairs here.");
     return;
   }
   world = next;
@@ -1149,8 +1772,8 @@ function tryUseStairs(): void {
   resetUiForNewWorld();
   registerHerdsForFirstFrame();
   renderPlayerHud();
-  focusCameraOn(player.pos);
-  hudMessageEl.textContent = `You climb ${down ? "down" : "up"} to level ${world.depth}.`;
+  focusCameraOn(player.pos, undefined, true);
+  say(`You climb ${down ? "down" : "up"} to level ${world.depth}.`);
 }
 
 /**
@@ -1183,20 +1806,21 @@ function playerAct(action: PlayerAction): void {
       resetUiForNewWorld();
       registerHerdsForFirstFrame();
       afterTick();
-      focusCameraOn(player.pos);
+      focusCameraOn(player.pos, undefined, true);
       renderPlayerHud();
-      hudMessageEl.textContent = pendingCombatNotice ?? "You cross into a new stretch of land.";
+      say(pendingCombatNotice ?? "You cross into a new stretch of land.");
       return;
     }
   }
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
-  focusCameraOn(player.pos);
+  scheduleSave();
+  keepPlayerInView(player.pos);
   renderPlayerHud();
   // Real combat news — the player got hit, or a bonded follower landed or
   // missed one — outranks the routine "You move."/"You wait." outcome
   // message `renderPlayerHud` just set, so it applies last.
-  if (pendingCombatNotice) hudMessageEl.textContent = pendingCombatNotice;
+  if (pendingCombatNotice) say(pendingCombatNotice);
   if (!findPlayer(world)) showGameOver(player.id);
   else checkWinCondition(player);
 }
@@ -1247,6 +1871,9 @@ window.addEventListener("keydown", (e) => {
   if (playerDead || playerWon) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
+      // Explicitly starting over must not leave the finished run's save
+      // behind for the next reload to resurrect.
+      clearSavedRun();
       loadPlayerWorld(playerSeed, playerScene);
     } else if (playerWon && e.key === "Enter") {
       e.preventDefault();
@@ -1438,6 +2065,13 @@ function afterTick(): void {
   const noticePlayer = findPlayer(world);
   pendingCombatNotice = noticePlayer ? combatNoticeFor(displayEvents, world, noticePlayer) : undefined;
   eventLogPanel.ingest(displayEvents, world);
+  // Your party's own news, in its own voice — see ActionLogPanel's doc
+  // comment for why the player is excluded here rather than included.
+  // Membership is read fresh each tick, so an event counts as your party's
+  // if they were following you at the time.
+  if (noticePlayer) {
+    actionLogPanel.ingest(displayEvents, world, new Set(bondedPartnersInZone(noticePlayer).map((a) => a.id)));
+  }
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);
   autoCamera.ingest(displayEvents, world);
@@ -1628,7 +2262,7 @@ function travelTo(target: Vec2): void {
   }
   const first = nextTravelStep(world, me, target);
   if (!first) {
-    hudMessageEl.textContent = "You do not know a way there.";
+    say("You do not know a way there.");
     return;
   }
   let steps = 0;
@@ -1639,7 +2273,7 @@ function travelTo(target: Vec2): void {
     if (!player) return;
     const step = nextTravelStep(world, player, target);
     if (!step) {
-      if (player.pos.x !== target.x || player.pos.y !== target.y) hudMessageEl.textContent = "You can go no further.";
+      if (player.pos.x !== target.x || player.pos.y !== target.y) say("You can go no further.");
       return;
     }
     playerAct(step);
@@ -1650,7 +2284,7 @@ function travelTo(target: Vec2): void {
     for (const id of seenNow) {
       if (!seenBefore.has(id)) {
         const who = world.agents.find((a) => a.id === id);
-        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        say(who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.");
         return;
       }
     }
@@ -1696,13 +2330,13 @@ function examineNext(): void {
     .filter((a) => a.id !== me.id && a.layer === me.layer && a.alive !== false && me.vision!.visible.has(a.pos.y * world.width + a.pos.x))
     .sort((a, b) => Math.hypot(a.pos.x - me.pos.x, a.pos.y - me.pos.y) - Math.hypot(b.pos.x - me.pos.x, b.pos.y - me.pos.y));
   if (seen.length === 0) {
-    hudMessageEl.textContent = "You see no one.";
+    say("You see no one.");
     return;
   }
   const i = seen.findIndex((a) => a.id === selectedAgentId);
   const next = seen[(i + 1) % seen.length]!;
   selectAgent(next);
-  hudMessageEl.textContent = examine(world, next, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
+  say(examine(world, next, { observer: me, name: (id) => SPECIES[id]?.name ?? id }));
 }
 
 // --- Unified side panel: Inspector / Battle / Chronicle / Events tabs ------
@@ -1720,7 +2354,7 @@ function examineNext(): void {
 // gone; Events moved from third to last in both the tab bar (index.html)
 // and this file's own tab order.
 
-type PanelTab = "inspector" | "battle-screen" | "chronicle" | "events";
+type PanelTab = "you" | "inspector" | "battle-screen" | "chronicle" | "events";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -1735,12 +2369,14 @@ let tabManualOverrideForBattleSeq: number | undefined;
 let lastAutoSwitchedBattleSeq: number | undefined;
 
 const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
+  you: tabYouBtn,
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
   chronicle: tabChronicleBtn,
   events: tabEventsBtn,
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
+  you: youPageEl,
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
   chronicle: chronicleEl,
@@ -1769,6 +2405,19 @@ function selectTab(tab: PanelTab, manual: boolean): void {
   }
 }
 
+tabYouBtn.addEventListener("click", () => {
+  document.body.classList.remove("world-tabs-open");
+  selectTab("you", true);
+});
+// "World" is a disclosure, not a page of its own: it unfolds the four
+// spectator tabs and lands on whichever was last open (Inspector by
+// default), so play mode spends one tab slot on them instead of four.
+tabWorldBtn.addEventListener("click", () => {
+  const opening = !document.body.classList.contains("world-tabs-open");
+  document.body.classList.toggle("world-tabs-open", opening);
+  if (opening) selectTab(activeTab === "you" ? "inspector" : activeTab, true);
+  else selectTab("you", true);
+});
 tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
 tabChronicleBtn.addEventListener("click", () => selectTab("chronicle", true));
 tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
@@ -1785,6 +2434,11 @@ tabEventsBtn.addEventListener("click", () => selectTab("events", true));
  * rule Auto Camera's own camera-follow already applies to a manual pan.
  */
 function maybeAutoSwitchTab(): void {
+  // Never in play mode: this is Auto Camera's spectator affordance, and
+  // yanking the panel off You mid-turn to show a fight elsewhere in the
+  // world is exactly the "my own stuff keeps getting buried" problem the
+  // You panel exists to fix.
+  if (playerMode) return;
   const engagement = autoCamera.currentEngagement();
   // Clashes count too. They render the same rich Battle Screen a real battle
   // does (same move/crit/damage lines, same HP bars) and outnumber real
@@ -1841,16 +2495,43 @@ speedSlider.addEventListener("input", () => {
   autoCamera.noteManualSpeedChange();
 });
 
-canvas.addEventListener("click", (event) => {
+/**
+ * Where on the map a pointer event landed. The canvas is drawn at its
+ * intrinsic tile size and then CSS-scaled, so screen pixels are not canvas
+ * pixels and the ratio has to come out of the live bounding box.
+ *
+ * Extracted because this arithmetic was inlined three times (click,
+ * mousemove, and renderer.ts's own hit test) and the tile menu would have
+ * made a fourth.
+ */
+function tileAtPointer(event: { clientX: number; clientY: number }): Vec2 {
+  const { x, y } = canvasPixelAt(event);
+  return { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+}
+
+/** The same event in the canvas's own pixel space — what `agentAtCanvasPos` and the engagement-box hit test want. */
+function canvasPixelAt(event: { clientX: number; clientY: number }): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+  };
+}
+
+canvas.addEventListener("click", (event) => {
+  // A long-press already acted on this tile; the browser still delivers the
+  // trailing click, which would otherwise also walk the player there.
+  if (suppressNextClick) {
+    suppressNextClick = false;
+    return;
+  }
+  const { x, y } = canvasPixelAt(event);
   // Direct ask: "select a move and target a space with it." Any tile —
   // whether or not something's standing on it — becomes the order's target,
   // ahead of the ordinary agent-select/tap-to-walk handling right below, the
   // same way a real target-a-tile UI would consume the next click outright.
   if (targeting) {
-    const target = { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+    const target = tileAtPointer(event);
     const { agentId, moveId } = targeting;
     targeting = undefined;
     targetPreviewTiles = [];
@@ -1860,8 +2541,7 @@ canvas.addEventListener("click", (event) => {
     // `agentId` undefined means this is the player's OWN targeted swing
     // (direct ask: "change attack for player moves to also be targeted,
     // like allies moves") rather than an order for a bonded partner.
-    if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
-    else playerAct({ kind: "command", agentId, moveId, target });
+    commitMove(agentId, moveId, target);
     return;
   }
   // Direct follow-up ask: "I should be able to click specific units in the
@@ -1875,15 +2555,18 @@ canvas.addEventListener("click", (event) => {
   const agent = agentAtCanvasPos(world, x, y, viewLayer());
   if (agent) {
     selectAgent(agent);
-    // Tapping a creature in Play mode is the examine verb (free, no tick).
-    const me = playerMode ? findPlayer(world) : undefined;
-    if (me && agent.id !== me.id) hudMessageEl.textContent = examine(world, agent, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
-    return;
+    // In play mode a tap NEVER examines any more — it walks, like every other
+    // tap. Direct report: "I get confused between tap to move vs tap to look."
+    // One gesture, one meaning: tap moves, long-press looks. Selecting still
+    // happens so the World/Inspector tab follows along.
+    if (!playerMode) return;
+    const me = findPlayer(world);
+    if (!me || agent.id === me.id) return;
   }
   // Play mode: tapping a tile walks there — direct ask: "I can't play at all
   // on mobile. Can you allow a click based control scheme?" See travelTo.
   if (playerMode && !playerDead) {
-    travelTo({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
+    travelTo(tileAtPointer(event));
     return;
   }
   // Direct ask: "draw the yellow bounding box anyways on all cool events
@@ -1913,10 +2596,7 @@ canvas.addEventListener("click", (event) => {
 // the actual committing, this only ever changes what's drawn.
 canvas.addEventListener("mousemove", (event) => {
   if (!targeting) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-  updateTargetPreview({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
+  updateTargetPreview(tileAtPointer(event));
 });
 
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));
@@ -2378,7 +3058,20 @@ const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) :
 const playerParam = new URLSearchParams(location.search).get("player");
 if (playerParam === "1" || playerParam === "cave") {
   // ROADMAP.md M0 (?player=1, surface) and M1 (?player=cave). No macro grid.
-  loadPlayerWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, playerParam === "cave" ? "cave" : "surface");
+  const bootSeed = Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED;
+  const bootScene = playerParam === "cave" ? "cave" : "surface";
+  // Load the generated world first so the game is playable immediately, then
+  // swap in a saved run if one turns out to match. Waiting on the (async)
+  // decompress before showing anything would put a blank screen in front of
+  // every player, including the majority who have no save at all.
+  loadPlayerWorld(bootSeed, bootScene);
+  void loadRun().then((restored) => {
+    // Only a save of the same scenario AND seed may take over: changing the
+    // seed in the URL is how you deliberately ask for a different world, and
+    // silently resurrecting the old one would ignore that.
+    if (!restored || restored.meta.scenario !== bootScene || restored.meta.seed !== bootSeed) return;
+    loadPlayerWorld(bootSeed, bootScene, restored);
+  });
 } else {
   enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
 }
@@ -2456,7 +3149,11 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
-  if (playerMode) renderHerdStatusPanel();
+  if (playerMode) {
+    renderPartySection();
+    actionLogPanel.render();
+    renderEventTicker();
+  }
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
   // is hidden, so this is cheap on every other frame.

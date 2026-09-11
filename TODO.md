@@ -11113,6 +11113,348 @@ Direct ask: *"Let's max the speed at x9 not x32."*
 - [x] Fixed a stale "32x" example in index.html's own comment about the
       battle-step speed readout.
 
+## Built: play-mode UX, Slice 0 — stop losing runs, stop fighting the camera
+
+Design doc: `PLAY_UX_DESIGN.md`. Direct ask: *"I need a better ux for play
+mode... On Mobile I don't like how hard it is to scroll around the screen,
+sometimes accidentally refreshing and losing everything."* Answers chosen:
+play mode gets its own layout; radial replaces the button pad **on mobile
+only** (*"Replace but only on mobile I think?"*); autosave folded in now;
+scope this round is Slices 0–2.
+
+- [x] **"Accidentally refreshing and losing everything" was two bugs stacked.**
+      The refresh was *reachable* (no `overscroll-behavior` anywhere, and
+      `#canvas-wrap` pans by native scroll, so a drag at its edge chained to
+      the document and pulled to refresh) AND nothing *survived* one (no
+      localStorage, no IndexedDB — zero persistence of any kind). Fixing only
+      the first still loses runs to a deliberate reload or an iOS tab
+      eviction. Both are fixed.
+- [x] `overscroll-behavior: none` on html/body, `contain` on both native-scroll
+      pan containers. Verified by computed style in a real mobile viewport.
+      **Honest limit: headless Chromium does not implement pull-to-refresh, so
+      this confirms the property applies, not that a refresh was seen failing
+      to fire.** Wants a thumb on a real phone.
+- [x] **The camera threw away your zoom on every single step.**
+      `focusCameraOn` ran after *every* `playerAct` and unconditionally called
+      `setZoom(AUTO_CAM_ZOOM)`. Measured at 390px wide: zoom out to 0.96, take
+      one step, back to 1.5; pan 300px, one step, snapped back. Pinch-zoom was
+      effectively inoperable — you could zoom, but not zoom *and then play*.
+      Replaced with `keepPlayerInView`, which never touches zoom and only
+      scrolls when the player leaves a ~2-tile dead-zone margin.
+
+      | moment | before | after |
+      |---|---|---|
+      | zoom out to 0.96, take a step | 1.5 (reverted) | 0.96 (held) |
+      | pan away, take a step | snapped back | preserved |
+      | walk off screen | recentres | recentres |
+- [x] First dead-zone attempt used 0.3, which parked the player exactly ON the
+      boundary after any correction, so the next pan was instantly undone —
+      *the same "panning feels stuck" complaint from the opposite cause.*
+      Measured, then tightened to 0.12 with two correction modes: centre
+      properly when the player is fully off screen, nudge minimally when they
+      merely drifted out by walking.
+- [x] **Autosave.** Measured first rather than guessed: a real `createCaveRun`
+      is **6.34 MB** of raw JSON across five levels — over localStorage's ~5 MB
+      ceiling — but gzips to **0.23 MB (3.7%)**, so gzip + base64 fits with
+      room to spare. Stored at 325 KB in practice.
+- [x] Rejected a replay-log save (record actions, replay from seed) despite it
+      being far smaller: replay cost grows with run length, and any divergence
+      corrupts the restore *silently*, which is the worst failure mode for the
+      one feature whose whole job is not losing your game.
+- [x] **`world.rng` is a function, and `JSON.stringify` drops functions
+      silently.** A naive save restored a world with no generator.
+      `world.rngSeed` exists but restoring from it *rewinds* the stream to
+      worldgen time and hands the player the same "random" numbers again —
+      deterministic, but wrong. mulberry32's entire state is one 32-bit int
+      initialised as `a = seed >>> 0`, so `mulberry32(state)` IS the exact
+      continuation; added `SeededRng.state()` (optional, so fixed-output test
+      stubs stay assignable) and 5 tests in `engine/test/rng.test.ts`, one of
+      which asserts the rewind bug specifically.
+- [x] **Regression I introduced and caught only by running it:**
+      `Agent.vision.visible` is a `Set<number>` (and `vision.explored` a record
+      of Sets). JSON turns a Set into `{}` with no error, so the first frame
+      after a restore threw `vision.visible.has is not a function`. My
+      structural probe missed it — it sampled only the first few array
+      entries. Fixed with a general Set/Map replacer/reviver rather than
+      special-casing vision, so a Set added anywhere later cannot reopen the
+      same hole.
+- [x] Live-verified across a real page reload, **13/13 checks pass, zero page
+      errors**: tick, player position, HP, hunger, thirst, agent roster and
+      depth all preserved; the rng **resumed rather than restarted**;
+      `vision.visible` still a real Set of 69 tiles; 129 explored tiles intact.
+- [ ] **Known gap, deliberately not silent:** overworld play mode (after
+      graduating out of the cave) is NOT autosaved. There `world` is one zone
+      of a `macroWorld` grid that isn't in the payload, and saving the zone
+      alone would restore a world whose zone crossings break. `saveNow()`
+      returns early when `macroWorld` is set, and the cave save is cleared on
+      graduation so a reload can't drop you back underground pre-win.
+- [ ] Autosave has no UI at all — no "saved" indicator, no manual save/load,
+      no way to abandon a run except dying or pressing R. Fine for now; worth
+      revisiting once the sidebar exists to put it in.
+
+## Built: play-mode UX, Slice 1 — one sidebar, and a mobile bottom sheet
+
+Direct ask: *"I want one sidebar with my player status, and my party members
+at a glance. Then expandable."* Answer chosen for the layout question: play
+mode gets its **own** layout, not a fifth tab.
+
+- [x] **Play mode leads with "You".** The side panel opens on a You tab
+      (identity, vitals, message, Party, Pack, Keys); the four spectator tabs
+      — Inspector / Battle / Chronicle / Events — fold behind a single
+      "World" disclosure. They are furniture for watching a simulation, not
+      for being inside one.
+- [x] **Two floating panels became none.** `#herd-status-panel` is deleted
+      outright, along with its pin state and the 🐾 button that restored it;
+      `#player-hud` is now controls only — the pack button and the seven-verb
+      pad. Everything you *read* is in the panel, everything you *press*
+      floats over the map. That is the literal answer to *"buttons either
+      easily dismissable or off to the side so it doesn't make the ui
+      obscured."*
+- [x] The bar markup was **moved with its ids intact**, so `renderPlayerHud`'s
+      `hud-${id}` lookups kept working with no change. A move, not a rewrite.
+- [x] **Mobile is a bottom sheet with three detents** — drag the grip, or tap
+      it to cycle. Measured live at 390px: peek **74px**, half **351px**, full
+      **663px**. It is `position: fixed`, so the map keeps the whole viewport
+      underneath instead of the old permanent 22vh in-flow panel.
+- [x] **Bug found by measuring, not reading (1):** at half and full the sheet
+      *covered the action pad* — every verb out of reach exactly when the
+      panel was open. `--sheet-h` moved to `:root` so the pad rides above the
+      sheet's current height, and hides at full. Verified with
+      `elementFromPoint` that the first button really is the topmost element
+      there, not merely present in the DOM.
+
+      | detent | pad shown | clear of sheet | button tappable |
+      |---|---|---|---|
+      | peek | yes | yes | yes |
+      | half | yes | yes | yes |
+      | full | no (by design) | — | — |
+- [x] **Bug found by measuring, not reading (2):** Watch mode was showing the
+      You/World tabs. `.panel-tab-btn` sets `display: flex` and is declared
+      *later* in the stylesheet than `.play-tab { display: none }` — equal
+      specificity, so source order won and the rule never applied. Scoped
+      through `#panel-tabs`. This is the `el.hidden` lesson again in a new
+      costume: the check caught it only because it read computed style
+      instead of trusting the rule I had just written.
+- [x] Orphaned `#panel-toolbar` row on the You page — one stranded expand
+      arrow under the tabs. Hidden in play mode.
+- [x] Added a real identity line ("Human · Lv 5"), and renamed the depth row
+      from "Level 1 of 5" to **"Depth 1 of 5"**: it sits directly under
+      "Lv 5", and two adjacent rows both reading "Level … 5" meant two
+      different fives.
+- [x] Verified: desktop 1280 and mobile 390 screenshots, detent cycling,
+      World-tab unfold, a watch-mode regression check, zero page errors, full
+      suite green (engine 1616, data 475), web build clean — and the 13/13
+      autosave checks from Slice 0 still pass after the restructure.
+- [ ] The verb pad is still 7 buttons on mobile, ~196px tall stacked in the
+      corner. That is scheduled to go away in Slice 3, where the long-press
+      radial replaces it **on mobile only** — verbatim: *"Replace but only on
+      mobile I think?"* Desktop keeps the pad.
+- [ ] Sheet detent isn't remembered across a reload. Minor, but it is the kind
+      of thing that gets noticed once autosave means reloads are survivable.
+
+## Built: play-mode UX, Slice 2 — the action log
+
+Direct ask: *"I need logs and things that are just about me and my party
+visible. I want one place to see like results of look, gather, like actions.
+This can be in said action log."*
+
+- [x] **The gap, precisely.** `hudMessageEl` was one line that every new
+      message overwrote. Looking at a creature or gathering a tile showed its
+      result for exactly one action and then it was gone, with no way back.
+      Nothing was ever kept. A single `say()` helper now both shows and keeps;
+      14 scattered `hudMessageEl.textContent = …` sites route through it. The
+      four left writing directly are the ones that *should* be transient — the
+      targeting prompt, the clear, and the session banner.
+- [x] **Two sources, two voices, on purpose.** Your own outcomes arrive second
+      person and already written for you ("You gather berries."). Your party's
+      events arrive third person, because a follower is not you.
+- [x] **Events naming the player are excluded from the party side.** Letting
+      both in printed every action twice, once in each voice.
+- [x] Not merged into the `SimEvent` union, deliberately: that union has
+      non-defaulted exhaustive switches in three packages, so a synthetic kind
+      would break builds the engine's own typecheck does not catch. Separate
+      typed buffer, merged at render.
+- [x] Persisted in the autosave (payload v2) — a reload wiping it would
+      contradict the ask it was built for: *"don't make em expire. Always have
+      em. Stored."*
+
+### Real output, read cold
+
+```
+#19  You wait. ×25
+#11  You gather berries.
+#0   The Venonat is standing still. He has seen you. He stays beside you.
+```
+
+- [x] **Two prose defects caught by reading real output, not by reading code.**
+      1. A single gather logged **four rows**: "You start gathering berries." /
+         "Gathering… 2 turns left." / "Gathering… 1 turn left." / "You gather
+         berries." Progress belongs on the HUD line, which is live status; the
+         log keeps the result only. That is a table with commas, which is the
+         exact failure the house style names.
+      2. Party events were being run through `formatEvent`, the **spectator**
+         formatter, which produced
+         `Zubat (1) used tackle on Venonat (0, the Venonats of Deepfen) for 6
+         (hp left: 15)` — ids in parentheses, herd names, a raw move key.
+         Wrong register entirely for a panel about the creature walking next
+         to you. Now: **"Zubat hit Venonat for 6."** Partial switch with a
+         `formatEvent` fallback, deliberately not exhaustive, so a new engine
+         event kind cannot turn this into a fourth place that fails to build.
+- [x] **A bug I introduced and caught the same way:** suppressing gather
+      progress also suppressed a *failed* gather ("Nothing to gather here."),
+      which is a real result. `outcome.ok` separates "started an activity"
+      from "could not".
+- [x] Consecutive identical lines collapse to one row with a count, so holding
+      a movement key does not bury the run in "You wait."
+- [x] Verified live: look result logged; gather logged; **the look result is
+      still readable 20 actions later** (the whole point); duplicate waits
+      collapsed; the log survives a page reload; zero console errors. Party
+      filtering verified with real event shapes — party event kept, noise
+      dropped, player-only dropped. Full suite green (engine 1616, data 475),
+      web build clean, Slice 0's 13/13 autosave checks still pass.
+- [ ] **Not observed live: a party event arising from ordinary play.** The
+      filter and formatter are verified against real event shapes fed in
+      directly, and the Party section populates with a genuinely bonded
+      follower — but 25 ticks of a real run produced no non-noise event naming
+      the follower, and a scripted attack to force one did not land. Stated
+      plainly rather than claimed.
+- [ ] `examine()` can still run to three sentences ("The Venonat is standing
+      still. He has seen you. He stays beside you."). House style says at most
+      two. It is engine prose, pre-existing and outside this slice, but it is
+      now much more visible because it is kept rather than overwritten.
+- [ ] Moves log nothing (a successful move's outcome text is empty). Probably
+      right — "You move." twenty times is noise — but it does mean walking
+      leaves no trace in the log at all.
+
+## Built: play-mode UX, Slice 3 — the radial tile menu
+
+Direct ask: *"Long press a tile to open radial, then drag up to one radial
+section examine it, seeing what items are harvestabls, what kind of terrain
+and what effects standing on it does. Another radial section like, let's you
+target it with an atk. Another let's you gather from that tile."*
+
+- [x] **The inversion.** The game was verb-first (press `g`, press `f` then
+      pick a target). It is now also noun-first: touch the tile and the tile
+      says what it offers. Which wedges exist IS the answer to "what can I do
+      here" — a corpse tile has Loot, a bare floor does not — so it is
+      self-documenting in a way a key list never is. This also fixes, as a
+      side effect, that **loot and butcher were keyboard-only with no button
+      at all** and therefore unreachable on mobile.
+- [x] New engine module `tileQuery.ts`: `examineTile` (terrain, harvestables,
+      standing effects, occupant, corpse, stairs) and `verbsForTile`. Put in
+      the engine, not the web app, because "what may this agent legally do
+      here" is a rules question — and because it can then be unit-tested
+      without a browser. **13 tests**, including that gather is offered only
+      on the tile you are standing on (it acts on `agent.pos`, so offering it
+      across the room would be a button that silently does nothing) and that
+      no tile ever offers more than six wedges.
+- [x] `examineTile` returns **facts, not a sentence**. The house rule is that
+      a vague word means the data is missing; returning fields makes it
+      impossible for the caller to write around a hole instead of going and
+      getting the value. Real output: **"Bare floor. Venonat stands here."**
+- [x] Desktop hover examines for free — no click, no turn. The "informed
+      decisions" pillar made ambient.
+- [x] Attack and Command reuse the existing command menu, with the tile
+      already chosen, so the move picker commits immediately instead of
+      asking for a target the player just picked.
+- [x] **Mobile pad trimmed to Wait + Crouch**, verbatim decision: *"Replace
+      but only on mobile I think?"* Every tile-contextual verb is in the
+      radial; the two with no tile stay as buttons. Desktop keeps the whole
+      pad — it has keys and right-click and no space pressure.
+- [x] **Bug found by measuring: drag-to-arm silently did not work.** The
+      wedges sit above the canvas, so once the menu opened every `pointermove`
+      landed on a wedge and never reached the canvas listener that arms them —
+      the wedge never highlighted and the hub never changed. Fixed with
+      `setPointerCapture` on the press. The verb legality checks had all been
+      passing the whole time, which is exactly why "the logic is right" is not
+      the same as "the feature works".
+- [x] Follow-up ask: *"make the radials a little larger and white bg black
+      text"* — ring radius 74→104px, wedges 62→82px, 22px icons, white on
+      black text with a drop shadow. It sits ON the map over terrain art, and
+      a dark panel over dark cave floor was hard to read.
+- [x] Verified live at 390px: **13/13 checks pass** — own tile offers Gather
+      and no "Go", an ally's tile offers Attack + Command + Go, every tile
+      offers Look, never more than six wedges, dragging arms a wedge, the hub
+      names what a release will do, release fires the verb into the action
+      log, the trailing click does not also walk the player, a pan does not
+      open the menu, and the mobile pad is down to Wait + Crouch. Zero console
+      errors. Full suite green (engine **1629**, data 475).
+- [ ] The radial covers the tile it is about — inherent to centring on it. The
+      hub names the terrain while nothing is armed, which mostly covers it,
+      but worth watching.
+- [ ] No keyboard equivalent for opening the radial on desktop. Right-click
+      and hover are there; a key (Tab to the facing tile?) would complete it.
+
+## Fixed: play-mode mobile round 2 — radial release, sheet, header, gestures
+
+Six asks from a real phone session.
+
+- [x] **"Radial release on mobile not working it drags the map instead."**
+      Root cause: `#canvas-wrap` carries `touch-action: pan-x pan-y`, so the
+      browser's own scroller claimed the gesture, swallowed the drag and fired
+      `pointercancel` instead of the pointermove/pointerup the menu needs. The
+      menu opened and the map then slid out from under it. Fixed by locking
+      `touch-action: none` on the wrap while the radial is open (a visibility
+      callback on `TileMenu`), plus a `pointercancel` handler that closes
+      without committing — a cancel is the browser taking the gesture away, not
+      the player choosing.
+      **That fix did not work, and the check that said it did was worthless.**
+      Reported again: "The map is still scrolling on drag, not letting me hit
+      the radials." Flipping `touch-action` when the menu OPENS is too late —
+      the browser decides whether it owns a touch sequence at `touchstart`,
+      from the value in effect then, and changing the property mid-gesture does
+      not take the gesture back. My check read the computed property back and
+      saw "none", which only ever proved I had set it; it never proved the
+      browser honoured it for a gesture already under way. Same shape as the
+      `el.hidden` and `-s` lessons already in CLAUDE.md.
+      **Real fix:** `preventDefault()` on a NON-passive `touchmove` while the
+      menu is open. That does take the gesture back, because the press sat
+      still for 400ms so this is the sequence's first move. `{ passive: false }`
+      is the whole point — touchmove defaults to passive, where preventDefault
+      is ignored silently.
+      **Real check:** driven with actual touch events over CDP
+      (`Input.dispatchTouchEvent`), not `page.mouse` — `page.mouse` never
+      scrolls the map at all, which is exactly why the first check passed while
+      a phone kept failing. Proven to fail without the fix (map scrolled
+      982 → 1071 mid-drag, wedge never armed, nothing fired) and pass with it
+      (scroll pinned at 982, wedge armed, verb fired), with a control that a
+      plain touch drag still pans.
+- [x] **Sheet is two detents now, not three.** Direct ask: "it should just be
+      low to full and the handle should be bigger or something to easily
+      toggle." The middle stop was the state that covered the verb pad without
+      being big enough to be worth it. Measured: **74px ↔ 663px**, one tap
+      either way. Grip went 36×4px to 64×6px in a **388×30px** hit area.
+- [x] **Play mode hides the spectator header.** Seed, Watch/Play, map mode,
+      clock, Auto Camera and render settings moved into `#observer-controls`,
+      hidden in play mode behind a hamburger that slides them back in as a
+      second row. `#toggle-panel` hides too — the sheet has its own grip, and
+      a second panel button was wrapping the header onto an extra line.
+- [x] **An event ticker took its place** — the last three things that happened
+      to you and your party, newest at full opacity then 0.75 then 0.5, exactly
+      as asked. Reads the same `actionLogPanel` the You panel does, so the two
+      can never disagree; only touches the DOM when the text actually changes.
+- [x] **One gesture, one meaning.** Direct report: "I get confused between tap
+      to move vs tap to look." Now **tap always moves** (tapping a creature
+      still selects it for the Inspector, but no longer examines), and
+      **releasing the radial without swiping always Looks** — the centre is the
+      Look action, not a cancel zone. That works because examining is free: an
+      accidental long-press costs nothing, so there is nothing to cancel. The
+      Look wedge is gone, since it would be a second way to do the default.
+- [x] **Gather is a button now, not a wedge.** Direct ask: "gather I think
+      might need to be it's own button like crouch and wait." It acts on the
+      tile you are already standing on, so there is nothing to point at — the
+      mobile pad is Wait, Gather, Crouch, and the radial is only verbs that
+      target *another* tile. `verbsForTile` still reports gather: the engine
+      says what is legal, the UI decides which surface offers it.
+- [x] Hover-examine is now gated to `@media (hover: hover)` — on touch it was
+      a tooltip that appeared where you last tapped and then sat there.
+- [x] **Bug caught by measuring:** the radial centre *behaved* as Look from the
+      moment it opened but did not *look* armed until the pointer first moved,
+      because the class was only applied in `track()`. The release fired
+      correctly the whole time, so only a visual check caught it.
+- [x] Verified live at 390px: **14/14** new checks, plus the earlier suites
+      still green (radial 13/13, autosave 13/13, action log 6/6). Full suite
+      engine 1629, data 475, web build clean.
 ## Biome ripping pass 1: deadwood, stone and fungus
 
 Direct ask: *"Do you have more biome ripping work?"* -> *"I meant more like more

@@ -49,6 +49,7 @@ export * from "./travel.js";
 export * from "./inventory.js";
 export { carryCapacityOf, usedCarryWeight, maybeStartFerrying, applyFerrying } from "./support.js";
 export * from "./harvest.js";
+export * from "./tileQuery.js";
 export * from "./threat.js";
 export * from "./trust.js";
 export * from "./notables.js";

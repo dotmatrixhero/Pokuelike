@@ -20,6 +20,15 @@
         background: var(--bg);
         color: var(--text);
         font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        /* Direct ask: "sometimes accidentally refreshing and losing
+           everything." #canvas-wrap pans by native scroll, so dragging the
+           map while it sits at a scroll edge used to chain the leftover
+           scroll up to the document and trigger pull-to-refresh — which,
+           with a run held only in memory, threw the whole game away. `none`
+           refuses both the chaining and the browser's own overscroll
+           gesture. The wrap itself gets `contain` (below) so it still
+           absorbs its own edges without ever handing them upward. */
+        overscroll-behavior: none;
       }
       * { box-sizing: border-box; }
       button, input, select {
@@ -186,6 +195,10 @@
         padding: 8px;
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
+        /* Stops a pan that runs off the edge of the map from becoming a
+           document-level overscroll (and so a pull-to-refresh). Paired with
+           `overscroll-behavior: none` on html/body above. */
+        overscroll-behavior: contain;
       }
       /* Author-origin declarations always outrank the browser's own default
          `[hidden] { display: none }` regardless of selector specificity, so
@@ -214,6 +227,10 @@
         padding: 8px;
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
+        /* Stops a pan that runs off the edge of the map from becoming a
+           document-level overscroll (and so a pull-to-refresh). Paired with
+           `overscroll-behavior: none` on html/body above. */
+        overscroll-behavior: contain;
       }
       #macro-map-canvas { display: block; }
       canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
@@ -368,40 +385,86 @@
       #auto-cam-badge .auto-cam-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff6b6b; box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.18); flex: 0 0 auto; }
       #auto-cam-status { font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-      /* ROADMAP.md M3 — the player's needs HUD, top-right of the map. */
+      /* Play mode's on-map control cluster. Used to be a 230px panel of
+         readouts; the readouts moved to the sidebar's You panel and what is
+         left is buttons, so it shrink-wraps its contents instead. */
       #player-hud {
         position: absolute;
         right: 14px;
         top: 14px;
         z-index: 20;
-        width: 230px;
-        background: rgba(23, 28, 36, 0.92);
-        border: 1px solid var(--panel-border);
-        border-radius: 10px;
-        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
         font-size: 11.5px;
         color: var(--text-dim);
       }
       #player-hud[hidden] { display: none; }
-      #player-hud .hud-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-      #player-hud .hud-label { width: 44px; flex: 0 0 auto; }
-      #player-hud .hud-bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
-      #player-hud .hud-fill { display: block; height: 100%; width: 0; border-radius: 4px; transition: width 120ms linear; }
-      #player-hud .hud-fill.hp { background: #5ad27a; }
-      #player-hud .hud-fill.hunger { background: #e5a43a; }
-      #player-hud .hud-fill.thirst { background: #4a9fe5; }
-      #player-hud .hud-fill.energy { background: #d9c94a; }
-      #player-hud .hud-fill.low { background: #ff6b6b; }
-      #player-hud .hud-num { width: 34px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-      #hud-pack-btn { display: block; margin: 0 0 6px 0; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
+      .hud-pad-top { display: flex; justify-content: flex-end; }
+      #hud-pack-btn { display: block; width: 30px; height: 30px; padding: 0; border: 1px solid var(--panel-border); border-radius: 8px; background: rgba(23, 28, 36, 0.92); color: var(--text); font-size: 14px; line-height: 1; cursor: pointer; }
       #hud-pack-btn:active { background: var(--accent); }
-      #hud-message { margin-top: 6px; min-height: 15px; color: var(--text); }
-      #hud-keys { margin-top: 4px; font-size: 10.5px; opacity: 0.7; }
-      #hud-pack { margin-top: 4px; font-size: 11px; color: var(--text-dim); }
-      #hud-depth { font-size: 11px; color: var(--text-dim); margin-bottom: 2px; }
+      #hud-pad { flex-wrap: wrap; justify-content: flex-end; max-width: 220px; background: rgba(23, 28, 36, 0.92); border: 1px solid var(--panel-border); border-radius: 10px; padding: 5px; }
+
+      /* The vitals bars. Scoped to the You panel now, not #player-hud —
+         the markup moved, and these selectors have to move with it or the
+         bars render as unstyled spans with no width. */
+      #you-page .hud-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+      #you-page .hud-label { width: 44px; flex: 0 0 auto; }
+      #you-page .hud-bar { flex: 1; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+      #you-page .hud-fill { display: block; height: 100%; width: 0; border-radius: 4px; transition: width 120ms linear; }
+      #you-page .hud-fill.hp { background: #5ad27a; }
+      #you-page .hud-fill.hunger { background: #e5a43a; }
+      #you-page .hud-fill.thirst { background: #4a9fe5; }
+      #you-page .hud-fill.energy { background: #d9c94a; }
+      #you-page .hud-fill.low { background: #ff6b6b; }
+      #you-page .hud-num { width: 38px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+      /* ===== The You panel (play mode's home) ===== */
+      #you-page { font-size: 11.5px; color: var(--text-dim); }
+      .you-vitals { padding-bottom: 8px; border-bottom: 1px solid var(--panel-border); }
+      #hud-message { margin-top: 8px; min-height: 15px; color: var(--text); font-size: 12px; }
+      #hud-keys { font-size: 10.5px; opacity: 0.75; line-height: 1.7; }
+      #hud-pack { font-size: 11px; color: var(--text-dim); }
+      #hud-depth { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
       #hud-depth:empty { display: none; }
-      #hud-pad { flex-wrap: wrap; }
-      #hud-pad button { flex: 1 1 28%; }
+      .you-section { border-bottom: 1px solid var(--panel-border); }
+      .you-section > summary {
+        cursor: pointer;
+        padding: 8px 0;
+        color: var(--text);
+        font-weight: 600;
+        font-size: 11.5px;
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .you-section > summary::-webkit-details-marker { display: none; }
+      /* Own disclosure triangle: the native marker is suppressed above so the
+         row can be a flex line with a count chip on it. */
+      .you-section > summary::before { content: "\25B8"; display: inline-block; transition: transform 120ms ease; color: var(--text-dim); }
+      .you-section[open] > summary::before { transform: rotate(90deg); }
+      .you-count { color: var(--text-dim); font-weight: 400; }
+      #you-title { color: var(--text); font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+      /* The panel toolbar is Expand + Clear-selection, both of which only
+         mean anything on the spectator pages. On You it was a stranded row
+         holding one lone arrow. */
+      body.player-mode:not(.world-tabs-open) #panel-toolbar { display: none; }
+      .you-section > div { padding-bottom: 10px; }
+      .you-empty { color: var(--text-dim); font-style: italic; }
+
+      /* The action log. Bounded so it never pushes Pack and Keys off the
+         bottom of the panel — it is the longest section by far and the only
+         one that grows without limit. */
+      #action-log { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+      .action-row { display: flex; gap: 7px; align-items: baseline; padding: 2px 0; line-height: 1.45; }
+      .action-tick { flex: 0 0 auto; color: var(--text-dim); opacity: 0.6; font-variant-numeric: tabular-nums; font-size: 10px; }
+      .action-text { flex: 1; }
+      /* Your own doing, emphasised: it is what you came to the log to read.
+         Your party's events stay dim so the two are separable at a glance. */
+      .action-you .action-text { color: var(--text); }
+      .action-party .action-text { color: var(--text-dim); }
 
       /* Direct ask: "have herd hp and status bars like easy to pin so you
          can see all; at once" — every bonded follower's HP at a glance,
@@ -412,33 +475,170 @@
          about a second docked panel competing with the map for space —
          this one floats over the map like #player-hud, it doesn't push
          anything else aside. */
-      #herd-status-panel {
-        position: absolute;
-        left: 14px;
-        bottom: 14px;
-        z-index: 20;
-        width: 210px;
-        max-height: 40%;
-        overflow-y: auto;
-        background: rgba(23, 28, 36, 0.92);
-        border: 1px solid var(--panel-border);
-        border-radius: 10px;
-        padding: 8px 10px;
-        font-size: 11.5px;
-        color: var(--text-dim);
-      }
-      #herd-status-panel[hidden] { display: none; }
-      .herd-status-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; color: var(--text); font-weight: 600; }
-      #herd-status-hide { width: 20px; height: 20px; padding: 0; border: 1px solid var(--panel-border); border-radius: 5px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 11px; line-height: 1; cursor: pointer; }
-      .herd-status-row { margin: 6px 0; }
-      .herd-status-name { display: flex; justify-content: space-between; color: var(--text); }
-      .herd-status-name .herd-status-status { color: var(--text-dim); font-weight: 400; font-size: 10.5px; }
-      .herd-status-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-top: 2px; }
+      /* Party rows. The floating #herd-status-panel these lived in is gone;
+         the rows themselves are unchanged and now render into #party-body
+         inside the You panel. */
+      .herd-status-row { margin: 7px 0; }
+      .herd-status-name { display: flex; justify-content: space-between; gap: 8px; color: var(--text); }
+      .herd-status-name .herd-status-status { color: var(--text-dim); font-weight: 400; font-size: 10.5px; text-align: right; }
+      .herd-status-bar { display: block; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-top: 3px; }
       .herd-status-fill { display: block; height: 100%; border-radius: 3px; transition: width 120ms linear; background: #5ad27a; }
       .herd-status-fill.low { background: #ff6b6b; }
       .herd-status-fill.fainted { background: #6b6f76; }
-      #hud-party-btn { display: block; margin: 0 6px 6px 0; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
-      #hud-party-btn:active, #hud-party-btn.pinned { background: var(--accent); }
+
+      /* ===== Play mode hides the spectator header =====
+         Direct ask: "in play mode you can auto hide the seed/watch/autocam
+         stuff to be a slide in button that opens that part of the menu." */
+      #observer-controls { display: contents; }
+      body.player-mode #observer-controls {
+        display: none;
+      }
+      /* Slid in, it becomes a real row under the title rather than trying to
+         squeeze back into a header that no longer has room for it. */
+      body.player-mode.header-open #observer-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        flex: 1 1 100%;
+        order: 10;
+        padding-top: 6px;
+        border-top: 1px solid var(--panel-border);
+      }
+      #header-toggle[hidden] { display: none; }
+      body.player-mode #header-toggle { display: inline-flex; align-items: center; }
+      /* The bottom sheet has its own grip in play mode, so a second
+         show/hide-the-panel button just wraps the header onto a second row. */
+      body.player-mode #toggle-panel { display: none; }
+      body.player-mode.header-open #header-toggle { background: var(--accent); color: #06111f; }
+
+      /* The last three things that happened to you, newest first. Direct ask:
+         "the most recent fully opacity and the least recent 50%." */
+      #event-ticker {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        font-size: 10.5px;
+        line-height: 1.3;
+        color: var(--text-dim);
+        overflow: hidden;
+      }
+      #event-ticker[hidden] { display: none; }
+      .ticker-row {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .ticker-row.you { color: var(--text); }
+
+      /* While the radial is open the map must NOT pan. Direct report: "Radial
+         release on mobile not working it drags the map instead." `touch-action:
+         pan-x pan-y` hands the gesture to the browser's own scroller, which
+         then swallows the drag and fires pointercancel instead of the
+         pointermove/pointerup the menu needs. */
+      #canvas-wrap.menu-open { touch-action: none; }
+
+      /* ===== The radial tile menu (PLAY_UX_DESIGN.md slice 3) =====
+         Long-press on mobile, right-click on desktop. Anchored on the tile
+         itself, so the thing you are acting on stays under the menu rather
+         than the menu appearing somewhere else and breaking the connection. */
+      #tile-menu {
+        position: absolute;
+        z-index: 32;
+        width: 0;
+        height: 0;
+        pointer-events: none; /* only the hub and wedges take input */
+      }
+      #tile-menu[hidden] { display: none; }
+      /* Light-on-dark, deliberately against the rest of the app's palette:
+         the radial sits ON the map, over whatever terrain art happens to be
+         underneath, and a dark panel over dark cave floor was hard to read at
+         a glance. White reads as "this is a thing on top", not part of the
+         world. Direct ask: "make the radials a little larger and white bg
+         black text". */
+      .tile-menu-hub {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        min-width: 96px;
+        max-width: 164px;
+        padding: 8px 11px;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+        color: #10141a;
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        line-height: 1.35;
+      }
+      .tile-menu-wedge {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        width: 82px;
+        padding: 11px 5px;
+        border-radius: 13px;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        background: #ffffff;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+        color: #10141a;
+        font-size: 12px;
+        cursor: pointer;
+        transition: transform 90ms ease, background 90ms ease;
+      }
+      .tile-menu-icon { font-size: 22px; line-height: 1; }
+      .tile-menu-label { font-weight: 700; }
+      /* "armed" is the drag-to state: the wedge a release would commit. Scaled
+         AND recoloured — under a thumb the scale is what you actually see,
+         since your hand is covering the colour. */
+      .tile-menu-wedge.armed {
+        background: var(--accent);
+        color: #ffffff;
+        border-color: #ffffff;
+        transform: translate(-50%, -50%) scale(1.16);
+      }
+      .tile-menu-wedge:hover { background: #eef2f7; }
+      /* The hub is the Look action now, not a cancel zone, so it gets the same
+         armed treatment the wedges do — otherwise "release without swiping"
+         looks like it will do nothing. */
+      .tile-menu-hub.armed {
+        background: var(--accent);
+        color: #ffffff;
+        border-color: #ffffff;
+      }
+
+      /* Desktop hover: examine for free, no click and no turn spent. */
+      #tile-tip {
+        position: absolute;
+        z-index: 28;
+        pointer-events: none;
+        max-width: 220px;
+        padding: 5px 8px;
+        border-radius: 7px;
+        background: rgba(12, 16, 22, 0.95);
+        border: 1px solid var(--panel-border);
+        color: var(--text-dim);
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      #tile-tip[hidden] { display: none; }
+      /* Hover-examine is a pointing-device affordance. On touch there is no
+         hover, and a "hover" tooltip there is just a box that appears where
+         you last tapped and then sits there. */
+      @media (hover: none) {
+        #tile-tip { display: none !important; }
+      }
+      #tile-tip b { color: var(--text); font-weight: 600; }
 
       /* ROADMAP.md M5 — the pack menu. */
       #pack-menu, #command-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
@@ -481,16 +681,30 @@
          sits exactly where a thumb rests on a phone. */
       body.player-mode #playback-hud { display: none; }
       @media (max-width: 768px) {
-        /* Bottom of the map, not the top: the map area is short on a phone
-           and the camera centres the player mid-wrap, which on the first
-           mobile run put the player's tile under the HUD — every tap on the
-           map landed on the Drink button. Bottom is also where thumbs are. */
-        #player-hud { width: auto; left: 10px; right: 10px; top: auto; bottom: 10px; padding: 6px 8px; }
-        #player-hud .hud-rows { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
-        #hud-keys { display: none; }
-        #hud-message { margin-top: 4px; }
-        #hud-pad { margin-top: 6px; }
-        #hud-pad button { min-height: 44px; }
+        /* Bottom-right of the map: the vitals that used to force this panel
+           full-width are in the sidebar now, so the pad only needs a thumb's
+           worth of corner. It sits ABOVE the bottom sheet's peek height so
+           the two never overlap. */
+        /* Rides on top of the sheet's CURRENT height, not the peek constant:
+           at half the sheet is 351px tall and a pad pinned above peek would
+           be buried under it, putting every verb out of reach exactly when
+           the panel is open. */
+        #player-hud { right: 10px; left: auto; top: auto; bottom: calc(var(--sheet-h, var(--sheet-peek)) + 12px); transition: bottom 0.18s ease; }
+        #hud-pad { max-width: 180px; }
+        #hud-pad button { min-height: 44px; min-width: 44px; }
+        /* Direct ask, verbatim: "Replace but only on mobile I think?" Every
+           verb that targets ANOTHER tile (drink, attack, stairs) is in the
+           long-press radial now, so keeping a button for it too is the clutter
+           that was being complained about. Wait, crouch and gather stay: they
+           act on you or the tile you are already standing on, so there is no
+           tile to point at. Direct ask: "gather I think might need to be it's
+           own button like crouch and wait". Desktop
+           keeps the whole pad — it has keys and right-click and no space
+           pressure, so the pad costs nothing there. */
+        body.player-mode #hud-pad button:not([data-act="wait"]):not([data-act="crouch"]):not([data-act="gather"]) { display: none; }
+        /* At full the sheet owns the screen and the pad has nowhere left to
+           go — you are reading, not acting. Drag down to get it back. */
+        body.player-mode.sheet-full #player-hud { display: none; }
       }
 
       /* ROADMAP.md M3 — death is a state, not a log line. */
@@ -551,6 +765,38 @@
         border-bottom: 1px solid var(--panel-border);
         flex: 0 0 auto;
       }
+
+      /* ===== Which tabs exist depends on the mode =====
+         Watch mode is the spectator app: four tabs, no You. Play mode leads
+         with You and folds the four spectator tabs behind one "World"
+         disclosure — they are furniture for watching a simulation, not for
+         being inside one. Direct ask: play mode gets its own layout. */
+      /* Scoped through #panel-tabs deliberately. `.panel-tab-btn` sets
+         `display: flex` and is declared LATER in this stylesheet, so a bare
+         `.play-tab { display: none }` ties on specificity and loses on source
+         order — which it did, leaving You/World visible in Watch mode until a
+         computed-style check caught it. */
+      #panel-tabs .play-tab { display: none; }
+      body.player-mode #panel-tabs .play-tab { display: flex; }
+      body.player-mode #panel-tabs .observer-tab { display: none; }
+      body.player-mode.world-tabs-open #panel-tabs .observer-tab { display: flex; }
+      body.player-mode.world-tabs-open #tab-world { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+      /* The four spectator tabs are narrower than You/World when they unfold,
+         so the row still fits a phone without wrapping. */
+      body.player-mode.world-tabs-open #panel-tabs { flex-wrap: wrap; }
+      body.player-mode.world-tabs-open .observer-tab { flex: 1 1 25%; font-size: 10.5px; padding: 7px 2px; }
+
+      /* ===== Mobile bottom sheet =====
+         The grip is desktop-invisible; on a phone the panel becomes a sheet
+         with three detents and this is what you drag. Height is driven by
+         --sheet-h, set per detent below, so the drag can interpolate between
+         them without fighting a `max-height` rule. */
+      :root { --sheet-peek: 74px; }
+      #sheet-handle { display: none; }
+      /* Direct ask: "the handle should be bigger or something to easily
+         toggle." It is the only always-reachable control on the sheet, so it
+         gets a real target rather than a hairline. */
+      .sheet-grip { display: block; width: 64px; height: 6px; border-radius: 3px; background: var(--text-dim); opacity: 0.5; }
       .panel-tab-btn {
         flex: 1;
         padding: 10px 4px;
@@ -890,11 +1136,62 @@
       @media (max-width: 900px) {
         main { flex-direction: column; }
         #side-panel { flex: 0 0 auto; max-height: 42vh; }
-        /* Play mode needs the map: on an iPhone the wrap measured 370x220
-           with the panel at 42vh, and the bottom HUD covered half of that
-           — the centred player sat under it and no map tap could land. */
-        body.player-mode #side-panel { max-height: 22vh; }
         #side-panel.panel-collapsed { max-height: 0; }
+
+        /* ===== Play mode: the panel becomes a bottom sheet =====
+           Direct ask: "one sidebar with my player status, and my party
+           members at a glance. Then expandable", plus "Need it to be easier
+           to navigate with buttons either easily dismissable or off to the
+           side so it doesn't make the ui obscured."
+
+           Fixed rather than in-flow, so the map keeps the WHOLE viewport
+           underneath instead of being squeezed into whatever is left. The
+           previous 22vh in-flow panel was the compromise this replaces: it
+           cost the map a fifth of the screen permanently and still only
+           showed a couple of rows. Now peek costs 74px, and full is one
+           drag away. */
+        body.player-mode #side-panel {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 25;
+          max-height: none;
+          height: var(--sheet-h, var(--sheet-peek));
+          border-radius: 14px 14px 0 0;
+          border-bottom: none;
+          box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.45);
+          transition: height 0.18s ease;
+        }
+        /* While a finger is down the height follows the finger directly, so
+           the easing above would make it lag behind the drag. */
+        body.player-mode #side-panel.sheet-dragging { transition: none; }
+        body.player-mode #sheet-handle {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          /* 44px of thumb, not a 4px line. */
+          min-height: 30px;
+          padding: 12px 0 10px;
+          flex: 0 0 auto;
+          cursor: grab;
+          touch-action: none;
+        }
+        body.player-mode #sheet-handle:active .sheet-grip { opacity: 0.9; }
+        /* Peek shows the vitals strip and nothing else: no tabs, no
+           sections, no toolbar. That is the whole point of peek — four bars
+           and the map. */
+        body.player-mode.sheet-peek #panel-tabs,
+        body.player-mode.sheet-peek #panel-toolbar,
+        body.player-mode.sheet-peek .you-section { display: none; }
+        body.player-mode.sheet-peek #hud-message { display: none; }
+        body.player-mode.sheet-peek .you-vitals { border-bottom: none; padding-bottom: 0; }
+        body.player-mode.sheet-peek .hud-rows { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+        body.player-mode.sheet-peek #hud-depth { display: none; }
+        body.player-mode.sheet-peek #panel-body { overflow: hidden; }
+        /* The sheet already owns the bottom of the screen; a collapsed
+           spectator panel underneath it would just be a dead gap. */
+        body.player-mode #side-panel.panel-collapsed { display: none; }
 
         /* Direct ask: "can you just really limit the ui to two units hp
            bar at a time and just say there's more units in the fight on
@@ -925,80 +1222,99 @@
           <span class="subtitle">live observer</span>
         </div>
 
-        <div id="seed-chip-wrap">
-          <button id="seed-chip" class="icon-btn" title="Seed">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-            <span id="seed-chip-label"></span>
+        <!-- Direct ask: "in play mode you can auto hide the seed/watch/autocam
+             stuff to be a slide in button that opens that part of the menu."
+             All spectator furniture — seed, Watch/Play, map mode, the clock,
+             Auto Camera, render settings. In Watch mode it IS the header; in
+             Play mode it slides away behind #header-toggle and the event
+             ticker takes the space. -->
+        <div id="observer-controls">
+          <div id="seed-chip-wrap">
+            <button id="seed-chip" class="icon-btn" title="Seed">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span id="seed-chip-label"></span>
+            </button>
+            <div id="seed-popover" hidden>
+              <label for="seed-input" class="inspect-label" style="color: var(--text-dim); font-size: 12px;">Seed</label>
+              <input id="seed-input" type="number" step="1" />
+              <button id="load-seed">Load</button>
+              <button id="random-seed" title="Mint a fresh random seed and load it">Random</button>
+              <button id="copy-seed" title="Copy the current seed to the clipboard">Copy</button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Watch the whole simulation, or play a human in it. Direct ask:
+               "I also want to have a mode to just look at the full Sim, too...
+               Separate from player mode." Watch is the spectator app as it
+               always was: no player, no fog, the macro grid available. Play
+               is ROADMAP.md's cave. -->
+          <div class="segmented" role="group" aria-label="Watch or play" id="play-mode-switch">
+            <button id="mode-watch" class="playing" title="Watch the whole simulation — no player, nothing hidden">Watch</button>
+            <button id="mode-play" title="Play a human in the cave — fog of war, hunger, thirst">Play</button>
+          </div>
+
+          <div class="segmented" role="group" aria-label="Map mode">
+            <button id="map-mode-zone" class="playing" title="The focused zone's detailed tile view">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 5px;"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              Zone
+            </button>
+            <button id="map-mode-overworld" title="The whole macro grid — several regions, only the focused one fully simulated">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 5px;"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.8 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.8-4-9s1.5-6.4 4-9z"/></svg>
+              Overworld
+            </button>
+          </div>
+
+          <div class="divider"></div>
+          <span id="tick-label"></span>
+          <span id="clock-label"></span>
+
+          <div style="flex: 1;"></div>
+
+          <button id="auto-cam-toggle" class="icon-btn" title="Follow notable events automatically — immigration, courtship/eggs, hatching, battles, evolution, deaths — zooming in and slowing down while each one plays out">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5 -2.5v9l-4.5 -2.5"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>
+            Auto Camera
           </button>
-          <div id="seed-popover" hidden>
-            <label for="seed-input" class="inspect-label" style="color: var(--text-dim); font-size: 12px;">Seed</label>
-            <input id="seed-input" type="number" step="1" />
-            <button id="load-seed">Load</button>
-            <button id="random-seed" title="Mint a fresh random seed and load it">Random</button>
-            <button id="copy-seed" title="Copy the current seed to the clipboard">Copy</button>
+
+          <div id="more-menu-wrap">
+            <button id="more-menu-toggle" title="Style, zoom, flat mode" aria-haspopup="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+            </button>
+            <div id="more-menu">
+              <div class="menu-row">
+                <span class="menu-label">Render style</span>
+                <div class="field-group">
+                  <button id="style-tile" class="playing">Tile</button>
+                  <button id="style-ascii">ASCII</button>
+                </div>
+              </div>
+              <div class="menu-row">
+                <span class="menu-label">Zoom</span>
+                <div class="field-group">
+                  <button id="zoom-out" title="Zoom out">&minus;</button>
+                  <span id="zoom-label"></span>
+                  <button id="zoom-in" title="Zoom in">+</button>
+                </div>
+              </div>
+              <div class="menu-row">
+                <span class="menu-label" title="A separate, simpler simulation with no macro grid/regions — a fallback, not the everyday view">Flat mode (no regions)</span>
+                <button id="overworld-toggle" title="Switch between the overworld (regions + migration) and one plain flat map">Overworld: On</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="divider"></div>
+        <!-- Direct ask: "Maybe in its place you show the last three events that
+             happened to you and your party. With the most recent fully opacity
+             and the least recent 50%." Play mode only; reads the same action
+             log the You panel does. -->
+        <div id="event-ticker" hidden></div>
 
-        <!-- Watch the whole simulation, or play a human in it. Direct ask:
-             "I also want to have a mode to just look at the full Sim, too...
-             Separate from player mode." Watch is the spectator app as it
-             always was: no player, no fog, the macro grid available. Play
-             is ROADMAP.md's cave. -->
-        <div class="segmented" role="group" aria-label="Watch or play" id="play-mode-switch">
-          <button id="mode-watch" class="playing" title="Watch the whole simulation — no player, nothing hidden">Watch</button>
-          <button id="mode-play" title="Play a human in the cave — fog of war, hunger, thirst">Play</button>
-        </div>
-
-        <div class="segmented" role="group" aria-label="Map mode">
-          <button id="map-mode-zone" class="playing" title="The focused zone's detailed tile view">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 5px;"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-            Zone
-          </button>
-          <button id="map-mode-overworld" title="The whole macro grid — several regions, only the focused one fully simulated">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 5px;"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.8 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.8-4-9s1.5-6.4 4-9z"/></svg>
-            Overworld
-          </button>
-        </div>
-
-        <div class="divider"></div>
-        <span id="tick-label"></span>
-        <span id="clock-label"></span>
-
-        <div style="flex: 1;"></div>
-
-        <button id="auto-cam-toggle" class="icon-btn" title="Follow notable events automatically — immigration, courtship/eggs, hatching, battles, evolution, deaths — zooming in and slowing down while each one plays out">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 10l4.5 -2.5v9l-4.5 -2.5"/><rect x="3" y="6" width="12" height="12" rx="2"/></svg>
-          Auto Camera
+        <button id="header-toggle" title="Seed, mode, camera and render settings" aria-expanded="false" hidden>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
 
-        <div id="more-menu-wrap">
-          <button id="more-menu-toggle" title="Style, zoom, flat mode" aria-haspopup="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
-          </button>
-          <div id="more-menu">
-            <div class="menu-row">
-              <span class="menu-label">Render style</span>
-              <div class="field-group">
-                <button id="style-tile" class="playing">Tile</button>
-                <button id="style-ascii">ASCII</button>
-              </div>
-            </div>
-            <div class="menu-row">
-              <span class="menu-label">Zoom</span>
-              <div class="field-group">
-                <button id="zoom-out" title="Zoom out">&minus;</button>
-                <span id="zoom-label"></span>
-                <button id="zoom-in" title="Zoom in">+</button>
-              </div>
-            </div>
-            <div class="menu-row">
-              <span class="menu-label" title="A separate, simpler simulation with no macro grid/regions — a fallback, not the everyday view">Flat mode (no regions)</span>
-              <button id="overworld-toggle" title="Switch between the overworld (regions + migration) and one plain flat map">Overworld: On</button>
-            </div>
-          </div>
-        </div>
 
         <button id="toggle-panel" title="Show/hide the side panel">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
@@ -1029,58 +1345,35 @@
             <span id="auto-cam-status"></span>
           </div>
 
-          <!-- Direct ask: "have herd hp and status bars like easy to pin
-               so you can see all; at once" — every bonded follower's HP
-               and status, together, without opening the Inspector and
-               clicking through them one at a time. Shows itself once you
-               have a follower; the ✕ dismisses it, the 🐾 HUD button
-               (player-hud, above) brings it back. -->
-          <div id="herd-status-panel" hidden>
-            <div class="herd-status-title"><span>Party</span><button id="herd-status-hide" title="Hide">✕</button></div>
-            <div id="herd-status-body"></div>
-          </div>
+          <!-- The floating "Party" panel that used to sit here is gone: the
+               same rows now live permanently in the sidebar's You panel
+               (#party-body). Direct ask: "I want one sidebar with my player
+               status, and my party members at a glance." Two separate
+               floating panels showing overlapping state was the thing being
+               complained about, so this is a deletion, not a move. -->
 
-          <!-- ROADMAP.md M3: the player's needs, always on screen. The
-               inspector shows the same numbers for any selected agent, but
-               the player's have to be there without clicking — you should
-               never be surprised by starving. -->
+          <!-- Play mode's on-map layer is now CONTROLS ONLY. Vitals, depth,
+               the pack summary, the action message and the key cheatsheet all
+               moved into the sidebar's "You" panel (#you-page) — direct ask:
+               "one sidebar with my player status, and my party members at a
+               glance", and "buttons either easily dismissable or off to the
+               side so it doesn't make the ui obscured". What floats over the
+               map is the things you press; the things you read live in the
+               panel. -->
           <div id="player-hud" hidden>
-            <!-- Direct ask: "clean up hud further. Put a backpack emoji
-                 for pack on the top right." Pulled out of the button row
-                 entirely and anchored to the HUD panel's own corner —
-                 one less thing crowding the row below. -->
-            <div style="display: flex; justify-content: flex-end;">
-              <!-- Direct ask: "have herd hp and status bars like easy to
-                   pin so you can see all; at once." The panel shows itself
-                   automatically once you have a bonded follower; this is
-                   how to bring it back after dismissing it. -->
-              <button id="hud-party-btn" data-act="party" title="Show your party's HP and status">🐾</button>
+            <div class="hud-pad-top">
               <button id="hud-pack-btn" data-act="pack" title="What you carry, and what you can make">🎒</button>
             </div>
-            <!-- ROADMAP.md M7: which cave level you're on, always visible — direct ask precedent, "mechanics visible on the map, not hidden in a meter." -->
-            <div id="hud-depth"></div>
-            <div class="hud-rows">
-              <div class="hud-row"><span class="hud-label">HP</span><span class="hud-bar"><span id="hud-hp" class="hud-fill hp"></span></span><span id="hud-hp-text" class="hud-num"></span></div>
-              <div class="hud-row"><span class="hud-label">Hunger</span><span class="hud-bar"><span id="hud-hunger" class="hud-fill hunger"></span></span><span id="hud-hunger-text" class="hud-num"></span></div>
-              <div class="hud-row"><span class="hud-label">Thirst</span><span class="hud-bar"><span id="hud-thirst" class="hud-fill thirst"></span></span><span id="hud-thirst-text" class="hud-num"></span></div>
-              <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
-            </div>
-            <div id="hud-message"></div>
-            <div id="hud-pack"></div>
-            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x &nbsp; gather: g &nbsp; pack: i &nbsp; crouch: z &nbsp; attack: f &nbsp; loot: o &nbsp; butcher: p &nbsp; stairs: &gt;</div>
             <!-- Tap controls — direct ask: "I can't play at all on mobile.
                  Can you allow a click based control scheme?" Tapping the map
                  walks there; these are the verbs that have no tile. Eat and
-                 Offer moved out of here and into the Pack menu, on the food
-                 row itself — direct ask: "We're getting too many buttons...
-                 let's make offer and eat only available from inventory
-                 after you gather." The `e` key still eats (ground food
-                 first, a carried berry otherwise); there's no keyboard
-                 shortcut for `offer` any more — it lives in Pack only.
-                 Pack itself moved to the top-right corner button above;
-                 Attack reads as crossed swords, "make it not so big and
-                 bulky" — every button here is icon-plus-title now, not
-                 wide text. -->
+                 Offer live in the Pack menu, on the food row itself — direct
+                 ask: "We're getting too many buttons... let's make offer and
+                 eat only available from inventory after you gather."
+                 Scheduled to be replaced ON MOBILE ONLY by the long-press
+                 radial (PLAY_UX_DESIGN.md slice 3) — direct ask, verbatim:
+                 "Replace but only on mobile I think?" Desktop keeps the pad,
+                 which costs nothing there next to keys and right-click. -->
             <div id="hud-pad">
               <button data-act="wait" title="Wait one turn">⏱️</button>
               <button data-act="drink" title="Drink from water beside you">💧</button>
@@ -1155,6 +1448,12 @@
                would stretch the pill and push the buttons off centre. -->
           <div id="region-banner" hidden></div>
 
+          <!-- Desktop hover examine. Direct ask: "hover and right click on
+               desktop to do stuff" — hovering tells you the terrain, what is
+               harvestable and what standing there does, for free and without
+               spending a turn. -->
+          <div id="tile-tip" hidden></div>
+
           <div id="playback-hud">
             <button id="play-pause" title="Play/Pause">
               <svg id="play-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M7 4.5v15l13-7.5z"/></svg>
@@ -1170,20 +1469,40 @@
         </div>
 
         <div class="panel" id="side-panel">
+          <!-- Mobile bottom-sheet grip. Hidden on desktop, where the panel is
+               an ordinary column. Drag it to move between peek/half/full, or
+               tap to cycle — direct ask: "Need it to be easier to navigate
+               with buttons either easily dismissable or off to the side." -->
+          <div id="sheet-handle" role="button" tabindex="0" aria-label="Resize panel"><span class="sheet-grip"></span></div>
+
           <div id="panel-tabs" role="tablist">
-            <button id="tab-inspector" class="panel-tab-btn playing" role="tab" aria-selected="true" title="Population stats and per-agent detail">
+            <!-- Play mode only. First, and selected by default, so your own
+                 state is never a click away — the whole point of the ask. -->
+            <button id="tab-you" class="panel-tab-btn play-tab" role="tab" aria-selected="false" title="You and your party">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
+              You
+            </button>
+            <!-- Play mode only: one disclosure standing in for the four
+                 spectator tabs, which are furniture for watching a
+                 simulation rather than being in one. Toggles them visible
+                 instead of permanently spending four slots on them. -->
+            <button id="tab-world" class="panel-tab-btn play-tab" title="The rest of the world — population, battles, chronicle, full event log">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 4 5.8 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.8-4-9s1.5-6.4 4-9z"/></svg>
+              World
+            </button>
+            <button id="tab-inspector" class="panel-tab-btn observer-tab playing" role="tab" aria-selected="true" title="Population stats and per-agent detail">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7"/></svg>
               Inspector
             </button>
-            <button id="tab-battle-screen" class="panel-tab-btn" role="tab" aria-selected="false" title="Pokémon-battle-textbox view of whatever Auto Camera is following">
+            <button id="tab-battle-screen" class="panel-tab-btn observer-tab" role="tab" aria-selected="false" title="Pokémon-battle-textbox view of whatever Auto Camera is following">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/><path d="M4 4l3 1 -1 3-3-1z"/><path d="M20 4l-3 1 1 3 3-1z"/></svg>
               Battle
             </button>
-            <button id="tab-chronicle" class="panel-tab-btn" role="tab" aria-selected="false" title="The story of each herd — foundings, migrations, disasters, splits — and the world's notables">
+            <button id="tab-chronicle" class="panel-tab-btn observer-tab" role="tab" aria-selected="false" title="The story of each herd — foundings, migrations, disasters, splits — and the world's notables">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v16h5.5a1.5 1.5 0 0 0 1.5-1.5z"/></svg>
               Chronicle
             </button>
-            <button id="tab-events" class="panel-tab-btn" role="tab" aria-selected="false" title="The scrolling world event log">
+            <button id="tab-events" class="panel-tab-btn observer-tab" role="tab" aria-selected="false" title="The scrolling world event log">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h9"/></svg>
               Events
             </button>
@@ -1195,6 +1514,52 @@
           </div>
 
           <div id="panel-body">
+            <!-- Play mode's home panel. Direct ask: "I want one sidebar with
+                 my player status, and my party members at a glance. Then
+                 expandable." The bar/message/pack ids are deliberately the
+                 SAME ones the old floating HUD used, so renderPlayerHud's
+                 lookups keep working unchanged — this is a move of the
+                 markup, not a reimplementation of the rendering. -->
+            <div id="you-page" data-panel-page hidden>
+              <!-- Compact vitals strip. On mobile this is the one row that
+                   stays visible at the sheet's "peek" detent, so it has to
+                   carry HP/hunger/thirst/energy on its own. -->
+              <div class="you-vitals">
+                <div id="you-title"></div>
+                <div id="hud-depth"></div>
+                <div class="hud-rows">
+                  <div class="hud-row"><span class="hud-label">HP</span><span class="hud-bar"><span id="hud-hp" class="hud-fill hp"></span></span><span id="hud-hp-text" class="hud-num"></span></div>
+                  <div class="hud-row"><span class="hud-label">Hunger</span><span class="hud-bar"><span id="hud-hunger" class="hud-fill hunger"></span></span><span id="hud-hunger-text" class="hud-num"></span></div>
+                  <div class="hud-row"><span class="hud-label">Thirst</span><span class="hud-bar"><span id="hud-thirst" class="hud-fill thirst"></span></span><span id="hud-thirst-text" class="hud-num"></span></div>
+                  <div class="hud-row"><span class="hud-label">Energy</span><span class="hud-bar"><span id="hud-energy" class="hud-fill energy"></span></span><span id="hud-energy-text" class="hud-num"></span></div>
+                </div>
+                <div id="hud-message"></div>
+              </div>
+
+              <details class="you-section" id="section-party" open>
+                <summary>Party <span id="party-count" class="you-count"></span></summary>
+                <div id="party-body"></div>
+              </details>
+
+              <!-- Direct ask: "I need logs and things that are just about me
+                   and my party visible. I want one place to see like results
+                   of look, gather, like actions. This can be in said action
+                   log." Open by default — "visible" was the ask. -->
+              <details class="you-section" id="section-log" open>
+                <summary>Log</summary>
+                <div id="action-log"></div>
+              </details>
+
+              <details class="you-section" id="section-pack" open>
+                <summary>Pack</summary>
+                <div id="hud-pack"></div>
+              </details>
+
+              <details class="you-section" id="section-keys">
+                <summary>Keys</summary>
+                <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x &nbsp; gather: g &nbsp; pack: i &nbsp; crouch: z &nbsp; attack: f &nbsp; loot: o &nbsp; butcher: p &nbsp; stairs: &gt;</div>
+              </details>
+            </div>
             <div id="inspector" data-panel-page></div>
             <div id="battle-screen" data-panel-page hidden></div>
             <div id="events-page" data-panel-page hidden>
