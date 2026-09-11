@@ -51,7 +51,18 @@ export function getSprite(spriteKey: string, direction: SpriteDirection = "down"
   // just swapping which file loads for which requested direction — no
   // canvas mirroring needed, the art is already correct once you ask for
   // the right file.
-  const resolvedDirection = direction === "left" ? "right" : direction === "right" ? "left" : direction;
+  // ...but ONLY for the Pokemon sheet. The trainer rip
+  // (scripts/rip_trainer_sprites.py) classifies each frame's facing from its
+  // own pixels and writes the file under the direction it actually depicts,
+  // so `human_*_left.png` really does face left. Applying the Pokemon sheet's
+  // swap to those flipped them the wrong way and the humans moonwalked —
+  // direct report: "the trainer is moonwalking. I think its facing left and
+  // right sprites have to be switched." Verified at 9x on a checkerboard
+  // before changing anything: `pikachu_left` has its face on the image's
+  // RIGHT (mislabelled, swap needed), `human_hunter_left` has its face on the
+  // image's LEFT (correct, swap must not apply).
+  const mislabelledSource = !spriteKey.startsWith("human_");
+  const resolvedDirection = mislabelledSource && direction === "left" ? "right" : mislabelledSource && direction === "right" ? "left" : direction;
   // frame 0 is the standing pose and keeps the plain `<key>_<dir>.png` name
   // every sprite has always used; walk frames are `_1`. A missing walk frame
   // just falls back to standing, so a species with no animation still draws.

@@ -10637,3 +10637,57 @@ tiles with berries on em?"*
       is why this is a separate maintenance pass rather than a fix in the rip.
 - [ ] Some berry sprites' soil mounds read as hard brown rectangles rather than
       rounded mounds — likely the same class of rip artifact, not checked.
+
+## Fixed: lattice rivers, and the trainers were moonwalking
+
+- [x] **Lattice rivers were a worldgen defect, not a rendering one.** Direct
+      report: "You have the shitty lattice rivers." Steepest descent searches
+      all 8 neighbours, so rivers routinely step diagonally — and two tiles on
+      a diagonal touch only at a corner. `carveRiverWidening` then carved a
+      second tile *perpendicular to the flow*, which for a diagonal flow is
+      itself diagonal, so a diagonal reach came out as two parallel diagonal
+      chains with the land between them untouched.
+- [x] Fix: a diagonal step now carves a corner connector — the lower of the
+      two tiles sharing an edge with both the current tile and the next —
+      instead of the perpendicular widening. Orthogonal steps keep the old
+      widening, which was already fine.
+- [x] Measured over 8 seeds with `validateRiverConnectivity.ts`:
+
+      | | before | after |
+      |---|---|---|
+      | diagonal-only water tiles | 254 | 3 |
+      | land tiles enclosed by water | 90 | 8 |
+      | total water tiles | 21279 | 21277 |
+
+      Water volume is the control: essentially unchanged, so this connected
+      the channels rather than flooding the map.
+- [x] This was never only cosmetic. An enclosed land tile is a one-tile island
+      a walker can be stranded on, and a channel connected only at its corners
+      is not swimmable end to end.
+- [x] **Trainers moonwalked** — direct report: "the trainer is moonwalking. I
+      think its facing left and right sprites have to be switched."
+      `getSprite` applies a global left/right swap, correct for the Pokemon
+      sheet (whose `_left`/`_right` files are genuinely mislabelled), but the
+      trainer rip classifies each frame's facing from its own pixels and
+      writes the file under the direction it actually depicts. The swap was
+      flipping correct labels. Now scoped to non-`human_` keys.
+- [x] Verified at 9x on a checkerboard before changing anything: `pikachu_left`
+      has its face on the image's RIGHT (mislabelled), `human_hunter_left` has
+      its face on the LEFT (correct). Then verified live: ArrowRight moves the
+      player x50 -> x56 and loads `human_player_right.png`; ArrowLeft moves to
+      x44 and loads `human_player_left.png`.
+- [ ] **Mud is real art but reads as a flat slab**, answering "Are mud tiles
+      just a buncha flat squares?" `mud.png` is a real 128x128 texture, and
+      mud is one of only two terrains (with `wall`) that get a per-tile window
+      rather than being squashed — so it is not a flat fill. But the texture
+      is one brown with sparse 1px speckles and no structure, so it reads flat
+      anyway, and its boundary against sand/floor is a hard 90-degree tile
+      step: `drawBiomeEdgeBlend` only blends BIOME grounds, and mud is a
+      terrain. Two things would fix it: mine a real marsh/mud texture off the
+      biome sheet's marsh panel (it has proper bank art), and give terrain
+      grounds the same world-space windowing and edge blending the biome
+      grounds now get. Not done — your call on whether it's worth it.
+- [ ] Mud also does not appear on a default map at all: it comes from drought
+      drying a water tile, a Sludge hit, or mangrove generation. A fresh world
+      at tick 90 has zero mud tiles, so this was checked by painting a patch
+      into a live world.
