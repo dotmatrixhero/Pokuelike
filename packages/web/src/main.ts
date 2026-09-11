@@ -878,6 +878,18 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
     case "drink":
       playerAct({ kind: "drink" });
       return;
+    case "eat":
+      playerAct({ kind: "eat" });
+      return;
+    case "pet": {
+      // Names the creature explicitly rather than letting the engine's
+      // single-neighbour fallback guess: the tile was already chosen, and
+      // with two animals beside you a guess can get you bitten by the wrong
+      // one.
+      const occupant = world.agents.find((a) => a.alive !== false && !a.isEgg && a.layer === viewLayer() && a.pos.x === tile.x && a.pos.y === tile.y && a.id !== me.id);
+      playerAct({ kind: "pet", targetId: occupant?.id });
+      return;
+    }
     case "loot":
       playerAct({ kind: "loot" });
       return;
@@ -911,7 +923,7 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
  * Everything else aims at the pressed tile. `examine` is in neither: it is the
  * centre, and giving it a wedge too would be a second way to do the default.
  */
-const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", "loot", "butcher", "useStairs"]);
+const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", "eat", "loot", "butcher", "useStairs"]);
 
 function openTileMenu(tile: Vec2): void {
   const me = findPlayer(world);
@@ -1454,6 +1466,32 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       if (move?.fertilityBoost || move?.fertilityCeilingBoost) return `You use ${name}. The ground here is richer.`;
       if (move?.statusImmunityAura) return `You use ${name}. Your herd shrugs off what ails it.`;
       return `You use ${name}.`;
+    }
+    case "pet": {
+      // Failure is either nothing in reach or too many things in reach, and
+      // those want different answers: one is "go closer", the other is "say
+      // which one". Collapsing them into one line is the mistake the attack
+      // case above already has a scar from.
+      if (!ok) {
+        const reachable = world.agents.filter((a) => a.id !== player.id && a.alive !== false && !a.isEgg && a.layer === player.layer && Math.max(Math.abs(a.pos.x - player.pos.x), Math.abs(a.pos.y - player.pos.y)) <= 1);
+        return reachable.length > 1 ? "Two are in reach. Say which one." : "Nothing within reach to pet.";
+      }
+      const petted = outcome.petted;
+      const target = world.agents.find((a) => a.id === petted?.targetId);
+      const name = target ? (SPECIES[target.species]?.name ?? target.species) : "it";
+      const startled = petted?.woke ? ` You woke ${name}.` : "";
+      switch (petted?.outcome) {
+        case "accepted":
+          return `${name} leans into your hand.${startled}`;
+        case "tolerated":
+          return `${name} holds still and lets you.${startled}`;
+        case "pulledAway":
+          return `${name} pulls away from your hand.${startled}`;
+        case "clashed":
+          return `${name} bites you.${startled}`;
+        default:
+          return "";
+      }
     }
     case "usePoultice": {
       if (!ok) return countOf(player, "poultice") < 1 ? "You don't have a poultice." : "Nobody hurt nearby.";
@@ -3317,6 +3355,28 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     /** Push a line into the action log, for checks that need a known sequence of entries. */
     say(text: string): void {
       say(text);
+    },
+    /**
+     * The verbs the radial would actually offer for a tile, and for where the
+     * player stands. Screen-space tile math is camera-dependent and easy to
+     * get wrong in a check — an earlier one long-pressed empty ground and
+     * reported "the menu has no Pet wedge," which was true and meaningless.
+     */
+    verbsAt(x: number, y: number): string[] {
+      const me = findPlayer(world);
+      return me ? verbsForTile(world, me, viewLayer(), { x, y }) : [];
+    },
+    selfVerbs(): string[] {
+      const me = findPlayer(world);
+      return me ? selfVerbsFor(world, me, viewLayer()) : [];
+    },
+    /** Rows currently in the action log, oldest first. */
+    actionLog(): string[] {
+      return actionLogPanel.snapshot().map((e) => e.text);
+    },
+    /** Open the radial on a named tile, skipping the screen-space pointer math a check cannot reliably reproduce. */
+    openTileMenu(x: number, y: number): void {
+      openTileMenu({ x, y });
     },
     /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
     biomeAt(x: number, y: number): string | undefined {

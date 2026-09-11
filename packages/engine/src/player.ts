@@ -14,6 +14,7 @@ import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, FALLBACK_MAX_HP, resolveHit } from "./predation.js";
 import { useUtilityMove } from "./utilityMoves.js";
 import { pickBestMove, withinMoveRange } from "./combat.js";
+import { applyPet, canPet } from "./pet.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -340,6 +341,27 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     case "crouch": {
       agent.posture = agent.posture === "crouch" ? undefined : "crouch";
       return agent.posture === "crouch";
+    }
+    case "pet": {
+      // Direct ask: "I want the ability to pet a Pokémon to try and gain
+      // rapport. Need to be in 1unit range, Pokémon can react poorly, walk
+      // away, or even clash." The odds table and the reasoning live in
+      // pet.ts; this case is only about finding who is meant.
+      //
+      // A named target is exact. Without one, this picks the single
+      // adjacent creature — the common case, and the one a tap on "pet"
+      // with one animal beside you obviously means. With two or more in
+      // reach it refuses rather than guessing, because guessing wrong here
+      // can get you bitten.
+      const reachable = world.agents.filter((a) => canPet(world, agent, a));
+      const target = action.targetId ? reachable.find((a) => a.id === action.targetId) : reachable.length === 1 ? reachable[0] : undefined;
+      if (!target) return false;
+      const result = applyPet(world, agent, target, log, ctx, rng, (x, y) => tileAt(world, agent.layer, x, y)?.walkable === true);
+      if (!result) return false;
+      out.petted = { targetId: target.id, outcome: result.outcome, stage: result.stageUsed, tooSoon: result.tooSoon, woke: result.woke };
+      // Every outcome spent the turn — including being bitten. "ok" here
+      // means the gesture happened, not that it was welcome.
+      return true;
     }
     case "offer": {
       const offered = resolveFoodItem(world, agent, action.itemKey);

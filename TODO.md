@@ -12111,3 +12111,96 @@ of screen."*
 - [x] Corrected a test-count line I got wrong in the stairs entry above
       (engine 1653 / data 476 at that commit, not 1658 / 477).
 - [x] Full suite green: engine **1658**, data **476**, web build clean.
+
+## Round: petting, and eating off the ground
+
+### Pet a Pokémon
+
+Direct ask: *"And finally I want the ability to pet a Pokémon to try and gain
+rapport. Need to be in 1unit range, Pokémon can react poorly, walk away, or
+even clash. But if you have high rapport it tends to work better."*
+
+New engine module `pet.ts`, a new `PlayerAction`, a new `RapportReason`, a new
+`SimEvent`, and a `Pet` wedge on the radial's targeted hemisphere.
+
+- [x] **Deliberately the risky counterpart to `offer`.** Offering is safe and
+      indirect: you set a berry down and step back, and the creature decides
+      in its own time. Petting costs nothing from the pack, resolves
+      immediately, and can go wrong — because you are inside the distance a
+      wary animal keeps for a reason. The cheap verb is the dangerous one.
+- [x] Trust picks the odds table, not a flat roll. Measured over 2000 attempts
+      per stage (seed 7):
+
+      | trust | accepted | tolerated | pulled away | clashed |
+      | --- | --- | --- | --- | --- |
+      | wary | 8% | 12% | 57% | 23% |
+      | tolerant | 30% | 26% | 35% | 10% |
+      | curious | 55% | 27% | 16% | 2% |
+      | bonded | 82% | 16% | 2% | 0% |
+
+      **These are sim-original starting numbers, not a balance ruling.** The
+      shape is what the ask specifies; the values are for the user to judge
+      against a real run. Same for `PET_COOLDOWN_TICKS` = 30.
+- [x] A bonded creature can never bite. At that point it is following you
+      through cave levels, and a bite out of nowhere would read as the sim
+      forgetting the relationship rather than as a risk you took.
+- [x] **Pestering is a real mechanic, not a refusal.** Petting again inside
+      the cooldown rolls on the stage BELOW the creature's real one. Refusing
+      outright would be a wasted turn with nothing learned; the same act
+      landing worse is what being pawed at repeatedly actually feels like.
+      Waking something by touching it costs another stage, and the two stack.
+- [x] A clash is a real hit through `resolveHit`, not a special-cased
+      scratch — getting bitten costs what being bitten costs.
+- [x] **The `"petted"` memory is only written on an accepted touch.** The
+      score still moves on the souring outcomes, but a memory reading "He has
+      petted me four times" on an edge where three were flinches would be the
+      prose lying. Prose: *"He petted me."* / *"He has petted me three
+      times."*
+- [x] `lastPetTick` lives on the CREATURE, not the player, so petting two
+      different party members in a row is two fresh gestures.
+- [x] Live through the real UI — the lines, read cold:
+      - `Machop leans into your hand.`
+      - `Machop holds still and lets you.`
+      - `Machop pulls away from your hand.`
+      - `Machop bites you.` → `Machop's Body Slam hits you for 9.`
+
+      The clash reads as cause then effect in the log, which is the point:
+      the damage line alone would look like an ambush.
+- [x] Failure says which failure it is — "Nothing within reach to pet." vs
+      "Two are in reach. Say which one." The engine refuses to guess between
+      two neighbours, because guessing wrong here gets you bitten.
+- [x] 17 tests, including a monotonic-gradient check across all four stages
+      (a single lucky roll would prove nothing) with a fresh scene per
+      attempt so a cooldown from the previous one cannot contaminate the next.
+
+### Eat off the ground
+
+Direct ask: *"I want to have a radial eat option to eat off the ground."*
+
+- [x] `selfVerbsFor` now offers `eat` when you are standing on a food tile
+      with stock left. `player.ts`'s `eat` already read the tile underfoot —
+      there was simply no way to ask for it from the radial, so standing on a
+      berry patch meant opening the pack.
+- [x] Verified with controls, not just a success: `eat` appears standing on
+      food (`["gather","eat"]`), and is absent both off food and on a patch
+      picked clean (`[]` both times). Live: hunger 0.40 → 0.80, "You eat."
+
+### Also
+
+- [x] `verbsForTile` with controls: `pet` appears for an adjacent creature
+      (`["examine","moveHere","pet","attack"]`), and is absent for the same
+      creature three tiles away and for empty adjacent ground.
+- [x] Radial renders with the hemisphere split intact: Go / Pet / Attack on
+      the targeted half, Eat / Gather on the self half.
+- [x] **A check that proved nothing, caught and replaced.** The first radial
+      verification long-pressed a screen position computed from tile
+      coordinates without accounting for the camera, opened the menu on empty
+      ground, and reported "the menu has no Pet wedge" — true, and
+      meaningless. Replaced with a debug hook that opens the menu on a named
+      tile. Same family as the fog-darkness measurement that read the wrong
+      canvas.
+- [x] The new `SimEvent` broke exactly the switches CLAUDE.md says it will:
+      web `eventText.ts` and the engine's own `RAPPORT_REASON_SIGNIFICANCE`
+      and `rapportProse.ts` tables. All updated. (The runner's `format.ts`
+      has a `default`, so it did not error — worth knowing.)
+- [x] Full suite green: engine **1675**, data 476, web build clean.

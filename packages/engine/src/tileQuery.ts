@@ -92,7 +92,7 @@ export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport |
  * `examine` is always present and always free — it costs no turn, which is
  * what makes looking before you commit a real option rather than a tax.
  */
-export type TileVerb = "examine" | "moveHere" | "gather" | "drink" | "attack" | "command" | "loot" | "butcher" | "useStairs";
+export type TileVerb = "examine" | "moveHere" | "gather" | "drink" | "eat" | "pet" | "attack" | "command" | "loot" | "butcher" | "useStairs";
 
 /** Chebyshev distance — this game's adjacency, diagonals included. */
 function reach(a: Vec2, b: Vec2): number {
@@ -121,6 +121,11 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   // terrain move — Fell, Clear — swings at the tile). Your OWN tile counts
   // too when its terrain is something a terrain move could act on, so you can
   // clear the bush you are standing in.
+  // Direct ask: "I want the ability to pet a Pokémon to try and gain rapport.
+  // Need to be in 1unit range." Offered only where it can actually land —
+  // a living creature you could reach out and touch. A verb that is always
+  // present and usually fails is worse than no verb.
+  if (adjacent && report.occupantId && report.occupantId !== agent.id) verbs.push("pet");
   const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
   if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");
@@ -148,6 +153,11 @@ export function selfVerbsFor(world: World, agent: Agent, layer: Layer): TileVerb
   if (!here) return [];
   const verbs: TileVerb[] = [];
   if (here.harvestable.length > 0 && here.harvestsLeft > 0) verbs.push("gather");
+  // Direct ask: "I want to have a radial eat option to eat off the ground."
+  // Standing on a berry patch and having to open the pack to eat from it was
+  // the gap — `player.ts`'s `eat` already reads the tile underfoot, there was
+  // simply no way to ask for it from the radial.
+  if (here.terrain === "food" && (tileAt(world, layer, agent.pos.x, agent.pos.y)?.stock ?? 0) > 0) verbs.push("eat");
 
   // Anything within one step, diagonals included.
   let waterNear = false;

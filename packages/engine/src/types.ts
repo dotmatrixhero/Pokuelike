@@ -5,6 +5,10 @@ import type { Disposition, StatKey } from "./nature.js";
 import type { MaterialId } from "./harvest.js";
 import type { DecalId } from "./decals.js";
 import type { SeededRng } from "./rng.js";
+// Type-only, so no runtime cycle — same shape as `MoveSpec` above, whose own
+// module imports this one.
+import type { PetOutcome } from "./pet.js";
+import type { TrustStage } from "./trust.js";
 
 export interface Vec2 {
   x: number;
@@ -664,6 +668,15 @@ export type PlayerAction =
    */
   | { kind: "offer"; itemKey?: string }
   /**
+   * Direct ask: "I want the ability to pet a Pokémon to try and gain rapport.
+   * Need to be in 1unit range, Pokémon can react poorly, walk away, or even
+   * clash. But if you have high rapport it tends to work better." See
+   * `pet.ts` for the odds table and why this is deliberately the risky
+   * counterpart to `offer`. `targetId` names who; omitted picks the single
+   * adjacent creature when there is exactly one, which is the common case.
+   */
+  | { kind: "pet"; targetId?: string }
+  /**
    * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Swings at
    * the adjacent tile in the given direction — a living agent there takes
    * a real hit through the ordinary combat pipeline (`player.ts`'s
@@ -839,6 +852,12 @@ export interface PlayerActionOutcome {
   butchered?: { itemKey: string; count: number }[];
   /** `usePoultice` succeeding: who got healed (the player's own id, or a bonded follower's) and by how much (post-clamp-to-maxHp, so the UI can say a real number). */
   healed?: { targetId: string; amount: number };
+  /**
+   * `pet` resolving: who was touched and how they took it. Present on every
+   * outcome including the bad ones — `ok` says a turn was spent, this says
+   * what the turn bought. See `pet.ts`.
+   */
+  petted?: { targetId: string; outcome: PetOutcome; stage: TrustStage; tooSoon: boolean; woke: boolean };
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -1105,6 +1124,14 @@ export interface Agent {
    * visit) is worth more. See `TREAT_VISIT_MULTIPLIER`.
    */
   lastTreatTick?: number;
+  /**
+   * Tick this agent was last petted by anyone — `pet.ts`'s
+   * `PET_COOLDOWN_TICKS`. Petting again inside that window is read as
+   * pestering and rolls on the weights of one trust stage lower. Kept on
+   * the creature rather than the player so petting two different party
+   * members in a row is two fresh gestures, which is what it is.
+   */
+  lastPetTick?: number;
   /**
    * ROADMAP.md M6, lever 3 (habituation): how many times THIS individual
    * has ever taken a berry from the player. Never decremented, never
@@ -2371,7 +2398,17 @@ export type RapportReason =
    * toward the herd-mate does not move, since nothing real happened on
    * that side. See needs.ts's `applyPlayerFeedingBonus`.
    */
-  | "witnessedKindness";
+  | "witnessedKindness"
+  /**
+   * The player reached out and touched them, and it went well —
+   * `pet.ts`'s `applyPet`. One-directional, like `witnessedKindness`: this
+   * is how the creature feels about being handled, and the player's own
+   * edge does not move for it.
+   *
+   * Recorded on the souring outcomes too, so the memory is honest about a
+   * relationship built partly out of gestures that were not welcome.
+   */
+  | "petted";
 
 /**
  * What a `RapportMemory` was *about*, when it was about something — the
