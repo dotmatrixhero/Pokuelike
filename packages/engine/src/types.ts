@@ -621,7 +621,25 @@ export type PlayerAction =
    * instead of letting `pickBestMove` auto-select one; omitted keeps the
    * original auto-pick behavior (the plain 'f'-key/HUD-button swing).
    */
-  | { kind: "attack"; dx: -1 | 0 | 1; dy: -1 | 0 | 1; moveId?: string }
+  | {
+      kind: "attack";
+      dx: -1 | 0 | 1;
+      dy: -1 | 0 | 1;
+      moveId?: string;
+      /**
+       * Direct ask: "change attack for player moves to also be targeted,
+       * like allies moves." When given, names the exact tile to strike —
+       * the same pick-a-move-then-tap-a-tile flow `command` already gives
+       * bonded partners — instead of the adjacent tile `dx`/`dy` (the
+       * direction you last moved) computes. Requires `moveId`: unlike the
+       * plain directional swing, there's no "auto-pick a move" for an
+       * arbitrary tile, since distance alone doesn't say which of the
+       * player's moves can even reach it. `dx`/`dy` stay required by the
+       * type — kept for the one caller that still wants them, the plain
+       * 'f'-key/HUD-button swing — but are ignored once `target` is set.
+       */
+      target?: Vec2;
+    }
   /**
    * Direct ask: "even before m7... under the attack option a sub menu
    * show up to select your bonded pokemon if its within the same zone as

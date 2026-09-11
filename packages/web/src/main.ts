@@ -206,8 +206,13 @@ let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
  * canvas click (any tile — living target or bare terrain) becomes that
  * order's `target` instead of the ordinary select/travel-to click. Cleared
  * on firing, on Escape, or on pressing Attack again.
+ *
+ * `agentId: undefined` means the move being targeted is the PLAYER's own —
+ * direct ask, "change attack for player moves to also be targeted, like
+ * allies moves": the same pick-a-move-then-tap-a-tile flow, just firing
+ * `{kind: "attack", target, moveId}` instead of `{kind: "command", ...}`.
  */
-let targeting: { agentId: string; moveId: string } | undefined;
+let targeting: { agentId?: string; moveId: string } | undefined;
 let inspectorDirty = true;
 let renderStyle: RenderStyle = "tile";
 let zoom = DEFAULT_ZOOM;
@@ -754,9 +759,13 @@ function bondedPartnersInZone(me: Agent): Agent[] {
  * player has moves too, even if it's just tackle." Attack always opens
  * this now: a "You" section lists the player's own real moves
  * (bare-handed Tackle, plus whatever a held item grants — `Agent.moves`,
- * kept in sync by `syncPlayerMoves`), each firing the ordinary directional
- * swing (`lastFacing`) with that specific move; a bonded-follower section
- * per partner in zone, same as before, for the tile-targeted command.
+ * kept in sync by `syncPlayerMoves`); a bonded-follower section per
+ * partner in zone, same as before. Direct follow-up ask: "change attack
+ * for player moves to also be targeted, like allies moves" — tapping
+ * either section's move now enters the same tap-a-tile `targeting` mode
+ * (`agentId: undefined` for the player's own), rather than the player's
+ * own swing instant-firing in `lastFacing`'s direction the moment it's
+ * picked.
  */
 function openCommandMenu(): void {
   const me = findPlayer(world);
@@ -789,10 +798,11 @@ function openCommandMenu(): void {
   for (const move of myMoves) {
     const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
     commandMenuBodyEl.appendChild(
-      row(move.name, onCooldown ? "on cooldown" : "tap to swing in the direction you last moved", () => {
+      row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
         if (onCooldown) return;
         closeCommandMenu();
-        playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId: move.id });
+        targeting = { moveId: move.id };
+        hudMessageEl.textContent = `Targeting with ${move.name} — tap a tile. Esc to cancel.`;
       })
     );
   }
@@ -1560,8 +1570,12 @@ canvas.addEventListener("click", (event) => {
     targeting = undefined;
     // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
     // the player's own turn to spend, same as every other verb; the HUD
-    // message comes from `outcomeText`'s own "command" case.
-    playerAct({ kind: "command", agentId, moveId, target });
+    // message comes from `outcomeText`'s own "command"/"attack" case.
+    // `agentId` undefined means this is the player's OWN targeted swing
+    // (direct ask: "change attack for player moves to also be targeted,
+    // like allies moves") rather than an order for a bonded partner.
+    if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
+    else playerAct({ kind: "command", agentId, moveId, target });
     return;
   }
   // Direct follow-up ask: "I should be able to click specific units in the

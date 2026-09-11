@@ -9582,3 +9582,77 @@ rule on it, not decided here:
    half-trusting follower fleeing mid-follow (then presumably resuming,
    or dropping to `wary` and un-following) is a real, legible consequence
    of not having fully earned its loyalty yet.
+
+## Built: wishlist item 3 — the player's own attack is tile-targeted, like ally commands
+
+Direct ask: *"change attack for player moves to also be targeted, like
+allies moves."* Before this, the attack menu's "You" section fired the
+moment a move was tapped, swinging at whatever tile `lastFacing` (the
+direction you last walked) happened to be — so hitting something you
+hadn't just walked toward meant walking toward it first (or bumping a
+wall) purely to turn, wasting a real turn on facing alone.
+
+**What changed.** `PlayerAction`'s `attack` case gained an optional
+`target: Vec2`, alongside the `dx`/`dy` it already had (kept, unchanged,
+for the one caller that still wants a bare directional swing — the
+quick auto-pick path nothing here touches). When `target` is set,
+`moveId` is required (there's no auto-pick for an arbitrary tile the way
+the plain swing has — distance alone doesn't say which known move can
+even reach it), and the range check uses the real distance to that tile
+instead of an assumed 1. `main.ts`'s "You" move rows now enter the exact
+same `targeting` mode ally moves already used (tap a move, then tap a
+tile) instead of instant-firing; `targeting.agentId` is `undefined` for
+the player's own swing and a real id for a partner's, sharing one click
+handler that branches into `{kind: "attack", target, ...}` or
+`{kind: "command", agentId, ...}` accordingly.
+
+**A real design question surfaced building this, not guessed at:** what
+distance metric counts as "adjacent" for the player's own melee? The
+game's general combat/range code (`predation.ts`'s `manhattan`, used for
+ally commands, hunting, fleeing) treats a diagonal tile as distance 2,
+outside a plain `range: {max: 1}` move. But the OLD dx/dy swing let you
+hit any of the 8 tiles around the player at an assumed distance of 1,
+diagonals included — it never actually computed a distance at all.
+Using `manhattan` for the new tile-targeted path would have quietly
+nerfed melee reach to the 4 orthogonal tiles the instant a swing became
+tile-targeted instead of directional, purely as a side effect of the
+interaction-model change this ask asked for — not something to slip in
+unstated. Used Chebyshev distance instead (`max(|dx|, |dy|)`) for this
+one case, matching how the player already moves (a diagonal step costs
+the same turn as an orthogonal one) and preserving the exact reach the
+old swing already had. Ally commands (`needs.ts`) are untouched and keep
+`manhattan` — a different, self-correcting case (an out-of-range order
+just walks the partner one step closer next tick, so a diagonal
+approach costs one extra tile of travel, not a hard refusal), not a
+one-shot swing standing in one spot.
+
+**Live-verified in the browser, not just by reading the engine tests.**
+First live pass on a diagonal target came back "Nothing there to hit,"
+which — same shape as the mirror-action false alarm above — turned out
+to be a test-fixture problem, not a code bug: `advancePlayerTurn` runs
+the whole world forward several real ticks before the player's own
+queued action actually fires (their action-energy threshold, not an
+instant resolve), and my synthetic diagonal target, an ordinary
+`rattata` with no rapport toward the player, read the player as a full
+threat and fled before the swing landed — the exact same "unbonded
+creature reacts to the player mid-scenario" class of artifact as the
+follower-flees bug just above, not a second copy of the same finding,
+just the same lesson landing twice in one session. Pinning it
+(`asleep: true`, so it doesn't act at all) confirmed the real thing:
+attack menu → tap Tackle → `targeting` set, HUD reads "Targeting with
+Tackle — tap a tile" → tapping the diagonal tile fires
+`{kind: "attack", target: {x, y}, moveId: "tackle"}` → lands
+("You strike Rattata!", `attackedId` set). Also re-verified a bonded
+partner's own command flow through the same shared click handler is
+unaffected (`{kind: "command", ...}`, `commandedAction` set correctly)
+— a real regression check, not an assumption, since both share one
+`targeting` variable and one canvas click listener now.
+
+**Tests.** `playerCombat.test.ts` gained 4 new cases: a diagonal target
+hit via `target` regardless of a deliberately-wrong `dx`/`dy` (proving
+`target` wins), an out-of-range target tile failing, a target requiring
+an explicit `moveId`, and a targeted terrain-effect move (felling a
+tree) at a named tile. Full engine suite: 1536/1536. `tsc --noEmit`
+(engine) and the real `pnpm --filter @pokuelike/web build` (not just
+`tsc --noEmit` on its own — CLAUDE.md's own lesson on why that
+specifically matters for this package) both clean.

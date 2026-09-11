@@ -196,14 +196,32 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       return true;
     }
     case "attack": {
-      const targetPos = { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      const targetPos = action.target ?? { x: agent.pos.x + action.dx, y: agent.pos.y + action.dy };
+      // A tile-targeted swing always names a real move — see this action's
+      // own doc comment on why there's no auto-pick equivalent for an
+      // arbitrary tile the way the bare directional swing has.
+      if (action.target && !action.moveId) return false;
+      // Chebyshev, not `manhattan` (predation.ts's own, used everywhere ELSE
+      // range is checked) — deliberately. The player moves 8-directionally,
+      // one step in any of 8 directions costs the same turn, and the old
+      // dx/dy swing this replaces already treated every one of those 8
+      // neighbors as "distance 1" by construction (dx/dy each -1/0/1, no
+      // distance computed at all). Manhattan would silently shrink melee
+      // reach to the 4 orthogonal tiles the instant a swing became
+      // tile-targeted instead of directional — a real behavior change this
+      // feature isn't meant to make. Ally commands (needs.ts) keep using
+      // manhattan; that's a separate, self-correcting case (an out-of-range
+      // order just walks the partner one step closer next tick), not this
+      // one-shot swing.
+      const distance = action.target ? Math.max(Math.abs(action.target.x - agent.pos.x), Math.abs(action.target.y - agent.pos.y)) : 1;
       // Direct ask: "Attack should move list should work when you have a
       // weapon, or tackle if you don't. The player has moves too" — an
       // explicit `moveId` names one of the player's own real moves; a
-      // chosen move must exist, be off cooldown, and reach distance 1 (dx/
-      // dy are each -1/0/1 by construction) to count as "you swung."
+      // chosen move must exist, be off cooldown, and reach `distance` (1 by
+      // construction for the plain dx/dy swing; whatever `target` is
+      // actually away for a tile-targeted one) to count as "you swung."
       const chosen = action.moveId ? agent.moves?.find((m) => m.id === action.moveId) : undefined;
-      if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, 1))) return false;
+      if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, distance))) return false;
       const defender = world.agents.find(
         (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
       );
@@ -214,11 +232,9 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         // false, so it can't tell those two apart for `out.ok`. Checked
         // here first, the same pre-check `canAttackFromHere` already does
         // at every other real call site, to know whether a swing actually
-        // happened at all. Distance is always 1 by construction — dx/dy
-        // are each -1/0/1, comfortably within every move on the player's
-        // loadout (`range: {max: 1}`).
-        if (!chosen && !pickBestMove(agent, defender.types ?? [], 1, world.tick)) return false;
-        resolveHit(world, agent, defender, log, "defeated", ctx, 1, rng, 1, chosen);
+        // happened at all.
+        if (!chosen && !pickBestMove(agent, defender.types ?? [], distance, world.tick)) return false;
+        resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, chosen);
         out.attackedId = defender.id;
         return true;
       }
