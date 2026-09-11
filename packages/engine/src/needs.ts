@@ -13,8 +13,7 @@ import {
   manhattan,
   nearest,
   resolveChargedAttack,
-  resolveHit,
-} from "./predation.js";
+  resolveHit, chebyshev } from "./predation.js";
 import {
   RAPPORT_SLEPT_NEAR_DELTA,
   RAPPORT_OFFERED_FOOD_DELTA,
@@ -1557,7 +1556,12 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   }
   const targetPos = defender?.pos ?? cmd.target;
 
-  const distance = manhattan(agent.pos, targetPos);
+  // Combat reach — see predation.ts's `chebyshev`. This is the player's own
+  // commanded attack resolving through an ally, so it has to agree with the
+  // reach the player's direct swing already uses (player.ts's "attack" case
+  // was ALREADY chebyshev, and its comment flagged this path as the
+  // remaining manhattan one).
+  const distance = chebyshev(agent.pos, targetPos);
   if (!withinMoveRange(move, distance)) {
     if (agent.behavior !== "fight") {
       logBehaviorChange(log, world, agent, "fight");
@@ -1797,7 +1801,9 @@ function engageStandingOrderTarget(world: World, agent: Agent, target: Agent, lo
     logBehaviorChange(log, world, agent, "fight");
     agent.behavior = "fight";
   }
-  const distance = manhattan(agent.pos, target.pos);
+  // Combat reach — see predation.ts's `chebyshev`. A standing order to
+  // engage should connect on the same eight tiles the player's own swing does.
+  const distance = chebyshev(agent.pos, target.pos);
   const move = pickBestMove(agent, target.types ?? [], distance, world.tick);
   if (move && withinMoveRange(move, distance)) {
     resolveHit(world, agent, target, log, "defeated", ctx, distance, rng, 1, move);

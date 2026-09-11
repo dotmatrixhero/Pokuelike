@@ -6,7 +6,7 @@ import { stormAccuracyMultiplier } from "./weather.js";
 import { elevationAccuracyMultiplier } from "./elevation.js";
 import { tileAt } from "./world.js";
 import { getStatStage } from "./status.js";
-import { FALLBACK_MAX_HP, manhattan, situationalAccuracyPenalty } from "./predation.js";
+import { FALLBACK_MAX_HP, manhattan, situationalAccuracyPenalty, chebyshev } from "./predation.js";
 import { RAPPORT_HERD_CLASH_DELTA, RAPPORT_SHARED_RESOURCE_DELTA, rapportScore, strengthenRapportMutual } from "./rapport.js";
 import { effectiveDisposition } from "./herdLeadership.js";
 import { SCARCITY_SCORE_THRESHOLD } from "./herdMigration.js";
@@ -356,7 +356,10 @@ function resolveRivalryHit(world: World, attacker: Agent, defender: Agent, log: 
   defender.maxHp = defender.maxHp ?? defender.stats?.maxHp ?? FALLBACK_MAX_HP;
   defender.hp = defender.hp ?? defender.maxHp;
 
-  const distance = manhattan(attacker.pos, defender.pos);
+  // Combat reach, so chebyshev — see predation.ts's `chebyshev` for why every
+  // move-range check moved off manhattan. The other manhattan uses in this
+  // file are clash-proximity radii and stay as they are.
+  const distance = chebyshev(attacker.pos, defender.pos);
   const move = pickBestMove(attacker, defender.types ?? [], distance, world.tick);
   if (!move) return; // nothing off-cooldown/in-range — no-op this tick, tried again on a later eligible tick
 

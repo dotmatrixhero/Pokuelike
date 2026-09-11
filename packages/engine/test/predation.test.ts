@@ -462,14 +462,26 @@ describe("mob-fighting", () => {
 
     tickWorld(world, log, RULES, undefined, SAFE_RNG);
 
-    // mobber1 is adjacent (distance 1) and lands a fallback-damage (1) hit;
-    // the predator()'s explicit maxHp default (see the factory) is 20.
+    // ALL THREE mobbers land a fallback-damage (1) hit, so the predator()'s
+    // explicit maxHp default of 20 drops to 17.
+    //
+    // This used to be 19 — one hit, from `mobber1` alone. The predator is at
+    // (5,6); `mobber1` at (5,5) is orthogonally adjacent, while `mobber2`
+    // (4,5) and `mobber3` (6,5) are DIAGONALLY adjacent, which manhattan
+    // called distance 2 and so out of a point-move's range 1. Combat reach is
+    // chebyshev now (see predation.ts's `chebyshev`), so a diagonal neighbour
+    // is one step away for hitting exactly as it already was for walking, and
+    // the two flanking mobbers connect. The change in this number IS the fix.
     expect(mobber1.behavior).toBe("fight");
     const hunter = world.agents.find((a) => a.id === "scyther-0")!;
-    expect(hunter.hp).toBe(19);
+    expect(hunter.hp).toBe(17);
     expect(log.events).toContainEqual(
-      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0", defenderHpRemaining: 19 })
+      expect.objectContaining({ kind: "fought", attackerId: "bulbasaur-0" })
     );
+    // The flanking pair specifically — the ones that could not reach before.
+    for (const id of ["bulbasaur-1", "bulbasaur-2"]) {
+      expect(log.events).toContainEqual(expect.objectContaining({ kind: "fought", attackerId: id }));
+    }
   });
 
   it("a mob of 3+ can finish off a fainted predator within the same tick (faint, then a follow-up hit exhausts the pool)", () => {

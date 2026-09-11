@@ -304,6 +304,32 @@ export function manhattan(a: Vec2, b: Vec2): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }
 
+/**
+ * Distance in STEPS, which is what combat reach has to measure.
+ *
+ * Movement in this engine is 8-way everywhere: `stepToward` tries the true
+ * diagonal first, and pathfinding expands all eight neighbours at unweighted
+ * cost 1. But every combat range check used `manhattan`, where a diagonal
+ * neighbour is 2 — and a point-shape move derives range 1. So a melee
+ * attacker could not hit a target standing one diagonal step away, even
+ * though the engine's own movement calls that one step. The two metrics
+ * contradicted each other, and movement's preference for the diagonal meant
+ * this was the COMMON case, not a corner.
+ *
+ * Measured before the change (`validateDiagonalReach.ts`, 40 trials each,
+ * identical apart from attacker position): orthogonally adjacent resolved
+ * 39/40 attacks, diagonally adjacent resolved **0/40**.
+ *
+ * Only distances that feed a move-range check were converted. `manhattan`
+ * stays, and every non-range caller keeps using it — herd cohesion radii,
+ * migration and dispersal distances, shelter clustering, mate search,
+ * resource proximity and flee-detection radii are tuned numbers whose
+ * meaning a blind swap would silently change.
+ */
+export function chebyshev(a: Vec2, b: Vec2): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
 // A plain function call (rather than an inline `agent.alive === false` check)
 // so TS's control-flow narrowing doesn't lock `alive`'s type down across a
 // loop that calls out to a function (`applySingleDamageInstance`) that can
@@ -589,7 +615,30 @@ export function preferMarked(agent: Agent, others: Agent[]): Agent | undefined {
  * needs.ts), so counting them toward a mob's muster would overstate how much
  * actual fighting help is nearby.
  */
-function countHerdAllies(world: World, excludeId: string, species: string, herdId: string | undefined, layer: Layer, pos: Vec2, radius: number): number {
+function countHerdAllies(
+  world: World,
+  excludeId: string,
+  species: string,
+  herdId: string | undefined,
+  layer: Layer,
+  pos: Vec2,
+  radius: number,
+  /**
+   * How to measure the radius. Defaults to `manhattan` so the two
+   * muster/protection callers keep the tuned area they were built against;
+   * the mob-TRIGGER caller passes `chebyshev`, because its own comment says
+   * allies have to be "within striking distance of the threat right now",
+   * and striking distance is steps (see `chebyshev`).
+   *
+   * This was not cosmetic. Measured on `validateDiagonalReach`: with the
+   * headcount still on manhattan, three prey around a diagonally-placed
+   * predator mustered only 2 of the 3 needed, fell through the mob branch
+   * entirely and FLED — so the reach fix never got exercised and the
+   * validator still read 0/40. The metric mismatch was in the headcount, not
+   * only in the range check.
+   */
+  metric: (a: Vec2, b: Vec2) => number = manhattan
+): number {
   if (!herdId) return 0;
   return world.agents.filter(
     (other) =>
@@ -600,7 +649,7 @@ function countHerdAllies(world: World, excludeId: string, species: string, herdI
       other.species === species &&
       other.herdId === herdId &&
       other.layer === layer &&
-      manhattan(other.pos, pos) <= radius
+      metric(other.pos, pos) <= radius
   ).length;
 }
 
@@ -784,7 +833,7 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
     logBehaviorChange(log, world, agent, "fight");
     agent.behavior = "fight";
     agent.fightTarget = threat.id;
-    const distance = manhattan(agent.pos, threat.pos);
+    const distance = chebyshev(agent.pos, threat.pos);
     if (canAttackFromHere(world, agent, threat, distance)) {
       resolveHit(world, agent, threat, log, faintKind, ctx, distance, rng);
     } else if (manhattan(agent.pos, egg.pos) > manhattan(threat.pos, egg.pos)) {
@@ -1998,7 +2047,7 @@ function applyFightOrFlight(
   // the whole feature. Non-lethal `"defeated"`, same as the mob-fight
   // branch: a cornered animal that turns is making the fight cost
   // something, not expected to win it.
-  const distance = manhattan(agent.pos, target.pos);
+  const distance = chebyshev(agent.pos, target.pos);
   logBehaviorChange(log, world, agent, "fight");
   agent.behavior = "fight";
   agent.huntTarget = undefined;
@@ -2122,7 +2171,7 @@ export function applyPredationInstincts(
       );
       const threat = preferMarked(herdmate, herdmateThreats);
       if (threat) {
-        const distance = manhattan(agent.pos, threat.pos);
+        const distance = chebyshev(agent.pos, threat.pos);
         // Actively fighting to defend a herd-mate isn't consistent with
         // still being asleep — clears it even though this guardian branch
         // fires regardless of `agent.asleep` (see this function's doc
@@ -2202,11 +2251,14 @@ export function applyPredationInstincts(
       });
   const threat = preferMarked(agent, threats);
   if (threat) {
-    const distance = manhattan(agent.pos, threat.pos);
+    // Reach, so chebyshev — gating the mob trigger AND the strike, because
+    // "can this mob reach the threat" and "can I hit it" are the same
+    // question here. See `chebyshev`.
+    const strikeDistance = chebyshev(agent.pos, threat.pos);
     // Allies must ALSO be within striking distance of the threat right now — not just
     // somewhere in the herd's general area — or a lone agent will "mob" alone and die
     // waiting for backup that's still several tiles away.
-    const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS) + 1;
+    const mobSize = countHerdAllies(world, agent.id, agent.species, agent.herdId, agent.layer, threat.pos, MOB_TRIGGER_RADIUS, chebyshev) + 1;
 
     // A severely outleveled prey doesn't commit to a mob-fight no matter how
     // many allies are nearby — headcount alone used to be enough to trigger
@@ -2218,12 +2270,12 @@ export function applyPredationInstincts(
     // they attacked anyone — traced on the bond bot: a Sandshrew walked up
     // to a crouched, empty-handed human and started a fight. Prey flee the
     // player or ignore them; fighting back waits for a player attack verb.
-    if (threat.controlledBy !== "player" && distance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent) && levelGap(threat, agent) < SEVERE_LEVEL_GAP) {
+    if (threat.controlledBy !== "player" && strikeDistance <= MOB_TRIGGER_RADIUS && mobSize >= mobThreshold(world, agent) && levelGap(threat, agent) < SEVERE_LEVEL_GAP) {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
       agent.fightTarget = threat.id;
-      if (canAttackFromHere(world, agent, threat, distance)) {
-        resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
+      if (canAttackFromHere(world, agent, threat, strikeDistance)) {
+        resolveHit(world, agent, threat, log, "defeated", ctx, strikeDistance, rng);
       } else {
         // stopAdjacent=true — see stepToward's doc comment.
         agent.pos = stepToward(world, agent.layer, agent.pos, threat.pos, agent, undefined, true);
@@ -2263,11 +2315,11 @@ export function applyPredationInstincts(
       // always prefers to run). Uses "defeated", same as the mob-fighting
       // branch above: a single cornered loner isn't expected to actually
       // kill its attacker, just make the fight cost something.
-      if (fleeStep.x === agent.pos.x && fleeStep.y === agent.pos.y && canAttackFromHere(world, agent, threat, distance)) {
+      if (fleeStep.x === agent.pos.x && fleeStep.y === agent.pos.y && canAttackFromHere(world, agent, threat, strikeDistance)) {
         logBehaviorChange(log, world, agent, "fight");
         agent.behavior = "fight";
         agent.fightTarget = threat.id;
-        resolveHit(world, agent, threat, log, "defeated", ctx, distance, rng);
+        resolveHit(world, agent, threat, log, "defeated", ctx, strikeDistance, rng);
       } else {
         agent.pos = fleeStep;
       }
@@ -2332,7 +2384,7 @@ export function applyPredationInstincts(
       agent.behavior = "hunt";
       agent.huntTarget = target.id;
 
-      const huntDistance = manhattan(agent.pos, target.pos);
+      const huntDistance = chebyshev(agent.pos, target.pos);
       // Real, positioning-driven pack bonus: how many OTHER same-species
       // conspecifics are already actually committed to this exact target
       // (not just "somewhere nearby") — see `committedPackmates`'s own doc

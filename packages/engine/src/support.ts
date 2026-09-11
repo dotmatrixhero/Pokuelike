@@ -8,7 +8,7 @@ import { ridesWater } from "./waterBody.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
-import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS, huntHungerThreshold } from "./predation.js";
+import { agentsWithin, isHunterSpecies, manhattan, nearest, FALLBACK_MAX_HP, FLEE_DETECT_RADIUS, huntHungerThreshold, chebyshev } from "./predation.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { herdMembers } from "./herdIndex.js";
 import { COLD_SNAP_SPEED_MULTIPLIER, isInColdSnap } from "./weather.js";
@@ -776,7 +776,9 @@ export function nearestAllyEffectTarget(world: World, agent: Agent, move: MoveSp
 
   return nearest(
     agent,
-    pool.filter((a) => withinMoveRange(move, manhattan(agent.pos, a.pos)))
+    // Combat reach — see predation.ts's `chebyshev`. The carry-home distances
+    // further down this file are pathing progress, not reach, and stay manhattan.
+    pool.filter((a) => withinMoveRange(move, chebyshev(agent.pos, a.pos)))
   );
 }
 
