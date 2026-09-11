@@ -15861,3 +15861,79 @@ pouch — all asserted across the same 400-roll run.
 
 Full suites after all three items: engine 1533/1533, data 468/468, all 4
 packages typecheck/build clean.
+
+## Humans render as real trainer sprites, not emoji
+
+Direct ask after an art-utilisation audit turned up `trainer sprites.png`
+sitting completely unripped: "Wow they have animations too... Do trainer to
+human including player."
+
+**What the sheet actually is.** 80 characters, 10 across and 8 down, each a
+3x4 grid of 32x32 frames — 3 walk frames per facing. That is where the
+"they have animations too" observation lands: every character has a real
+walk cycle, not just a standing pose.
+
+**Two things that had to be measured, because assuming them produced
+visibly wrong output first — both caught by looking, not by a passing
+build:**
+
+1. **The grid drifts.** It is very nearly 96x128 per character but not
+   exactly: block starts read `0,96,192,288,479,...` on one row and
+   `0,95,191,287,383,...` on another, and the row bands measure
+   `128,127,129,128,...`. Cutting a fixed 96x128 grid bled the neighbouring
+   block's flat background into frames as stray coloured lines under the
+   sprites' feet — clearly visible once rendered on a checkerboard. Block
+   edges are now read per row-band off the flattest scanline in that band
+   (the gap between two sprite rows, pure background across all ten
+   characters), and each frame is found from its own content. Two earlier
+   attempts at that scanline are recorded in the script: a fixed row near
+   the band top over-split wherever hair or hats reach the cell top, and
+   per-column dominant colour over-split worse still, since a sprite
+   outnumbers background down the middle of its own cell.
+
+2. **The frame order is not a standard charset.** It reads cleanly as
+   neither row-major nor column-major directions. So nothing is assumed
+   about packing: each cell is classified from its own pixels — horizontal
+   self-mirror difference separates the symmetric facings (up/down) from
+   the side ones, head-region colour count separates up (a solid mass of
+   hair) from down (hair plus face), and a **per-character skin palette**
+   decides which way a side frame looks. That palette is learned by diffing
+   the colours in a character's front-view head against their back-view
+   head. A first version instead took "the brightest pixels in the head"
+   and silently dropped **41 of the 80 characters** — hats, helmets, big
+   hair and dark-skinned characters all defeated it. Left vs right is then
+   decided *within* each mirror-matched pair, a relative call rather than an
+   absolute threshold, which is what makes it hold for all 80.
+
+**Confidence scoring, and why the eye still made the call.** `confidence()`
+scores each character on front/back separation and left/right mirror
+quality. It correctly flagged the two picks that were actually broken — a
+bald monk scored -2.8 (the back of a bald head is as skin-coloured as the
+face, so the front/back test has nothing to grip) and a backpacker scored
+12.0 and had a duplicated front frame where a side frame belonged. It is
+used to narrow the field, not to decide: all six final characters were
+checked by eye across all four facings before being fixed in `ROLES`.
+
+**What shipped.** Six characters, 72 frames: the player keeps their own
+character (a red-capped protagonist) rather than sharing an archetype's,
+since their role is earned through play rather than rolled at spawn
+(HUMANS_DESIGN.md). Hunter is a bearded man in olive field gear, forager a
+straw-hatted farmer, traveler wears a green bandana and light travelling
+clothes, merchant a peaked cap and gold-trimmed coat, wanderer is bald and
+bearded in a plain robe. Backgrounds are knocked out to real alpha.
+
+The emoji branches in `renderer.ts` are kept as a fallback (`&& !sprite`)
+for the frame or two before a PNG loads — the same graceful-degradation
+shape the Pokemon sprite path already uses.
+
+**Verification.** The player was checked live in a real browser (Playwright
+driving the dev server, Play mode): the red-cap trainer sprite draws with a
+transparent background over the cave floor, no 404s, web build clean. All
+six characters' 24 standing frames were rendered on a checkerboard and read
+by eye — that is what caught both the bleed lines and the two bad picks.
+Every one of the 72 expected files exists and every archetype the engine can
+assign (plus the undefined fallback) maps to a real key. Stated plainly: a
+wild archetype human was **not** seen on screen — they are far too rare to
+wait for, and the debug hook that would force one is still the open TODO it
+was last round. What is shared with the verified player path is the whole
+draw call; what is unverified is only that specific agent reaching it.

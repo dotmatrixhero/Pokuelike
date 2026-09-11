@@ -9342,3 +9342,26 @@ typecheck clean.
       instead of filling the waterskin, and the test's own assertion
       caught it (0 charges instead of 1). Fixed by moving the test to the
       surface layer, where that rule doesn't apply.
+
+## Built: humans render as real trainer sprites — see DESIGN.md
+
+- [x] Direct ask: "Wow they have animations too... Do trainer to human
+      including player." Ripped 6 characters (72 frames) out of the
+      never-touched `trainer sprites.png` into real per-archetype art, plus
+      the player's own character. Extractor kept at
+      `packages/web/scripts/rip_trainer_sprites.py` — the previous rips'
+      scripts were never checked in, which is why this sheet's layout had to
+      be re-derived from scratch. Emoji kept as a load-time fallback.
+- [x] **Two real mistakes caught by looking, not by the build**: a fixed
+      96x128 grid bled neighbouring backgrounds into frames as stray lines
+      (the sheet's grid drifts by a pixel or two per row), and a
+      "brightest pixels are the face" heuristic silently dropped 41 of 80
+      characters. Both fixed; both written up in the script and DESIGN.md.
+- [ ] **Walk frames are on disk but not yet animated.** Each character has
+      `_1`/`_2` step frames alongside the standing pose; nothing reads them
+      yet. Doing it properly means re-ripping the Pokemon sheet with its
+      frames too, so creatures and humans animate alike — otherwise humans
+      would be the only things that walk.
+- [ ] Still no debug hook to force a wild human on screen, so the
+      per-archetype sprites are verified as correct files + a total mapping,
+      not watched live. Same gap flagged last round.

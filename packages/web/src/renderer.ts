@@ -10,6 +10,7 @@ import {
   getFoodSprite,
   getSeedlingSprite,
   getSprite,
+  humanSpriteKey,
   getTileSprite,
   getWaterEdge,
   getWaterInterior,
@@ -1204,7 +1205,14 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   // lets any species with real art render it, curated or not; getSprite
   // already degrades to null (and drawAgent to the letter) for a species
   // with genuinely no art.
-  const sprite = getSprite(def?.spriteKey ?? agent.species, direction);
+  // A human resolves to one of the ripped trainer sprites (by archetype, or
+  // the player's own character) rather than to `def.spriteKey` — "human" has
+  // no art in the Pokemon sheet. See sprites.ts's `humanSpriteKey`.
+  const spriteKey =
+    agent.species === "human"
+      ? humanSpriteKey(agent.controlledBy === "player", agent.archetype)
+      : (def?.spriteKey ?? agent.species);
+  const sprite = getSprite(spriteKey, direction);
   const isCorpse = agent.alive === false;
 
   // Faux drop shadow — direct ask: "faux shadows under the Pokémon, just
@@ -1243,7 +1251,10 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
     ctx.fillStyle = "#fff"; // the backing circle's 0.28 alpha would otherwise apply to the egg — see the player branch
     ctx.fillText("🥚", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
-  } else if (agent.controlledBy === "player") {
+  } else if (agent.controlledBy === "player" && !sprite) {
+    // Fallback only, now that real trainer art exists (see `humanSpriteKey`):
+    // this still draws for the frame or two before the PNG finishes loading,
+    // and if the file is ever missing.
     // Direct ask: "change the player icon to a 👱 emoji." The human has no
     // sprite art, and the letter fallback read as one more glyph among
     // the terrain. Same backing-circle treatment as the egg so it holds up
@@ -1270,7 +1281,8 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     // report: "It's still semi transparent." Opaque fill before every emoji.
     ctx.fillStyle = "#fff";
     ctx.fillText("👱", cx, cy);
-  } else if (agent.species === "human") {
+  } else if (agent.species === "human" && !sprite) {
+    // Fallback only — real per-archetype trainer art is the normal path now.
     // A wild/NPC human — direct ask: "make humans spawn with different
     // types... Should also have sex and that should affect which emoji
     // you choose for them." Same backing-disc treatment as the player

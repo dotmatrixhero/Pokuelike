@@ -62,6 +62,25 @@ export function getSprite(spriteKey: string, direction: SpriteDirection = "down"
 }
 
 /**
+ * Which trainer sprite a human renders as. "human" has no sprite of its own in
+ * the Pokemon sheet (the species entry's `spriteKey` is a placeholder), so
+ * humans fell through to an emoji — 👱 for the player, an archetype emoji for
+ * everyone else. These come from legacy-cpp/data/sprites/"trainer sprites.png"
+ * instead, ripped by packages/web/scripts/rip_trainer_sprites.py: real
+ * directional art, one distinct character per archetype, with the same
+ * `<key>_<direction>.png` naming every Pokemon sprite already uses (plus
+ * `_1`/`_2` walk frames alongside).
+ *
+ * The player keeps their own character rather than sharing an archetype's:
+ * their role is earned through play (HUMANS_DESIGN.md), so they should not
+ * look like a wild human who spawned as one.
+ */
+export function humanSpriteKey(isPlayer: boolean, archetype?: string): string {
+  if (isPlayer) return "human_player";
+  return `human_${archetype ?? "wanderer"}`;
+}
+
+/**
  * Terrain tile art — ripped from legacy-cpp/data/sprites/"building and lake
  * sprites.png" (plus "biome sprites unripped.png" for mud and the floor_*
  * variants below) into public/tiles/. Only some terrain kinds have real
