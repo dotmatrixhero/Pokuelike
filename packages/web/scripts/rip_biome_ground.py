@@ -67,6 +67,11 @@ GROUND = [
     ("frost", 11, (24, 152)),         # cool grey, tundra
     ("snow", 9, (40, 8)),             # white, snow
     ("cave", 7, (60, 140)),           # fine pebble, underground
+    # The wheat field on panel 13. `grass_dry` is seeded on the PALE DRY GRASS
+    # beside it, not on the crop -- the two are 60 apart in RGB and only the
+    # grass was ever ripped. The field itself is the one big golden texture on
+    # this sheet that nothing was using.
+    ("wheat", 13, (96, 108)),
     ("dirt", 3, (80, 120)),           # plain brown dirt
     ("water", 0, (70, 90)),
 ]
@@ -407,6 +412,21 @@ OBJECTS = [
     ("barrel_3", 1, None, None, 88, 252, 34, 42),
     ("sign_danger_1", 1, None, None, 74, 76, 46, 30),
     ("fence_wood_1", 1, None, None, 42, 170, 44, 44),
+    # NOTHING COLD. The snow/tundra/highland pools were the thinnest on the
+    # map (5-6 entries against forest's 15) and this sheet cannot help them.
+    # Panel 11 is one continuous rock massif and cloud-edged snow fields with
+    # no separable object on it at all. Panel 9 has what look like snow
+    # mounds, snow-capped logs and conifer shrubs, and none of them will cut:
+    # measured against the rim palette, a snow mound differs from the snow
+    # around it on TWENTY-TWO PIXELS out of 1,292, a shrub on 33 of 784. They
+    # are not low-contrast, they are drawn in the ground's own palette and
+    # tiled edge to edge, so every box that holds one has another one on its
+    # rim. No threshold separates a thing from itself.
+    # Savanna. The fence RUN along panel 13's top is drawn as a band and
+    # cannot be cut (its own timber reaches the rim of every box that holds
+    # it -- same shape as the cobwebs); the corner at the bottom left ends on
+    # both sides, so it has a silhouette.
+    ("fence_picket_1", 13, None, None, 22, 110, 42, 38),
     # Shore.
     ("rock_sea_1", 12, 57, 234, 46, 220, 28, 28),
     ("shell_1", 12, 104, 248, 94, 238, 22, 22),

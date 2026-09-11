@@ -123,7 +123,11 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
   tree: 7,
   boulder: 2,
   bush: 4,
-  wall: 2,
+  // No `wall` here on purpose. It had two "variants" and they are not two
+  // variants of one thing: `wall_2.png` is a seamless 16x16 rock pattern,
+  // while `wall_1.png` is a single 144x144 BOULDER SPRITE — one rounded rock
+  // with a lit top and transparent corners. Walls now load `wall.png` (a copy
+  // of the seamless one) and `wall_1.png` is unused.
 };
 
 /**
@@ -157,8 +161,16 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
  * rendered as a random 20x20 crop out of the middle of a tree — half a
  * canopy, or a bare length of trunk. Direct report: "The trees are kina
  * incorrectly cropped there."
+ *
+ * `wall` was ALSO wrong and stayed wrong when that was fixed, because the
+ * fix whitelisted it by name. `wall_1.png` is 144x144 and is not a texture —
+ * it is one boulder sprite. Windowed, a mountain field became a patchwork of
+ * arbitrary 20x20 squares out of it: dark rim crops beside pale centre crops
+ * beside the sprite's own transparent corners, hard-edged, every tile
+ * different. Direct report: "Still got some ugly square splotches there."
+ * Walls now use the seamless 16x16 pattern whole, which needs no window.
  */
-const TILING_SURFACE_TERRAIN = new Set(["mud", "wall"]);
+const TILING_SURFACE_TERRAIN = new Set(["mud"]);
 
 export function tileWindow(img: HTMLImageElement, terrainKind: string, x: number, y: number, tileSize: number): { sx: number; sy: number } | null {
   if (!TILING_SURFACE_TERRAIN.has(terrainKind)) return null;
@@ -245,7 +257,12 @@ const BIOME_GROUND: Record<string, string> = {
   beach: "shore",            // very pale cream
   desert: "sand",
   badlands: "clay",          // warm red-brown
-  savanna: "grass_dry",      // dry gold grass
+  // Was `grass_dry`, which is the PALE DRY GRASS beside panel 13's wheat
+  // field rather than the crop itself -- 16.5 from `field` in mean RGB and
+  // only 30.7 from `sand`, so savanna read as a slightly greener beach.
+  // `wheat` is the field interior, 57.8 away, and it is golden and banded
+  // with crop rows, which is what "dry plains" is supposed to look like.
+  savanna: "wheat",
   highland: "stone",         // warm grey rock
   tundra: "frost",           // cool grey, plus its own blue tint
   snow: "snow",

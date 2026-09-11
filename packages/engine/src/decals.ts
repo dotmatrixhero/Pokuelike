@@ -35,7 +35,7 @@ export type DecalId =
   | "boulder_1"
   | "cactus_1" | "cactus_2"
   | "cattail_1"
-  | "fence_wood_1"
+  | "fence_wood_1" | "fence_picket_1"
   | "fern_1"
   | "flower_red_1"
   | "lily_1" | "lily_2"
@@ -115,6 +115,7 @@ export const DECALS: Record<DecalId, DecalSpec> = {
   stump_cut_2: DEADWOOD,
   stump_ring_1: DEADWOOD,
   fence_wood_1: DEADWOOD,
+  fence_picket_1: DEADWOOD,
 
   // Stone. Likewise the visible cause behind "is there a wall within 1".
   boulder_1: STONE,
@@ -146,18 +147,19 @@ export const DECALS: Record<DecalId, DecalSpec> = {
  * wherever the jitter puts it rather than snapping to a tile origin.
  */
 export const BIOME_SCATTER: Record<string, readonly DecalId[]> = {
-  grassland: ["bloom_1", "bloom_2", "flower_red_1", "tuft_green_1"],
+  grassland: ["bloom_1", "bloom_2", "flower_red_1", "tuft_green_1", "fern_1"],
   forest: ["fern_1", "bloom_1", "flower_red_1", "moss_1", "shroom_red_1", "shroom_red_2", "shroom_orange_1"],
   jungle: ["fern_1", "reed_1", "tuft_green_1", "moss_1", "shroom_red_2", "shroom_orange_1"],
   wetland: ["reed_1", "lily_1", "moss_1", "tuft_green_1", "shroom_red_1"],
-  mangrove: ["reed_1", "lily_1", "lily_2", "moss_1"],
-  badlands: ["tuft_dry_1", "tuft_dry_2", "succulent_1"],
-  desert: ["tuft_dry_1", "tuft_dry_3", "succulent_1"],
-  beach: ["tuft_dry_2", "tuft_dry_3"],
-  savanna: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1"],
-  highland: ["moss_1", "tuft_dry_1", "tuft_green_1"],
-  tundra: ["blade_cold_2", "moss_1", "tuft_dry_2"],
-  snow: ["blade_cold_1", "blade_cold_2"],
+  mangrove: ["reed_1", "lily_1", "lily_2", "moss_1", "fern_1"],
+  badlands: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1"],
+  desert: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1"],
+  beach: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1"],
+  savanna: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1", "bloom_2"],
+  highland: ["moss_1", "tuft_dry_1", "tuft_green_1", "blade_cold_2", "flower_red_1"],
+  // Dead grass poking through the snow, not green moss on top of it.
+  tundra: ["blade_cold_1", "blade_cold_2", "tuft_dry_1", "tuft_dry_2", "moss_1"],
+  snow: ["blade_cold_1", "blade_cold_2", "tuft_dry_1"],
 };
 
 /**
@@ -168,22 +170,30 @@ export const BIOME_SCATTER: Record<string, readonly DecalId[]> = {
  * of tiles; the sparse layer is where a find is actually a find.
  */
 export const BIOME_FEATURES: Record<string, readonly DecalId[]> = {
-  grassland: ["boulder_1", "log_1", "stump_oak_1", "stump_cut_1"],
+  grassland: ["boulder_1", "log_1", "stump_oak_1", "stump_cut_1", "fence_picket_1"],
   forest: ["log_1", "log_mossy_1", "boulder_1", "stump_ring_1", "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2"],
   jungle: ["log_1", "log_mossy_1", "boulder_1", "stump_oak_2", "stump_cut_2"],
-  wetland: ["cattail_1", "log_1", "log_mossy_1", "stump_oak_2"],
-  mangrove: ["cattail_1", "log_1", "log_mossy_1"],
+  wetland: ["cattail_1", "log_1", "log_mossy_1", "stump_oak_2", "boulder_1"],
+  mangrove: ["cattail_1", "log_1", "log_mossy_1", "stump_oak_2"],
   // Worked junk, not scenery: a quarry should read as somewhere somebody dug.
   badlands: ["cactus_1", "boulder_1", "rock_sea_1", "barrel_1", "barrel_2", "barrel_3", "sign_danger_1", "fence_wood_1"],
-  desert: ["cactus_1", "cactus_2", "boulder_1", "rock_sea_1"],
+  desert: ["cactus_1", "cactus_2", "boulder_1", "rock_sea_1", "stump_cut_1"],
   // `shell_1` is a FEATURE, not ground detail. In the fine layer it drew 338
   // times in one frame on a map that is 83% beach — a third as dense as the
   // grass tufts, which reads as a shell beach, not a shell.
-  beach: ["log_1", "boulder_1", "rock_sea_1", "shell_1"],
-  savanna: ["cactus_1", "boulder_1", "log_1", "stump_oak_1"],
-  highland: ["boulder_1", "rock_sea_1"],
-  tundra: ["boulder_1", "log_1", "stump_cut_1"],
-  snow: ["boulder_1", "log_1", "stump_cut_2"],
+  beach: ["log_1", "boulder_1", "rock_sea_1", "shell_1", "stump_oak_2", "cattail_1"],
+  savanna: ["cactus_1", "boulder_1", "log_1", "stump_oak_1", "fence_picket_1", "fence_wood_1"],
+  // The three cold/high biomes below were the thinnest pools on the map, and
+  // the source sheet has nothing left for them: its only two cold panels are
+  // a solid rock massif and a field of snow mounds drawn in the snow's own
+  // palette, tiled edge to edge, which no key can separate from the ground
+  // (measured: a mound differs from the snow around it on 22 pixels out of
+  // 1,292). So they are filled from the library instead. Everything here is
+  // something that genuinely survives above the treeline or under snow --
+  // stone, deadwood, and bone.
+  highland: ["boulder_1", "rock_sea_1", "stump_ring_1", "stump_oak_1", "log_mossy_1", "bones_2"],
+  tundra: ["boulder_1", "rock_sea_1", "log_1", "log_mossy_1", "stump_cut_1", "stump_oak_2", "bones_2", "bones_4"],
+  snow: ["boulder_1", "rock_sea_1", "log_1", "log_mossy_1", "stump_cut_2", "stump_ring_1", "bones_1", "bones_3"],
 };
 
 const SCATTER_DEFAULT: readonly DecalId[] = ["moss_1", "tuft_green_1"];
