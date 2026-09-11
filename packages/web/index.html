@@ -1152,6 +1152,8 @@
            drag away. */
         body.player-mode #side-panel {
           position: fixed;
+          /* The grip is absolutely positioned against this. */
+          overflow: visible;
           left: 0;
           right: 0;
           bottom: 0;
@@ -1166,14 +1168,25 @@
         /* While a finger is down the height follows the finger directly, so
            the easing above would make it lag behind the drag. */
         body.player-mode #side-panel.sheet-dragging { transition: none; }
+        /* Floats ABOVE the sheet rather than sitting inside it. Direct
+           report: "Now in play mode I only see hunger and hp. Due to handle
+           being bigger." A 30px handle inside a 74px peek left 44px for four
+           bars. Lifted out of flow it costs the sheet nothing, and it is
+           semi-transparent so it does not read as a solid bar across the map.
+           Direct ask: "Make handle semitransparent and lift up a little." */
         body.player-mode #sheet-handle {
           display: flex;
           align-items: center;
           justify-content: center;
-          /* 44px of thumb, not a 4px line. */
-          min-height: 30px;
-          padding: 12px 0 10px;
-          flex: 0 0 auto;
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: -30px;
+          height: 30px;
+          padding: 0;
+          margin: 0;
+          background: rgba(23, 28, 36, 0.55);
+          border-radius: 14px 14px 0 0;
           cursor: grab;
           touch-action: none;
         }

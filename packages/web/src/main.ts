@@ -4,7 +4,7 @@ import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, 
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
-import { examineTile, verbsForTile, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { examineTile, selfVerbsFor, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
 import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -638,10 +638,127 @@ const tileTipEl = document.getElementById("tile-tip") as HTMLElement;
  */
 let pendingTargetTile: Vec2 | undefined;
 
+/**
+ * How far apart two tiles are for reach purposes — Chebyshev, matching the
+ * engine's own tile-targeted swing (player.ts's `attack` case).
+ */
+function reachBetween(a: Vec2, b: Vec2): number {
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+}
+
+/**
+ * A move aimed at something too far away to hit yet. The player walks toward
+ * it and strikes the moment it is in range.
+ *
+ * Direct report: "Attacking does not seem to work for me. I hit attack and
+ * tackle and it don't work... I'm just unsure how we want to handle targeting a
+ * unit that's running away." Three options were on the table: say out of range,
+ * chase and strike when possible, or swing at the tile regardless.
+ *
+ * Chase-and-strike, because the engine already works that way for the OTHER
+ * half of this same feature: player.ts's own comment on ally commands says "an
+ * out-of-range order just walks the partner one step closer next tick". The
+ * player getting different rules from their own ally would be the odd thing.
+ * Swinging at the tile is what effectively happened before — a wasted turn
+ * hitting dirt — and is the worst of the three.
+ */
+let strikeOrder: { targetId: string; moveId: string } | undefined;
+let strikeTimer: number | undefined;
+let strikeSteps = 0;
+/** A chase is a commitment, not a life sentence — long enough to run something down, short enough that you get control back. */
+const STRIKE_MAX_STEPS = 14;
+
+function cancelStrike(): void {
+  if (strikeTimer !== undefined) window.clearTimeout(strikeTimer);
+  strikeTimer = undefined;
+  strikeOrder = undefined;
+  strikeSteps = 0;
+}
+
+function stepStrike(): void {
+  strikeTimer = undefined;
+  const order = strikeOrder;
+  if (!order) return;
+  const me = findPlayer(world);
+  const foe = world.agents.find((a) => a.id === order.targetId);
+  if (!me) return cancelStrike();
+  if (!foe || foe.alive === false || foe.layer !== me.layer) {
+    say("It is gone.");
+    return cancelStrike();
+  }
+  const move = me.moves?.find((m) => m.id === order.moveId);
+  if (!move) return cancelStrike();
+
+  if (strikeSteps++ >= STRIKE_MAX_STEPS) {
+    say(`You lose ${SPECIES[foe.species]?.name ?? foe.species}.`);
+    return cancelStrike();
+  }
+
+  const distance = reachBetween(me.pos, foe.pos);
+  if (withinMoveRange(move, distance)) {
+    playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId: move.id, target: { ...foe.pos }, targetId: foe.id });
+    // A quarry that is still moving can step off the tile within the same
+    // advance, so the swing lands on empty ground. Measured: the first chase
+    // closed to range, swung, and reported "Your swing finds nothing" while
+    // the Venonat walked on. Keep the order alive and try again rather than
+    // giving up after one miss — "attack first time its possible" means the
+    // first time it actually connects, not the first time we tried.
+    const stillThere = world.agents.find((a) => a.id === order.targetId);
+    if (!stillThere || stillThere.alive === false || !findPlayer(world)) return cancelStrike();
+    if (me.lastActionOutcome?.attackedId === order.targetId) return cancelStrike();
+    strikeTimer = window.setTimeout(stepStrike, TRAVEL_STEP_MS);
+    return;
+  }
+  const step = nextTravelStep(world, me, foe.pos);
+  if (!step) {
+    say(`You cannot reach ${SPECIES[foe.species]?.name ?? foe.species}.`);
+    return cancelStrike();
+  }
+  playerAct(step);
+  if (!findPlayer(world)) return cancelStrike();
+  strikeTimer = window.setTimeout(stepStrike, TRAVEL_STEP_MS);
+}
+
 /** Issuing an order is the player's own turn to spend, same as every other verb — `agentId` undefined means the player's own swing. */
 function commitMove(agentId: string | undefined, moveId: string, target: Vec2): void {
-  if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
-  else playerAct({ kind: "command", agentId, moveId, target });
+  if (agentId !== undefined) {
+    playerAct({ kind: "command", agentId, moveId, target });
+    return;
+  }
+  const me = findPlayer(world);
+  const move = me?.moves?.find((m) => m.id === moveId);
+  if (!me || !move) return;
+
+  if (me.moveCooldowns?.[moveId]) {
+    // Say WHY. The engine returns a bare false for cooldown, out-of-range and
+    // empty-tile alike, and the UI printed "Nothing there to hit." for all
+    // three — which reads as a lie when the thing is visibly standing there.
+    say(`${move.name} is not ready yet.`);
+    return;
+  }
+  const distance = reachBetween(me.pos, target);
+  if (withinMoveRange(move, distance)) {
+    // Name the occupant when there is one: the action sits queued while the
+    // world ticks, so a tile alone would miss anything that steps away.
+    const standing = world.agents.find(
+      (a) => a.id !== me.id && a.alive !== false && !a.isEgg && a.layer === me.layer && a.pos.x === target.x && a.pos.y === target.y
+    );
+    playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target, targetId: standing?.id });
+    return;
+  }
+  // Out of reach. If something living is standing there, go and get it.
+  const foe = world.agents.find(
+    (a) => a.id !== me.id && a.alive !== false && !a.isEgg && a.layer === me.layer && a.pos.x === target.x && a.pos.y === target.y
+  );
+  if (!foe) {
+    say(`${move.name} does not reach that far.`);
+    return;
+  }
+  cancelTravel();
+  strikeOrder = { targetId: foe.id, moveId };
+  strikeSteps = 0;
+  say(`You move in on ${SPECIES[foe.species]?.name ?? foe.species}.`);
+  stepStrike();
 }
 
 const TERRAIN_WORDS: Partial<Record<string, string>> = {
@@ -714,6 +831,9 @@ function tileScreenPos(tile: Vec2): { x: number; y: number } {
 function runTileVerb(verb: TileVerb, tile: Vec2): void {
   const me = findPlayer(world);
   if (!me) return;
+  // A bottom-hemisphere verb is about where you STAND, so it must not be
+  // handed the tile you happened to press.
+  if (SELF_VERBS.has(verb)) tile = me.pos;
   switch (verb) {
     case "examine": {
       // Free: costs no turn, which is what makes looking before you commit a
@@ -753,28 +873,45 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
 }
 
 /**
- * Verbs the radial does NOT give a wedge to, even though the rules allow them
- * here.
+ * Which half of the radial a verb belongs to.
  *
- * - `examine` is the centre: a release without swiping already does it, so a
- *   wedge would be a second way to do the default.
- * - `gather` acts on the tile you are already standing on, not one you point
- *   at, so it belongs with wait and crouch as a button. Direct ask: "gather I
- *   think might need to be it's own button like crouch and wait."
+ * Direct ask: "THINGS you can do from your current position should be on one
+ * section of radial (ex bottom hemisphere), and things you target should be on
+ * the other (like top hemisphere)... That way I don't have to precisely target
+ * the tile I'm on to drink water when I'm standing on it."
  *
- * `verbsForTile` still reports both — the engine says what is legal, the UI
- * decides which surface offers it.
+ * So `SELF_VERBS` are resolved against where the player STANDS, not the tile
+ * under the finger, and appear in every radial regardless of what was pressed.
+ * Everything else aims at the pressed tile. `examine` is in neither: it is the
+ * centre, and giving it a wedge too would be a second way to do the default.
  */
-const WEDGELESS_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["examine", "gather"]);
+const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", "loot", "butcher", "useStairs"]);
 
 function openTileMenu(tile: Vec2): void {
   const me = findPlayer(world);
   if (!me || playerDead || playerWon) return;
-  const verbs = verbsForTile(world, me, viewLayer(), tile);
-  if (verbs.length === 0) return;
-  const wedges = menuItemsFor(verbs.filter((v) => !WEDGELESS_VERBS.has(v)));
-  const centre = menuItemsFor(["examine"])[0]!;
-  tileMenu.open(tileScreenPos(tile), wedges, centre, (verb) => runTileVerb(verb, tile));
+  const layer = viewLayer();
+  // Top half: what you can do TO that tile.
+  const targeted = verbsForTile(world, me, layer, tile).filter((v) => v !== "examine" && !SELF_VERBS.has(v));
+  // Bottom half: what you can do from where you are. Computed from the
+  // player's own tile — pressing anywhere gets you the same "here" verbs, which
+  // is the whole point of the split.
+  // `selfVerbsFor`, not `verbsForTile(me.pos)`: the latter asks "is THIS tile
+  // water", so standing beside a pond never reported drink. Measured — the
+  // bottom hemisphere came back empty.
+  const selfVerbs = selfVerbsFor(world, me, layer);
+  if (targeted.length === 0 && selfVerbs.length === 0) {
+    // Nothing but Look — still worth opening, since Look is the centre.
+    tileMenu.open(tileScreenPos(tile), [], [], menuItemsFor(["examine"])[0]!, (verb) => runTileVerb(verb, tile));
+    return;
+  }
+  tileMenu.open(
+    tileScreenPos(tile),
+    menuItemsFor(targeted),
+    menuItemsFor(selfVerbs),
+    menuItemsFor(["examine"])[0]!,
+    (verb) => runTileVerb(verb, tile)
+  );
 }
 
 /**
@@ -1233,7 +1370,10 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       if (ok) return "You set a berry down beside you.";
       return FOOD_MATERIAL_IDS.some((id) => countOf(player, id) > 0) ? "No free ground beside you." : "You have no food. Gather some from a patch.";
     case "attack": {
-      if (!ok) return "Nothing there to hit.";
+      // Only reachable now for a swing the UI already judged in range — the
+      // out-of-range and cooldown cases are answered in `commitMove` with the
+      // real reason, rather than all three collapsing into one wrong line.
+      if (!ok) return "Your swing finds nothing.";
       if (outcome.attackedId) {
         const target = world.agents.find((a) => a.id === outcome.attackedId);
         return `You strike ${target ? (SPECIES[target.species]?.name ?? target.species) : "it"}!`;
@@ -1267,6 +1407,19 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       if (!ok) return player.equipment?.held === "flintKnife" ? "Nothing nearby left to butcher." : "Nothing nearby to butcher — a knife would get you more.";
       const parts = outcome.butchered?.map((b) => `${itemName(b.itemKey).toLowerCase()}${b.count > 1 ? ` ×${b.count}` : ""}`) ?? [];
       return `You butcher it: ${parts.join(", ")}.`;
+    }
+    case "useUtilityMove": {
+      const move = player.moves?.find((m) => m.id === action.moveId);
+      const name = move?.name ?? "it";
+      // Says what it DID where the data exists, rather than a bare "you used
+      // X" — the house rule is that a vague line means the value was never
+      // fetched.
+      if (!ok) return `${name} finds nothing to work on.`;
+      if (move?.spawnsRain) return `You call up ${move.weatherType ?? "rain"}.`;
+      if (move?.selfHeal) return `You use ${name}, and feel steadier.`;
+      if (move?.fertilityBoost || move?.fertilityCeilingBoost) return `You use ${name}. The ground here is richer.`;
+      if (move?.statusImmunityAura) return `You use ${name}. Your herd shrugs off what ails it.`;
+      return `You use ${name}.`;
     }
     case "usePoultice": {
       if (!ok) return countOf(player, "poultice") < 1 ? "You don't have a poultice." : "Nobody hurt nearby.";
@@ -1571,13 +1724,38 @@ function openCommandMenu(): void {
     return el;
   };
   commandMenuBodyEl.appendChild(heading("You"));
-  const myMoves = me.moves ?? [];
-  if (myMoves.length === 0) commandMenuBodyEl.appendChild(row("No moves.", undefined, () => {}));
+  const allMine = me.moves ?? [];
+  // Utility moves have no target — every effect is centred on you or the
+  // ground around you — so they fire on the spot rather than asking for a
+  // tile. Direct ask: "I want to be able to use utility moves too."
+  const myUtility = allMine.filter((m) => m.utilityMove);
+  const myMoves = allMine.filter((m) => !m.utilityMove);
+  if (allMine.length === 0) commandMenuBodyEl.appendChild(row("No moves.", undefined, () => {}));
+  for (const move of myUtility) {
+    const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
+    commandMenuBodyEl.appendChild(
+      row(move.name, onCooldown ? "on cooldown" : "use it now — no target needed", () => {
+        if (onCooldown) {
+          closeCommandMenu();
+          say(`${move.name} is not ready yet.`);
+          return;
+        }
+        closeCommandMenu();
+        playerAct({ kind: "useUtilityMove", moveId: move.id });
+      })
+    );
+  }
   for (const move of myMoves) {
     const onCooldown = (me.moveCooldowns?.[move.id] ?? 0) > 0;
     commandMenuBodyEl.appendChild(
       row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
-        if (onCooldown) return;
+        if (onCooldown) {
+          // Silently ignoring the tap left the menu open to swallow the next
+          // click, which reads as the whole attack flow being broken.
+          closeCommandMenu();
+          say(`${move.name} is not ready yet.`);
+          return;
+        }
         closeCommandMenu();
         // The radial already asked "what do you want to do to THIS tile", so
         // there is nothing left to target — go straight to the swing rather
@@ -1622,7 +1800,11 @@ function openCommandMenu(): void {
       const onCooldown = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
       commandMenuBodyEl.appendChild(
         row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
-          if (onCooldown) return;
+          if (onCooldown) {
+            closeCommandMenu();
+            say(`${name}'s ${move.name} is not ready yet.`);
+            return;
+          }
           closeCommandMenu();
           if (pendingTargetTile) {
             const target = pendingTargetTile;
@@ -2246,6 +2428,7 @@ const TRAVEL_MAX_STEPS = 60;
 let travelTimer: number | undefined;
 
 function cancelTravel(): void {
+  cancelStrike();
   if (travelTimer !== undefined) {
     window.clearTimeout(travelTimer);
     travelTimer = undefined;

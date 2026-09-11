@@ -54,10 +54,26 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
   const ordered = candidates.map((_, i) => candidates[(start + i) % candidates.length]);
 
   for (const move of ordered) {
+    if (applyUtilityMoveEffects(world, agent, move!, log, rng)) return true;
+  }
+  return false;
+}
+
+/**
+ * Applies ONE utility move's effects, unconditionally. Extracted from the
+ * rotation loop above so a deliberate, player-chosen use can reach the same
+ * code without the 15%-per-tick gate that makes the ambient version ambient.
+ *
+ * Returns false without spending the move when it had nothing to act on — a
+ * `drainNeeds` move with no one in range, say. The caller treats that as "not
+ * used", so it is neither put on cooldown nor counted as the agent's action.
+ */
+function applyUtilityMoveEffects(world: World, agent: Agent, move: MoveSpec, log: EventLog | undefined, rng: () => number): boolean {
+  {
     if (move.drainNeeds) {
       const targets = agentsWithin(world, agent, move.drainNeeds.radius).filter((other) => other.herdId === undefined || other.herdId !== agent.herdId);
       const target = nearest(agent, targets);
-      if (!target) continue; // nothing to drain from yet — try again next eligible tick, not wasted on cooldown
+      if (!target) return false; // nothing to drain from yet — try again next eligible tick, not wasted on cooldown
       useMove(agent, move, world.tick);
       const { need, amount } = move.drainNeeds;
       target.needs[need] = Math.max(0, target.needs[need] - amount);
@@ -129,7 +145,20 @@ export function maybeUseUtilityMove(world: World, agent: Agent, log: EventLog | 
     log?.record({ kind: "utilityMoveUsed", tick: world.tick, agentId: agent.id, species: agent.species, moveId: move.id, inCombat: false });
     return true;
   }
-  return false;
+}
+
+/**
+ * A deliberate, player-driven use of one named utility move.
+ *
+ * Direct ask: "I want to be able to use utility moves too." Before this they
+ * were reachable only by `maybeUseUtilityMove`'s ambient 15%-per-tick roll and
+ * its in-combat sibling — an agent might use Growth eventually, but a player
+ * could never decide to. No random gate here: you picked it, it fires.
+ */
+export function useUtilityMove(world: World, agent: Agent, moveId: string, log: EventLog | undefined, rng: () => number): boolean {
+  const move = (agent.moves ?? []).find((m) => m.id === moveId && m.utilityMove);
+  if (!move || agent.moveCooldowns?.[move.id]) return false;
+  return applyUtilityMoveEffects(world, agent, move, log, rng);
 }
 
 /**

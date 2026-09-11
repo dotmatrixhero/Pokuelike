@@ -12,6 +12,7 @@ import { applyLooting, carryCapacityOf, healFromCookedFood, isTrulyDead } from "
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, FALLBACK_MAX_HP, resolveHit } from "./predation.js";
+import { useUtilityMove } from "./utilityMoves.js";
 import { pickBestMove, withinMoveRange } from "./combat.js";
 
 /**
@@ -245,7 +246,15 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // manhattan; that's a separate, self-correcting case (an out-of-range
       // order just walks the partner one step closer next tick), not this
       // one-shot swing.
-      const distance = action.target ? Math.max(Math.abs(action.target.x - agent.pos.x), Math.abs(action.target.y - agent.pos.y)) : 1;
+      // A named target is resolved HERE, at swing time, so a quarry that moved
+      // while this action sat queued is still struck. Falls back to the tile
+      // when it is gone (dead, or off this layer) so the swing still happens
+      // rather than silently evaporating.
+      const named = action.targetId
+        ? world.agents.find((a) => a.id === action.targetId && a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer)
+        : undefined;
+      const aimPos = named ? named.pos : targetPos;
+      const distance = named || action.target ? Math.max(Math.abs(aimPos.x - agent.pos.x), Math.abs(aimPos.y - agent.pos.y)) : 1;
       // Direct ask: "Attack should move list should work when you have a
       // weapon, or tackle if you don't. The player has moves too" — an
       // explicit `moveId` names one of the player's own real moves; a
@@ -254,9 +263,11 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // actually away for a tile-targeted one) to count as "you swung."
       const chosen = action.moveId ? agent.moves?.find((m) => m.id === action.moveId) : undefined;
       if (action.moveId && (!chosen || agent.moveCooldowns?.[chosen.id] || !withinMoveRange(chosen, distance))) return false;
-      const defender = world.agents.find(
-        (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
-      );
+      const defender =
+        named ??
+        world.agents.find(
+          (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === targetPos.x && a.pos.y === targetPos.y
+        );
       if (defender) {
         // `resolveHit`'s own return value only ever says whether this hit
         // was a true KILL (see its doc comment) — a landed-but-nonlethal
@@ -277,13 +288,13 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // crafting.ts), so a plain auto-swing (no explicit `moveId`) picks
       // one directly here rather than through the ordinary combat move-
       // selection path; an explicit `moveId` was already resolved above.
-      const tile = tileAt(world, agent.layer, targetPos.x, targetPos.y);
+      const tile = tileAt(world, agent.layer, aimPos.x, aimPos.y);
       if (!tile) return false;
       const move =
         chosen ??
         (agent.moves ?? []).find((m) => m.terrainEffect && !agent.moveCooldowns?.[m.id] && (!m.terrainEffect.from || m.terrainEffect.from.includes(tile.terrain)));
       if (!move?.terrainEffect) return false;
-      const felled = applyTerrainEffectAt(world, agent, agent.layer, targetPos, move);
+      const felled = applyTerrainEffectAt(world, agent, agent.layer, aimPos, move);
       if (!felled) return false;
       out.felled = felled;
       return true;
@@ -434,6 +445,11 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       out.butchered = butchered;
       log?.record({ kind: "butchered", tick: world.tick, agentId: agent.id, species: agent.species, fromId: corpse.id, fromSpecies: corpse.species, itemKeys: butchered.map((b) => b.itemKey) });
       return true;
+    }
+    case "useUtilityMove": {
+      const used = useUtilityMove(world, agent, action.moveId, log, rng);
+      if (used) out.utilityMoveId = action.moveId;
+      return used;
     }
     case "usePoultice": {
       // Direct report: "I can't apply poultice to heal units" — the item

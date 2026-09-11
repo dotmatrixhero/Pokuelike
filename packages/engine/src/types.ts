@@ -674,6 +674,22 @@ export type PlayerAction =
       dy: -1 | 0 | 1;
       moveId?: string;
       /**
+       * Strike this AGENT, wherever it is when the swing resolves, rather
+       * than a fixed tile.
+       *
+       * `advancePlayerTurn` queues the action and then ticks the world until
+       * the player's own action tick comes round — so every other agent moves
+       * in between. A tile-targeted swing at anything that is running away
+       * therefore lands on the ground it just left; measured, a chase closed
+       * to melee and reported "your swing finds nothing" three times while
+       * the quarry walked on. Naming the target instead lets the engine
+       * resolve against where it actually IS at that moment.
+       *
+       * Range is re-checked at resolve time against the target's live
+       * position: the point is to hit a moving thing, not to gain reach.
+       */
+      targetId?: string;
+      /**
        * Direct ask: "change attack for player moves to also be targeted,
        * like allies moves." When given, names the exact tile to strike —
        * the same pick-a-move-then-tap-a-tile flow `command` already gives
@@ -769,7 +785,18 @@ export type PlayerAction =
    * this same table lists stays unbuilt (ROADMAP.md M7+), same as the
    * carry/rescue mechanic itself.
    */
-  | { kind: "usePoultice" };
+  | { kind: "usePoultice" }
+  /**
+   * Deliberately use one of your own `utilityMove`-flagged moves — Growth,
+   * Grassy Terrain, a status aura, a weather call.
+   *
+   * Direct ask: "I want to be able to use utility moves too." These were
+   * previously reachable ONLY through utilityMoves.ts's ambient 15%-per-tick
+   * roll, which wild agents get for free and a player, having no ambient
+   * behaviour, never got at all. No target: every utility effect is centred on
+   * the user or their surroundings.
+   */
+  | { kind: "useUtilityMove"; moveId: string };
 
 /**
  * What happened when the player's last action was applied — for the UI to
@@ -784,6 +811,8 @@ export interface PlayerActionOutcome {
   gathered?: { itemKey: string; count: number }[];
   /** `craft` completing: what was made. */
   crafted?: string;
+  /** `useUtilityMove` succeeding: which move fired. */
+  utilityMoveId?: string;
   /** An activity finished this turn (as opposed to merely advanced). */
   completed?: Activity["kind"];
   /** `attack` landing a real hit on another agent: who got hit. */

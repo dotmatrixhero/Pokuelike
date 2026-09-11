@@ -24,6 +24,15 @@ import type { TileVerb } from "@pokuelike/engine";
  * do the first few times, and on a trackpad. Supporting only the first would
  * make the menu feel broken to anyone who releases before they mean to.
  *
+ * **Two hemispheres.** Direct ask: "THINGS you can do from your current
+ * position should be on one section of radial (ex bottom hemisphere), and
+ * things you target should be on the other (like top hemisphere)... That way I
+ * don't have to precisely target the tile I'm on to drink water when I'm
+ * standing on it." So the bottom half is computed from where the player
+ * STANDS and is the same whichever tile you press; the top half is about the
+ * tile under your finger. The split is the grammar: up means "to that", down
+ * means "here".
+ *
  * **The centre is Look, not cancel.** Direct ask: "long press into the radial
  * into no swipe always looks, since it's a non destructive action... and tap
  * always moves. Just for consistency?" That makes the two gestures mean one
@@ -68,7 +77,7 @@ const ARM_DISTANCE = 34;
 export class TileMenu {
   private readonly root: HTMLElement;
   private readonly hub: HTMLElement;
-  private wedges: { el: HTMLElement; item: TileMenuItem }[] = [];
+  private wedges: { el: HTMLElement; item: TileMenuItem; angle: number }[] = [];
   private armed: TileMenuItem | undefined;
   private centre: TileMenuItem | undefined;
   private onPick: ((verb: TileVerb) => void) | undefined;
@@ -106,7 +115,8 @@ export class TileMenu {
    */
   open(
     at: { x: number; y: number },
-    items: TileMenuItem[],
+    targeted: TileMenuItem[],
+    self: TileMenuItem[],
     centre: TileMenuItem,
     onPick: (verb: TileVerb) => void
   ): void {
@@ -120,11 +130,15 @@ export class TileMenu {
     this.root.style.top = `${at.y}px`;
     this.hub.textContent = centre.hint;
 
-    // Evenly spaced around the ring, starting straight up. "Drag up to one
-    // radial section" — so the first and most-wanted verb is the one directly
-    // under an upward flick.
-    items.forEach((item, i) => {
-      const angle = (i / items.length) * Math.PI * 2 - Math.PI / 2;
+    // Spread each group across its own half, padded so nothing lands exactly
+    // on the horizontal axis where the two halves meet. One item in a half
+    // sits dead centre of it — straight up for a target verb, straight down
+    // for a "from here" one.
+    const placed: { item: TileMenuItem; angle: number }[] = [
+      ...targeted.map((item, i) => ({ item, angle: -Math.PI + ((i + 1) / (targeted.length + 1)) * Math.PI })),
+      ...self.map((item, i) => ({ item, angle: ((i + 1) / (self.length + 1)) * Math.PI })),
+    ];
+    placed.forEach(({ item, angle }) => {
       const el = document.createElement("button");
       el.type = "button";
       el.className = "tile-menu-wedge";
@@ -144,7 +158,7 @@ export class TileMenu {
         this.commit(item.verb);
       });
       this.root.appendChild(el);
-      this.wedges.push({ el, item });
+      this.wedges.push({ el, item, angle });
     });
 
     // Armed from the moment it opens, not only once the pointer first moves:
@@ -172,16 +186,18 @@ export class TileMenu {
     if (distance >= ARM_DISTANCE && this.wedges.length > 0) {
       const angle = Math.atan2(dy, dx);
       let bestDelta = Infinity;
-      this.wedges.forEach(({ item }, i) => {
-        const wedgeAngle = (i / this.wedges.length) * Math.PI * 2 - Math.PI / 2;
-        // Shortest way round the circle, so the wedge at -90° and a pointer at
+      for (const { item, angle: wedgeAngle } of this.wedges) {
+        // Each wedge's own placed angle — the two hemispheres are not evenly
+        // spaced around the whole circle, so recomputing from the index would
+        // arm the wrong one.
+        // Shortest way round the circle, so a wedge at -90° and a pointer at
         // +170° compare correctly.
         const delta = Math.abs(Math.atan2(Math.sin(angle - wedgeAngle), Math.cos(angle - wedgeAngle)));
         if (delta < bestDelta) {
           bestDelta = delta;
           best = item;
         }
-      });
+      }
     }
     this.armed = best;
     for (const { el, item } of this.wedges) el.classList.toggle("armed", item === best);

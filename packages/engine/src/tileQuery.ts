@@ -122,3 +122,39 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
 
   return verbs;
 }
+
+/**
+ * What this agent can do from where it is standing, independent of any tile it
+ * might be pointing at.
+ *
+ * Direct ask: "THINGS you can do from your current position should be on one
+ * section of radial... That way I don't have to precisely target the tile I'm
+ * on to drink water when I'm standing on it."
+ *
+ * Not expressible as `verbsForTile(agent.pos)`: `drink` there asks whether the
+ * PASSED tile is water, so querying your own tile never reports it — you are
+ * standing beside the pond, not in it. Same for a corpse one step away. This
+ * asks the question the other way round: given where I am, what is in reach?
+ */
+export function selfVerbsFor(world: World, agent: Agent, layer: Layer): TileVerb[] {
+  const here = examineTile(world, layer, agent.pos);
+  if (!here) return [];
+  const verbs: TileVerb[] = [];
+  if (here.harvestable.length > 0 && here.harvestsLeft > 0) verbs.push("gather");
+
+  // Anything within one step, diagonals included.
+  let waterNear = false;
+  let corpseNear = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const near = examineTile(world, layer, { x: agent.pos.x + dx, y: agent.pos.y + dy });
+      if (!near) continue;
+      if (near.drinkable) waterNear = true;
+      if (near.corpseId) corpseNear = true;
+    }
+  }
+  if (waterNear) verbs.push("drink");
+  if (corpseNear) verbs.push("loot", "butcher");
+  if (here.stairs) verbs.push("useStairs");
+  return verbs;
+}
