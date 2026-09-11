@@ -22,6 +22,24 @@ export const PARALYSIS_SKIP_CHANCE = 0.25;
 export const PARALYSIS_SPEED_MULTIPLIER = 0.5;
 /** Chance a frozen agent thaws on any given tick, independent of being hit. */
 export const FREEZE_THAW_CHANCE = 0.2;
+
+/**
+ * Chance a confused agent stumbles instead of doing what it meant to do.
+ * Direct: "Confusion should make you move in a random direction with a 50%
+ * chance while you have the status."
+ *
+ * Deliberately a STUMBLE, not a skip. Paralysis already owns "you lose the
+ * action" (`PARALYSIS_SKIP_CHANCE`), and a second status that also just
+ * burns turns would be the same mechanic wearing a different name. A
+ * confused agent still MOVES — into the open, off its own tile, away from
+ * the thing it was eating, possibly into a predator. That is visible on the
+ * map, which is the bar this project sets for a mechanic.
+ */
+export const CONFUSION_STUMBLE_CHANCE = 0.5;
+
+/** Confusion runs out on its own, like sleep — mainline's 1-4 turns, in this sim's own tick denomination. */
+export const CONFUSION_TICKS_MIN = 12;
+export const CONFUSION_TICKS_MAX = 40;
 /** Bounded random sleep duration, in ticks. This sim's ticks are far finer-grained than mainline turns, so mainline's "1-3 turns" doesn't transfer directly — picked to be a real, felt lockout without being a de facto death sentence. */
 export const SLEEP_TICKS_MIN = 10;
 export const SLEEP_TICKS_MAX = 30;
@@ -46,6 +64,11 @@ const STATUS_IMMUNE_TYPES: Record<StatusKind, PokemonType[]> = {
   poison: ["poison", "steel"],
   freeze: ["ice"],
   sleep: [],
+  // No type resists confusion. Mainline has no confusion immunity either
+  // (the ability that grants it is an ability, not a typing), and this sim
+  // has no abilities — so an empty list is the honest answer, not an
+  // oversight.
+  confusion: [],
 };
 
 export function isImmuneToStatus(types: PokemonType[] | undefined, kind: StatusKind): boolean {
@@ -62,6 +85,10 @@ export function isAsleep(agent: Agent): boolean {
 
 export function isFrozen(agent: Agent): boolean {
   return agent.status?.kind === "freeze";
+}
+
+export function isConfused(agent: Agent): boolean {
+  return agent.status?.kind === "confusion";
 }
 
 export function isBurned(agent: Agent): boolean {
@@ -91,7 +118,11 @@ export function maybeInflictStatus(
   if (rng() >= move.statusChance) return;
 
   const ticksRemaining =
-    move.statusKind === "sleep" ? SLEEP_TICKS_MIN + Math.floor(rng() * (SLEEP_TICKS_MAX - SLEEP_TICKS_MIN + 1)) : undefined;
+    move.statusKind === "sleep"
+      ? SLEEP_TICKS_MIN + Math.floor(rng() * (SLEEP_TICKS_MAX - SLEEP_TICKS_MIN + 1))
+      : move.statusKind === "confusion"
+        ? CONFUSION_TICKS_MIN + Math.floor(rng() * (CONFUSION_TICKS_MAX - CONFUSION_TICKS_MIN + 1))
+        : undefined;
   defender.status = { kind: move.statusKind, ticksRemaining, severityMultiplier: move.statusSeverity };
   log?.record({
     kind: "statusInflicted",
@@ -206,6 +237,20 @@ export function tickStatusEffects(agent: Agent, world: World, log?: EventLog, rn
     if (remaining <= 0) {
       agent.status = undefined;
       log?.record({ kind: "statusCleared", tick: world.tick, agentId: agent.id, species: agent.species, statusKind: "sleep", reason: "woke" });
+    } else {
+      status.ticksRemaining = remaining;
+    }
+    return;
+  }
+
+  // Confusion wears off on its own clock, same shape as sleep. It deals no
+  // damage — the cost is the actions it wastes and where it leaves you
+  // standing, which is `applyConfusedStumble` (needs.ts).
+  if (status.kind === "confusion") {
+    const remaining = (status.ticksRemaining ?? 1) - 1;
+    if (remaining <= 0) {
+      agent.status = undefined;
+      log?.record({ kind: "statusCleared", tick: world.tick, agentId: agent.id, species: agent.species, statusKind: "confusion", reason: "cleared" });
     } else {
       status.ticksRemaining = remaining;
     }

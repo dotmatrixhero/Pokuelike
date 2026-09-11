@@ -1,9 +1,12 @@
-import type { Agent, Layer, Vec2, World } from "./types.js";
+import type { Agent, ItemDef, Layer, RecipeDef, Vec2, World } from "./types.js";
+import type { MoveSpec } from "./moves.js";
 import type { EventLog } from "./events.js";
 import { biomeWeightsAt, findWalkableNear } from "./worldgen.js";
 import { findNearbyOtherHerd } from "./dispersal.js";
 import { findNearestIndexed } from "./resourceIndex.js";
 import { ensureHerd } from "./herds.js";
+import { addItem } from "./inventory.js";
+import { MATERIALS, type MaterialId } from "./harvest.js";
 
 /**
  * Immigration — new herds arriving into the world from outside it, over the
@@ -89,6 +92,138 @@ export interface ImmigrationContext {
   speciesRoster: ImmigrationSpeciesInfo[];
   /** Builds a full new `Agent` for `speciesId` at `pos`/`level` — `@pokuelike/data`'s `spawn.ts`'s `spawnAgent`, reused rather than duplicating agent-construction logic here. */
   spawnAgent(speciesId: string, id: string, pos: Vec2, level: number, rng: () => number): Agent;
+  /**
+   * The item/recipe/tool-move catalog — `@pokuelike/data`'s `crafting.ts`.
+   * Previously only wired into the two player-scenario `World`s
+   * (`scenario.ts`), so a wild human spawned via ordinary immigration into
+   * any other zone had `world.items`/`playerBaseMoves` unset and
+   * `syncPlayerMoves` silently no-opped for them. `promoteZone` now stamps
+   * this onto every zone `World` it creates, the same "carry it down once,
+   * at promotion" treatment `territoryName`/`sanctuaryDistance` already
+   * get — so any human, player or wild, gets real tool-granted moves.
+   * Optional: a caller with no catalog (tests, minimal demo worlds) just
+   * leaves items/recipes/playerBaseMoves unset, same as today.
+   */
+  itemCatalog?: { items: Record<string, ItemDef>; recipes: Record<string, RecipeDef>; playerBaseMoves: MoveSpec[] };
+}
+
+const HUMAN_ARCHETYPES = ["hunter", "forager", "traveler", "merchant", "wanderer"] as const;
+
+type StartingGear = { held?: string; worn?: string; carry?: [string, number][] };
+
+/**
+ * Picks one entry from `weights` (`[value, weight]` pairs) — a plain
+ * weighted roll, same shape `immigration.ts`'s own species-roster picks
+ * already use elsewhere in this file.
+ */
+function weightedPick<T>(weights: [T, number][], rng: () => number): T {
+  const total = weights.reduce((sum, [, w]) => sum + w, 0);
+  let roll = rng() * total;
+  for (const [value, w] of weights) {
+    roll -= w;
+    if (roll <= 0) return value;
+  }
+  return weights[weights.length - 1]![0];
+}
+
+/**
+ * Starting loadout per archetype, drawn from the real `@pokuelike/data`
+ * `ITEMS` catalog via `ImmigrationContext.itemCatalog` — direct ask: "can
+ * we make humans spawn with different types... depending on type they can
+ * have different items on their inventory, lootable when they are
+ * fainted." Lootable for free once carried: `support.ts`'s existing
+ * corpse-loot mechanic already transfers a fainted agent's `inventory` to
+ * whoever loots it, no new mechanic needed.
+ *
+ * Hunter and merchant roll a weighted weapon/wares tier rather than a
+ * single fixed item — direct follow-up ask: "plus having valuable loot."
+ * The tiers are the crafting table's own real cost ladder (`crafting.ts`'s
+ * `RECIPES` turn counts): axe (14 turns, the single most expensive recipe
+ * in the game) and machete (11 turns + cordage) are rare, genuinely worth
+ * killing a hunter for; club/flint knife (6-10 turns) are the common case.
+ * Forager/traveler/wanderer stay fixed — this ask was specifically about
+ * hunter's weapon and, by extension, what's worth looting, not a rarity
+ * pass on every archetype.
+ */
+const MERCHANT_BONUS_WARES = ["poultice", "foragePouch", "camouflageCloak"] as const;
+
+const ARCHETYPE_STARTING_GEAR: Record<(typeof HUMAN_ARCHETYPES)[number], (rng: () => number) => StartingGear> = {
+  // Weapon in hand — "hunter (ex. weapons, can use more moves)". Mostly
+  // the common two; axe/machete are the rare, valuable finds.
+  hunter: (rng) => ({
+    held: weightedPick(
+      [
+        ["flintKnife", 35],
+        ["club", 35],
+        ["machete", 18],
+        ["axe", 12],
+      ],
+      rng
+    ),
+  }),
+  // Forage pouch, a couple of already-gathered berries, and a waterskin in
+  // hand — the user's own original phrase: "collects crops, puts in
+  // inventory, waterskin, etc." (held so it can actually be filled/drunk
+  // from — see crafting.ts's `waterskin` ItemDef and player.ts's
+  // `canFillWaterskin`).
+  forager: () => ({ held: "waterskin", carry: [["foragePouch", 1], ["food", 2]] }),
+  // Camouflage cloak, not a weapon — moves light and unseen rather than
+  // armed. Bedroll too: pure flavor, no mechanic — a traveler's the one
+  // who actually beds down away from home.
+  traveler: () => ({ worn: "camouflageCloak", carry: [["bedroll", 1]] }),
+  // Raw goods and real coin every time, plus a real chance of one
+  // finished, more valuable piece of wares on top — a trader who's
+  // actually made a sale recently. Coin pouch is flavor/loot value only
+  // (no economy to spend it in yet), but it's the one item that says
+  // "merchant" on sight, so it's guaranteed rather than rolled.
+  merchant: (rng) => {
+    const wares: [string, number][] = [["fiber", 3], ["cordage", 2], ["coinPouch", 1]];
+    if (rng() < 0.3) {
+      const bonus = MERCHANT_BONUS_WARES[Math.floor(rng() * MERCHANT_BONUS_WARES.length)]!;
+      wares.push([bonus, 1]);
+    }
+    return { carry: wares };
+  },
+  // Owns nothing — the plainest read of "wanderer".
+  wanderer: () => ({}),
+};
+
+/**
+ * Rolls a spawn-time archetype tendency for a wild human and hands it the
+ * matching starting gear — called once, right where `agent.sex` is already
+ * rolled (immigration.ts's real-arrival path, overworld.ts's `promoteZone`
+ * invented-population path), never for the player (`controlledBy ===
+ * "player"`, which has its own fully-earned system) and never for a
+ * non-human species (a no-op there).
+ *
+ * Sets `agent.moves` the same way `player.ts`'s `syncPlayerMoves` does
+ * (base moves + whatever the held item grants) since wild humans have no
+ * equip/stow actions of their own to trigger that sync later — this is
+ * the one and only time a wild human's loadout is computed. If
+ * `ctx.itemCatalog` is absent (a minimal test/demo world with no item
+ * data wired in), the archetype tendency is still recorded but no gear or
+ * moves are granted — same "quietly does less" fallback `syncPlayerMoves`
+ * itself already uses for a world with no catalog.
+ */
+export function assignHumanArchetype(agent: Agent, ctx: ImmigrationContext, rng: () => number): void {
+  if (agent.species !== "human" || agent.controlledBy === "player") return;
+  const archetype = HUMAN_ARCHETYPES[Math.floor(rng() * HUMAN_ARCHETYPES.length)]!;
+  agent.archetype = archetype;
+  const catalog = ctx.itemCatalog;
+  if (!catalog) return;
+  const gear = ARCHETYPE_STARTING_GEAR[archetype](rng);
+  const weightOf = (key: string): number => catalog.items[key]?.weight ?? MATERIALS[key as MaterialId]?.weight ?? 1;
+  if (gear.held) {
+    addItem(agent, gear.held, 1, weightOf(gear.held));
+    agent.equipment = { ...agent.equipment, held: gear.held };
+  }
+  if (gear.worn) {
+    addItem(agent, gear.worn, 1, weightOf(gear.worn));
+    agent.equipment = { ...agent.equipment, worn: gear.worn };
+  }
+  for (const [key, count] of gear.carry ?? []) addItem(agent, key, count, weightOf(key));
+  const grantedMoves = gear.held ? (catalog.items[gear.held]?.grantsMoves ?? []) : [];
+  agent.moves = [...catalog.playerBaseMoves, ...grantedMoves];
 }
 
 /**
@@ -636,6 +771,7 @@ export function maybeImmigrate(world: World, ctx: ImmigrationContext | undefined
     const pos = nextArrivalPos(i);
     const agent = ctx.spawnAgent(species.id, `${species.id}-immigrant-${world.tick}-${i}`, pos, rollImmigrantLevel(species, rng, localAvgLevel, zoneCenter), rng);
     agent.sex = rng() < 0.5 ? "male" : "female";
+    assignHumanArchetype(agent, ctx, rng);
     newAgents.push(agent);
   }
 

@@ -129,6 +129,22 @@ export const ITEMS: Record<string, ItemDef> = {
   // protein, not a berry) is the reason to actually carry it back to a
   // fire instead of just eating it raw.
   roastedMeat: { key: "roastedMeat", name: "Roasted Meat", weight: 1, cooked: { healFraction: 0.25, rapportMultiplier: 2.5 } },
+  // Non-combat flavor items — direct ask: "waterskin, bedroll, coin pouch."
+  // Waterskin is the one with a real mechanic on top: "make waterskin when
+  // held, allow gather from water sources and filling it up" —
+  // `holdsWater`/`waterCapacity` (player.ts's `canFillWaterskin`/
+  // `agent.waterskinCharges`), a real drink away from any water tile once
+  // filled. 3 charges: enough for a real stretch away from water without
+  // making a real water source pointless to ever revisit.
+  waterskin: { key: "waterskin", name: "Waterskin", weight: 1, slot: "held", holdsWater: true, waterCapacity: 3 },
+  // Bedroll: pure flavor, no mechanic — a traveler's real gear, not a
+  // combat item. No `slot`, same as poultice/coin pouch below: something
+  // you carry, not wear or wield.
+  bedroll: { key: "bedroll", name: "Bedroll", weight: 2 },
+  // Coin pouch: pure flavor/loot value — no economy exists yet to spend it
+  // in, so deliberately no recipe below (found on a merchant, not crafted;
+  // "valuable loot" is the point, not a new resource sink).
+  coinPouch: { key: "coinPouch", name: "Coin Pouch", weight: 1 },
 };
 
 function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1, requiresNearFire = false): RecipeDef {
@@ -199,6 +215,17 @@ export const RECIPES: Record<string, RecipeDef> = {
   // would make it exactly the "exists in the data, never fires" bug this
   // project keeps finding and fixing.
   roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, 1, true),
+  // Waterskin: known at start, same tier as torch/club — water is core
+  // survival, not a discovery-gated craft.
+  waterskin: recipe("waterskin", "Waterskin", [["cordage", 1], ["fiber", 2]], 6, true),
+  // Bedroll is deliberately NOT knownAtStart, and that is now a real gap
+  // rather than a choice: nothing in the game discovers a recipe, so this
+  // is unreachable exactly the way the cooked dishes above were. Flagged
+  // in TODO.md rather than quietly flipped, since it is the same
+  // still-open "nothing grants any non-knownAtStart recipe" hole that
+  // axe/machete/knappedFlint sit in.
+  bedroll: recipe("bedroll", "Bedroll", [["fiber", 3], ["cordage", 1]], 7, false),
+  // No coinPouch recipe — deliberately loot-only, see its ITEMS comment.
 };
 
 export const KNOWN_AT_START: string[] = Object.values(RECIPES).filter((r) => r.knownAtStart).map((r) => r.id);

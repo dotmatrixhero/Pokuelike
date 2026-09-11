@@ -144,9 +144,25 @@ export function pickWeatherType(world: World, x: number, y: number, rng: () => n
  * but at the caster's own position with a forced type instead of a rolled
  * one. Exported for that second caller.
  */
-export function spawnWeatherCellAt(world: World, log: EventLog | undefined, x: number, y: number, type: WeatherType, rng: () => number): void {
-  const radius = WEATHER_RADIUS_MIN + rng() * (WEATHER_RADIUS_MAX - WEATHER_RADIUS_MIN);
-  const lifespanTicks = Math.round(WEATHER_LIFESPAN_MIN_TICKS + rng() * (WEATHER_LIFESPAN_MAX_TICKS - WEATHER_LIFESPAN_MIN_TICKS));
+export function spawnWeatherCellAt(
+  world: World,
+  log: EventLog | undefined,
+  x: number,
+  y: number,
+  type: WeatherType,
+  rng: () => number,
+  /**
+   * Extra radius/lifespan on top of the rolled ones — a move-driven cell
+   * that a skill tree has deepened (`MoveSpec.weatherRadiusBonus`/
+   * `weatherLifespanBonus`, utilityMoves.ts). Omitted by the ordinary
+   * random spawn, which is exactly the pre-existing behaviour.
+   */
+  shaping?: { radiusBonus?: number; lifespanBonus?: number }
+): void {
+  const radius = WEATHER_RADIUS_MIN + rng() * (WEATHER_RADIUS_MAX - WEATHER_RADIUS_MIN) + Math.max(0, shaping?.radiusBonus ?? 0);
+  const lifespanTicks =
+    Math.round(WEATHER_LIFESPAN_MIN_TICKS + rng() * (WEATHER_LIFESPAN_MAX_TICKS - WEATHER_LIFESPAN_MIN_TICKS)) +
+    Math.max(0, Math.round(shaping?.lifespanBonus ?? 0));
   const angle = rng() * 2 * Math.PI;
   const drift: Vec2 = { x: Math.cos(angle) * WEATHER_DRIFT_SPEED, y: Math.sin(angle) * WEATHER_DRIFT_SPEED };
 

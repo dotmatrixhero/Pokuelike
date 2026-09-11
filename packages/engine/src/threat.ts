@@ -2,7 +2,7 @@ import type { Agent, World } from "./types.js";
 import { trustFleeFactor, trustStage } from "./trust.js";
 
 /**
- * Threat signature — ROADMAP.md M6, PLAYER_INVENTORY.md. What the player
+ * Threat signature — ROADMAP.md M6, PLAYER_INVENTORY.md. What a human
  * reads as to a creature deciding whether to bolt: not a species flag but
  * how they move, how they stand, and what is in their hand.
  *
@@ -10,7 +10,21 @@ import { trustFleeFactor, trustStage } from "./trust.js";
  * player inside the ordinary radius no matter what; now a crouched,
  * unarmed, still human reads as half a threat and a running one with a
  * club as a large one. `predation.ts` multiplies the prey's own flee
- * radius by this number for the player specifically.
+ * radius by this number for any human.
+ *
+ * Originally player-only (`agent.controlledBy !== "player"` gated it);
+ * widened to any human — direct ask: "make the humans feel a little more
+ * like a threat despite having weak stat blocks." A wild hunter's real
+ * stat block (species.ts's baseline `human` stats) is genuinely weak next
+ * to a real Pokémon's, so this is the lever that actually delivers
+ * "feels dangerous": nearby prey give an armed hunter (`assignHumanArchetype`'s
+ * `flintKnife`/`club`/`axe`/`machete`) real berth the same formula already
+ * gives the player, purely from what is in their hand — no stat retuning,
+ * same tuned coefficients this whole session already validated against
+ * `validateBond.ts`. An unarmed wanderer still reads as harmless. This
+ * does NOT make a human an active hunter of other creatures — see
+ * `HUNT_RULES`' own doc comment for why that's a materially bigger,
+ * species-wide-table change, not built here.
  *
  * Magnitudes are sim-original guesses to be judged against
  * `validateBond.ts`, not canon:
@@ -21,19 +35,21 @@ import { trustFleeFactor, trustStage } from "./trust.js";
  *
  * **Lever 2, the gift moment**: overrides all of the above to
  * `GIFT_GRACE_SIGNATURE` while `agent.giftGraceUntil` (player.ts's
- * `offer`) hasn't yet passed. Found by measurement, not guessed: lever 1
- * alone still left two seeds crossing `curious` while the player was
- * already 4 tiles into the retreat every courting cycle used to avoid
- * re-spooking the target — the exact moment food goes down is also the
- * moment signature should collapse, so the creature has a real window to
- * approach without the player having to abandon the spot at all.
+ * `offer`) hasn't yet passed — player-only in practice (no wild-human AI
+ * ever sets `giftGraceUntil`), but harmless to check unconditionally.
+ * Found by measurement, not guessed: lever 1 alone still left two seeds
+ * crossing `curious` while the player was already 4 tiles into the
+ * retreat every courting cycle used to avoid re-spooking the target — the
+ * exact moment food goes down is also the moment signature should
+ * collapse, so the creature has a real window to approach without the
+ * player having to abandon the spot at all.
  */
 export const GIFT_GRACE_SIGNATURE = 0.1;
 /** How long a gift moment lasts — long enough for a treat-seeking creature (needs.ts) to walk over from a few tiles out and eat. */
 export const GIFT_GRACE_TICKS = 60;
 
 export function threatSignatureOf(world: World, agent: Agent): number {
-  if (agent.controlledBy !== "player") return 0;
+  if (agent.species !== "human") return 0;
   if (agent.giftGraceUntil !== undefined && world.tick <= agent.giftGraceUntil) return GIFT_GRACE_SIGNATURE;
   let sig = 1;
   if (agent.posture === "crouch") sig *= 0.5;
@@ -46,10 +62,12 @@ export function threatSignatureOf(world: World, agent: Agent): number {
 }
 
 /**
- * A creature's effective flee radius against the player: its own radius,
- * scaled by the player's signature, scaled again by how far it has come
+ * A creature's effective flee radius against a human: its own radius,
+ * scaled by that human's signature, scaled again by how far it has come
  * to trust them (trust.ts's `trustFleeFactor`). Under 1 tile means "does
- * not read as a threat at all" — a bonded creature never flees the player.
+ * not read as a threat at all" — a bonded creature never flees a human it
+ * trusts (the player, in practice — no wild-human AI builds rapport, so a
+ * wild human's `trustFleeFactor` is always the stranger default, 1).
  */
 export function playerFleeRadius(world: World, player: Agent, baseRadius: number, observer?: Agent): number {
   const trust = observer ? trustFleeFactor(trustStage(world, observer, player.id)) : 1;

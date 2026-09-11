@@ -2,6 +2,7 @@ import type { ImmigrationContext } from "@pokuelike/engine";
 import { SPECIES } from "./species.js";
 import { spawnAgent } from "./spawn.js";
 import { naturalMinLevelFor, isSingleStageSpecies } from "./leveling.js";
+import { ITEMS, RECIPES, BARE_HANDS_MOVES } from "./crafting.js";
 
 /**
  * Wires `@pokuelike/engine`'s `immigration.ts` up to this package's actual
@@ -29,4 +30,5 @@ export const IMMIGRATION_CONTEXT: ImmigrationContext = {
     rarity: species.rarity,
   })),
   spawnAgent,
+  itemCatalog: { items: ITEMS, recipes: RECIPES, playerBaseMoves: BARE_HANDS_MOVES },
 };

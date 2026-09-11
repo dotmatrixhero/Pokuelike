@@ -1,4 +1,4 @@
-import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2 } from "./types.js";
+import type { Agent, PassiveKind, StatusKind, TerrainKind, Vec2, WeatherType } from "./types.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { PokemonType } from "./typing.js";
 import type { MaterialId } from "./harvest.js";
@@ -48,7 +48,26 @@ export type MoveShape =
   | { kind: "line"; length: number }
   | { kind: "cone"; length: number; width: number }
   | { kind: "ring"; radius: number }
-  | { kind: "burst"; radius: number };
+  | { kind: "burst"; radius: number }
+  /**
+   * A facing-oriented RECTANGLE that starts one tile ahead of the caster and
+   * runs `length` tiles out, `width` tiles to either side of the centre line
+   * (so it is `2 * width + 1` tiles across, always odd — the caster's own
+   * lane plus a matched pair of flanks). Direct ask, about Surf: "A large
+   * wave. Like a moving rectangle of water that does aoe on impact.. It can
+   * be aimed."
+   *
+   * The two existing aimed shapes could not express that. A `line` has a
+   * length but no width. A `cone` widens with depth, so its near tiles are
+   * always narrower than its far ones — the opposite of a wave front, which
+   * is at its widest the moment it arrives. `ring`/`burst` are centred on the
+   * caster and are not aimed at all.
+   *
+   * Unlike `ring`, it covers distance 1: a wave rolls over whatever is
+   * standing right in front of you. That is the specific defect this shape
+   * was added to fix — see Surf's own comment in packages/data/src/moves.ts.
+   */
+  | { kind: "wave"; length: number; width: number };
 
 /** One condition -> damage-multiplier pair. See `MoveSpec.situationalBonus(es)`. */
 export interface SituationalBonus {
@@ -318,6 +337,31 @@ export interface MoveSpec {
    */
   excludesAllies?: boolean;
   /**
+   * KNOWING this move (it is on `Agent.moves`) makes its user a boat. Two
+   * effects, both read through `waterBody.ts`'s `ridesWater`:
+   *
+   *  1. Deep water stops being a wall (`canEnterWater`) — the user crosses a
+   *     large body freely whatever its types are. Direct ask, about Surf:
+   *     "if it's a non water Pokemon it can freely travel around water
+   *     easily."
+   *  2. It can pick a herd-mate up and ferry it to a landing that herd-mate
+   *     could not have reached on its own (`support.ts`'s
+   *     `maybeStartFerrying`). Direct ask: "It also allows the unit to carry
+   *     allies over water."
+   *
+   * A BASE-SPEC property, deliberately not a tree delta and not a
+   * `PassiveKind`. The ask states both as things Surf *is*, in the same
+   * breath as its shape — not as something a build earns — and a passive
+   * would have to be bought before a Surf user could swim, which reads
+   * backwards. It also keeps the capability keyed to the move that provides
+   * it: `forgetMove` drops the spec off `agent.moves` and the boat is gone,
+   * with no `revokePassive` bookkeeping to get wrong.
+   *
+   * `applyMoveTree` copies the base spec wholesale (`{ ...base }`), so this
+   * survives every respec without needing an apply site of its own.
+   */
+  watercraft?: boolean;
+  /**
    * Bonus power scaling with the attacker's own bulk (`agent.maxHp`, the
    * sim's existing weight proxy — see support.ts's `bodyWeightOf` for the
    * same proxy used elsewhere), added on top of `power` at the moment of the
@@ -503,6 +547,21 @@ export interface MoveSpec {
    * marks eligibility for the idle path, it carries no effect of its own.
    * Absent = never eligible for idle/stand-alone use, the default.
    */
+  /**
+   * Extends STATUS infliction (and `statusSpreads`) to every target caught in
+   * a `hitsArea` move's shape, not just the deliberately-picked one.
+   *
+   * Off by default, which is the base rule `resolveHitAgainstTarget` has
+   * always had and still has: a Growl-style blast damages everyone and
+   * statuses only who you aimed at. This exists so a skill tree can BUY that
+   * out — direct: "I do not like the aoe status thing. That's fine as a base
+   * but should be modified with notable nodes in the skill tree."
+   *
+   * Deliberately status-only. On-hit forced movement and `positionSwap` are
+   * defined relative to the one picked defender and stay primary-only.
+   */
+  areaStatus?: boolean;
+
   utilityMove?: boolean;
   /** Heals this fraction of the user's own maxHp — `sunbeamBonus`, if set, adds an extra fraction when used within `flora.ts`'s `SUNBEAM_RADIUS` of a real "sunbeam" tile (reuses the same terrain-scaled-healing idea `isNearSunbeam` already drives for germination). Requires `utilityMove`. Absent = no self-heal, the default. */
   selfHeal?: { fraction: number; sunbeamBonus?: number };
@@ -512,6 +571,53 @@ export interface MoveSpec {
   statusImmunityAura?: { ticks: number; radius: number };
   /** Spawns (or refreshes) a real rain `WeatherCell` (weather.ts) centered on the user's own position — a move-driven weather trigger, not a passive spawn roll. Requires `utilityMove`. Absent/false = no weather effect, the default. */
   spawnsRain?: boolean;
+  /**
+   * Added to the RADIUS of the cell `spawnsRain` puts down (weather.ts's
+   * `spawnWeatherCellAt` rolls `WEATHER_RADIUS_MIN`-`WEATHER_RADIUS_MAX`,
+   * 8-18, and this is added on top). A wider front is the most directly
+   * visible thing a weather move can buy: more tiles under rain means more
+   * flora holding on (`floraDecayDivisor`), more thirst spared
+   * (`thirstDecayMultiplier`) and more shoreline eligible to become real
+   * water (`advanceWaterCycle`). Meaningless without `spawnsRain`. Absent/0
+   * = the rolled radius, unchanged.
+   */
+  weatherRadiusBonus?: number;
+  /**
+   * Added to the LIFESPAN in ticks of the cell `spawnsRain` puts down
+   * (rolled 200-500). Distinct from `weatherRadiusBonus` in kind, not
+   * degree: water forms under rain on a per-tile-per-tick roll
+   * (`RAIN_WATER_FORM_CHANCE_PER_TICK`, 1/1800), so duration is what
+   * actually converts shoreline into new water, while radius decides how
+   * much shoreline is under the cloud at all. Meaningless without
+   * `spawnsRain`. Absent/0 = the rolled lifespan, unchanged.
+   */
+  weatherLifespanBonus?: number;
+  /**
+   * What KIND of cell `spawnsRain` puts down, when the move's own rain is
+   * meant to arrive as something worse. `"storm"` carries real, separate
+   * mechanics in weather.ts (`stormAccuracyMultiplier` 0.6,
+   * `stormFovPenalty` 4, and sustained exposure with no cover is a genuine
+   * `"weather"` migration trigger in herdMigration.ts); `"coldSnap"` slows
+   * everything under it (`COLD_SNAP_SPEED_MULTIPLIER`). Meaningless
+   * without `spawnsRain`. Absent = `"rain"`, the default and the only
+   * thing `spawnsRain` could produce before this field existed.
+   */
+  weatherType?: WeatherType;
+  /**
+   * Permanently raises the `fertilityCeiling` of every tile within `radius`
+   * (Chebyshev) of the user by `amount` — flora.ts's `raiseFertilityCeiling`,
+   * applied by utilityMoves.ts, clamped at loam's 1.0.
+   *
+   * Deliberately NOT the same lever as `fertilityBoost`: that one raises a
+   * tile's current fertility toward a ceiling it cannot pass, so on sandy
+   * (0.6) or rocky (0.25) ground — where worldgen already writes the
+   * starting fertility AT the ceiling — it measurably does nothing at all.
+   * This one moves the ceiling itself, which is the difference between
+   * "this patch recovers faster" and "this patch can hold a plant now."
+   * Requires `utilityMove`. Absent = the ground keeps whatever ceiling its
+   * ground type gave it, the default.
+   */
+  fertilityCeilingBoost?: { amount: number; radius: number };
   /** Multiplies the user's own mate-search radius (`reproduction.ts`'s `MATE_SEARCH_RADIUS`) by `multiplier` for `ticks` — see `Agent.matingRadiusBoostTicksRemaining`'s own doc comment. Requires `utilityMove`. Absent = no boost, the default. */
   matingRadiusBoost?: { multiplier: number; ticks: number };
   /** On use, finds the nearest living, non-same-herd agent within `radius` and transfers `amount` of the user's target `need` from them to the user — real resource theft, distinct from any hostile hit. A no-op (still goes on cooldown) if no such agent is in range. Requires `utilityMove`. Absent = no drain effect, the default. */
@@ -687,6 +793,7 @@ export interface MoveTreeNode {
     excludesAllies?: boolean;
     terrainBurn?: boolean;
     statusSpreads?: boolean;
+    areaStatus?: boolean;
     /** Overwrite, like `shape`. Prefer `allyEffects`: two independent nodes setting this silently race. */
     allyEffect?: { healFraction?: number; buff?: { stat: StatKey; stage: number; ticks?: number } };
     /** APPENDS to `MoveSpec.allyEffects` rather than overwriting — the stacking form. */
@@ -757,6 +864,14 @@ export interface MoveTreeNode {
     statusImmunityAura?: { ticks: number; radius: number };
     /** OR-merge, like a boolean flag being turned on for good once any node sets it — see `selfHeal` above. */
     spawnsRain?: boolean;
+    /** Additive, like `power` — two nodes each widening the front both count, so a build stacks them instead of racing. See `MoveSpec.weatherRadiusBonus`. */
+    weatherRadiusBonus?: number;
+    /** Additive, like `power` — see `MoveSpec.weatherLifespanBonus`. */
+    weatherLifespanBonus?: number;
+    /** Overwrite, like `shape` — a move's rain arrives as exactly one kind of weather, so alternative kinds must sit on one ancestry chain. See `MoveSpec.weatherType`. */
+    weatherType?: WeatherType;
+    /** Overwrite, like `shape`. Restate the whole object (amount/radius). See `MoveSpec.fertilityCeilingBoost`. */
+    fertilityCeilingBoost?: { amount: number; radius: number };
     /** Additive, like `power` — see `MoveSpec.gatherBurst`. Real on any move that already qualifies for one of the gather paths (a `burrow` move for digging, a damage move for canopy harvest). */
     gatherBurst?: number;
   };
@@ -790,6 +905,22 @@ export function resolveShape(shape: MoveShape, origin: Vec2, facing: Direction):
         }
       }
       break;
+
+    case "wave": {
+      // Same perpendicular basis `cone` uses, but the spread is CONSTANT with
+      // depth instead of growing — that constant is the whole difference
+      // between a wave front and a cone.
+      const perp = { x: -forward.y, y: forward.x };
+      for (let depth = 1; depth <= shape.length; depth++) {
+        for (let s = -shape.width; s <= shape.width; s++) {
+          tiles.push({
+            x: origin.x + forward.x * depth + perp.x * s,
+            y: origin.y + forward.y * depth + perp.y * s,
+          });
+        }
+      }
+      break;
+    }
 
     case "ring":
       for (let dx = -shape.radius; dx <= shape.radius; dx++) {
@@ -831,6 +962,12 @@ function growShape(shape: MoveShape, bonus: number | undefined): MoveShape {
       return { kind: "line", length: shape.length + bonus };
     case "cone":
       return { kind: "cone", length: shape.length + bonus, width: shape.width };
+    // A wave grows the way it travels — further out, same frontage. Widening
+    // it instead would make `areaBonus` mean something different on this
+    // shape than on every other one (length for line/cone, radius for
+    // ring/burst): "make it scalar with range of area".
+    case "wave":
+      return { kind: "wave", length: shape.length + bonus, width: shape.width };
     case "ring":
       return { kind: "ring", radius: shape.radius + bonus };
     case "burst":
@@ -1005,6 +1142,7 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       excludesAllies: delta.excludesAllies ?? result.excludesAllies,
       terrainBurn: delta.terrainBurn ?? result.terrainBurn,
       statusSpreads: delta.statusSpreads ?? result.statusSpreads,
+      areaStatus: delta.areaStatus ?? result.areaStatus,
       allyEffect: delta.allyEffect ?? result.allyEffect,
       allyEffects: delta.allyEffects ? [...(result.allyEffects ?? []), ...delta.allyEffects] : result.allyEffects,
       weightScaling: delta.weightScaling ?? result.weightScaling,
@@ -1034,6 +1172,12 @@ export function applyMoveTree(base: MoveSpec, chosenNodeIds: string[]): MoveSpec
       selfHeal: delta.selfHeal ?? result.selfHeal,
       statusImmunityAura: delta.statusImmunityAura ?? result.statusImmunityAura,
       spawnsRain: delta.spawnsRain ?? result.spawnsRain,
+      weatherRadiusBonus:
+        delta.weatherRadiusBonus !== undefined ? (result.weatherRadiusBonus ?? 0) + delta.weatherRadiusBonus : result.weatherRadiusBonus,
+      weatherLifespanBonus:
+        delta.weatherLifespanBonus !== undefined ? (result.weatherLifespanBonus ?? 0) + delta.weatherLifespanBonus : result.weatherLifespanBonus,
+      weatherType: delta.weatherType ?? result.weatherType,
+      fertilityCeilingBoost: delta.fertilityCeilingBoost ?? result.fertilityCeilingBoost,
       gatherBurst: delta.gatherBurst !== undefined ? (result.gatherBurst ?? 0) + delta.gatherBurst : result.gatherBurst,
     };
     if (delta.shape) formShape = delta.shape;

@@ -16,7 +16,7 @@ export interface Vec2 {
  * `maybeInflictStatus` in status.ts). See DESIGN.md's "Status effects"
  * section.
  */
-export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze" | "confusion";
 
 /**
  * Agent-modifying passives — a tree node's effect that permanently changes
@@ -226,6 +226,19 @@ export type TerrainKind =
   | "mud"
   | "shelter"
   /**
+   * Fouled ground — see sludge.ts. Left behind by a Sludge hit: walkable,
+   * not opaque, poisons what stands in it, and lingers on a countdown
+   * (`Tile.sludgeTicksRemaining`) before draining away to bare "floor".
+   *
+   * The tile is temporary; what it destroyed is not. Sludge landing on
+   * flora/food/seedling/bush KILLS the plant, and sludge landing on water
+   * turns that water to "mud" — direct: "Sludge should create a poisonous
+   * tile that kills plants and turns water into mud." So a fouled patch
+   * drains away and leaves behind dead ground and a ruined pond, which is
+   * the visible, diegetic consequence rather than a hidden meter.
+   */
+  | "sludge"
+  /**
    * Direct ask: "Can you collect flint in the cave? I think I want us to
    * be able to grab that in some stone tiles" — a real, visible rock
    * outcrop, not the invisible "floor next to a wall" rule flint
@@ -374,6 +387,9 @@ export interface Tile {
    * burning tile refreshes this rather than stacking.
    */
   burnTicksRemaining?: number;
+
+  /** Ticks of fouling left on a "sludge" tile before it drains back to "floor" — see sludge.ts. */
+  sludgeTicksRemaining?: number;
   /**
    * "bush" tiles only: true if standing here makes an agent harder to
    * detect — a real (not cosmetic) reduction to predation.ts's flee/hunt
@@ -506,6 +522,23 @@ export interface Tile {
    * bricked forever. `undefined`/0 == undamaged.
    */
   groundDegraded?: number;
+  /**
+   * Permanent improvement to this tile's own `fertilityCeiling` — soil
+   * built ON TOP of what the ground type came with, the inverse of
+   * `groundDegraded` above. Only ever raised by a move that carries
+   * `MoveSpec.fertilityCeilingBoost` (Grassy Terrain's tree), applied by
+   * utilityMoves.ts; flora.ts's `fertilityCeiling` folds it in and clamps
+   * the result at loam's own 1.0, so no tile can ever be made richer than
+   * the best natural ground in the world.
+   *
+   * Why this exists at all: `raiseFertility` caps at the tile's ceiling,
+   * and `assignGroundTypes` (worldgen.ts) already writes a rocky tile's
+   * fertility AT its 0.25 ceiling — so before this field, casting a
+   * fertility move on rocky or sandy ground was measurably a no-op, and a
+   * whole lane of a ground-changing move's tree would have been dead
+   * content. `undefined`/0 == the ground type's own ceiling, unchanged.
+   */
+  fertilityCeilingBonus?: number;
   /**
    * "water"/"ice" tiles only: which real body this tile belongs to — see
    * `WaterKind`'s own doc comment. Set once at generation (worldgen.ts's
@@ -756,6 +789,8 @@ export interface PlayerActionOutcome {
   attackedId?: string;
   /** `attack` resolving as a terrain-directed swing (axe/machete) instead — MoveSpec.terrainEffect's own before/after. */
   felled?: { from: TerrainKind; to: TerrainKind; yields?: MaterialId };
+  /** `gather` completing as a waterskin fill instead of a material take — how many charges the waterskin now holds. */
+  filledWater?: number;
   /** `butcher` succeeding: what the corpse actually yielded (capacity-trimmed — see player.ts's own case). */
   butchered?: { itemKey: string; count: number }[];
   /** `usePoultice` succeeding: who got healed (the player's own id, or a bonded follower's) and by how much (post-clamp-to-maxHp, so the UI can say a real number). */
@@ -837,6 +872,17 @@ export interface ItemDef {
    * food item.
    */
   cooked?: { healFraction: number; rapportMultiplier: number };
+  /**
+   * Held: can be filled with water via `gather` at a water source and
+   * drunk from later without being near water — direct ask: "make
+   * waterskin when held, allow gather from water sources and filling it
+   * up." `waterCapacity` is how many drinks a full one holds
+   * (`agent.waterskinCharges`, mirroring `Agent.torchFuel`'s "state lives
+   * on the agent, not the inventory stack" shape). Absent = this item
+   * holds no water (everything except the waterskin).
+   */
+  holdsWater?: boolean;
+  waterCapacity?: number;
 }
 
 /**
@@ -913,6 +959,8 @@ export interface Agent {
   equipment?: { held?: string; worn?: string };
   /** Ticks of burn left in the torch currently held. Ruling: 1000 per torch; at 0 the torch is used up. See player.ts `TORCH_FUEL_TICKS`. */
   torchFuel?: number;
+  /** Drinks left in the currently held waterskin. Same "state lives on the agent, not the inventory stack" shape as `torchFuel`. See player.ts `WATERSKIN_CAPACITY`. */
+  waterskinCharges?: number;
   /** ROADMAP.md M6: crouched reads as half the threat. Player only. See threat.ts. */
   posture?: "crouch";
   /**
@@ -1044,6 +1092,24 @@ export interface Agent {
   fleeingFromId?: string;
   /** Absent = genderless (doesn't seek a mate). */
   sex?: "male" | "female";
+  /**
+   * A wild/NPC human's spawn-time tendency — never set on the player
+   * (`controlledBy === "player"`), whose role is purely earned through
+   * actual play, per HUMANS_DESIGN.md's "roles are inherited/earned, not a
+   * spawn table" decision. This is deliberately the softer promise: a
+   * roll, not a title — it decides starting gear/loadout and which emoji
+   * the renderer picks, nothing more. Direct ask: "can we make humans
+   * spawn with different types... hunter/forager/traveler/merchant/
+   * wanderer." Set once at spawn (immigration.ts, overworld.ts's
+   * `promoteZone`) by `assignHumanArchetype`, never reassigned.
+   *
+   * "Earned confirmation" (a spawn tendency becoming a real, behavior-
+   * backed role) is NOT built — wild humans currently run the same
+   * generic animal behavior tree as every other species (no gather/craft/
+   * trade AI exists for them yet to earn a role from). Flagged as an open
+   * question in HUMANS_DESIGN.md rather than faked.
+   */
+  archetype?: "hunter" | "forager" | "traveler" | "merchant" | "wanderer";
   /** Ticks alive. Absent is treated as already mature (for agents spawned directly into a scenario). */
   age?: number;
   /** Current/max HP. Set from `stats.maxHp` at spawn for combat-capable agents. */
@@ -1524,8 +1590,27 @@ export interface Agent {
   matingRadiusBoostTicksRemaining?: number;
   /** General item slots — simple food units and/or ITEM_DEX entries, each carrying its own weight. Capped by `carryCapacityOf` (support.ts). */
   inventory?: InventoryItem[];
-  /** The id of a fully-fainted ally this agent is currently carrying, if any. Mutually exclusive in practice with `beingCarriedBy` on the same agent. */
+  /**
+   * The id of an ally this agent is currently carrying, if any. Mutually
+   * exclusive in practice with `beingCarriedBy` on the same agent.
+   *
+   * Two kinds of carry share this field, told apart by `ferryLanding`:
+   * absent = the original rescue carry (a fully-FAINTED ally, hauled toward
+   * `homePos` — `applyCarrying`), present = a ferry (a CONSCIOUS herd-mate
+   * being taken across water it cannot cross — `applyFerrying`). One field
+   * on purpose: everything that already has to know an agent is luggage
+   * (`occupancy.ts`, `simulation.ts`, `reproduction.ts`, `needs.ts`'s
+   * action-tick early-out) reads `beingCarriedBy` and is correct for both
+   * without a second concept to keep in sync.
+   */
   carryingId?: string;
+  /**
+   * Where a FERRY is headed: a landing tile the passenger provably cannot
+   * reach on its own (see support.ts's `findFerryLanding`). Present only for
+   * the duration of a ferry, and its presence is what marks `carryingId` as
+   * a ferry rather than a rescue carry.
+   */
+  ferryLanding?: Vec2;
   /** The id of the herd-mate currently carrying this agent, if any. While set, this agent takes no action-tick behavior (see needs.ts) regardless of `fainted`. */
   beingCarriedBy?: string;
   /** The hungry/fainted herd-mate this agent is currently walking a food item to, mid-`deliverFood`. */

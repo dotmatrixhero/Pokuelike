@@ -3,7 +3,8 @@ import type { EventLog } from "./events.js";
 import type { AllyBuff, MoveSpec } from "./moves.js";
 import { resolveAllyEffect } from "./moves.js";
 import { logBehaviorChange } from "./events.js";
-import { stepToward } from "./movement.js";
+import { canStepTo, stepToward } from "./movement.js";
+import { ridesWater } from "./waterBody.js";
 import { tileAt } from "./world.js";
 import { CONSUME_STOCK_AMOUNT, recordGrazing } from "./flora.js";
 import { isNight, isTwilight } from "./daynight.js";
@@ -891,6 +892,11 @@ function dropCarriedAlly(world: World, agent: Agent, reason: "arrived" | "threat
  */
 export function applyCarrying(world: World, agent: Agent, rules: HuntRules | undefined, log?: EventLog): boolean {
   if (!agent.carryingId) return false;
+  // A ferry shares `carryingId` but is a different errand with a different
+  // destination and a CONSCIOUS passenger — `applyFerrying` owns it. Without
+  // this line the `carried.fainted !== true` release two lines below would
+  // drop every ferry passenger on the tick it started.
+  if (agent.ferryLanding) return false;
 
   const carried = world.agents.find((a) => a.id === agent.carryingId);
   if (!carried || carried.alive === false || carried.fainted !== true) {
@@ -921,5 +927,287 @@ export function applyCarrying(world: World, agent: Agent, rules: HuntRules | und
   agent.pos = stepToward(world, agent.layer, agent.pos, home, agent, agent);
   carried.pos = { ...agent.pos };
   carried.layer = agent.layer;
+  return true;
+}
+
+// --- Ferrying (a conscious herd-mate, across water) ---
+//
+// Direct ask, about Surf: "It also allows the unit to carry allies over
+// water." Distinct from the rescue carry above in all three of its parts:
+// the passenger is CONSCIOUS (not fainted), the destination is a LANDING
+// across the water (not `homePos`), and the carrier needs a `watercraft`
+// move (`waterBody.ts`'s `ridesWater`) rather than merely spare capacity.
+// It reuses `carryingId`/`beingCarriedBy` so every existing consumer of
+// "this agent is luggage" is already correct for it — see `Agent.carryingId`.
+
+/** 4-connected offsets for the ferry's reachability floods. Deliberately 4- and not 8-connected: `stepToward` moves orthogonally, so an 8-connected flood would call a diagonal-only gap "reachable" that the carrier cannot actually walk. */
+const FERRY_NEIGHBORS: Vec2[] = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/**
+ * Chebyshev half-width of the box either reachability flood may leave its
+ * start position, and the tile budget that bounds it. The box (21x21 = 441
+ * tiles) is deliberately a little larger than the budget, so open ground
+ * saturates the budget and a real island does not — which is what
+ * `maybeStartFerrying` reads the saturation as meaning.
+ */
+const FERRY_SEARCH_RADIUS = 10;
+const FERRY_SEARCH_LIMIT = 400;
+
+function ferryKey(pos: Vec2): string {
+  return `${pos.x},${pos.y}`;
+}
+
+/**
+ * Flood of the tiles `agent` could walk to from `from` under its own power,
+ * bounded by `FERRY_SEARCH_RADIUS`/`FERRY_SEARCH_LIMIT`. Capacity-blind
+ * (no `mover` passed to `canStepTo`) on purpose: this asks "is there a way
+ * across at all", and a herd-mate standing in a doorway right now is not a
+ * coastline.
+ */
+function ferryReachable(world: World, agent: Agent, from: Vec2, layer: Layer): Set<string> {
+  const seen = new Set<string>([ferryKey(from)]);
+  const queue: Vec2[] = [from];
+  while (queue.length > 0 && seen.size < FERRY_SEARCH_LIMIT) {
+    const cur = queue.shift()!;
+    for (const offset of FERRY_NEIGHBORS) {
+      const next = { x: cur.x + offset.x, y: cur.y + offset.y };
+      if (Math.abs(next.x - from.x) > FERRY_SEARCH_RADIUS || Math.abs(next.y - from.y) > FERRY_SEARCH_RADIUS) continue;
+      const key = ferryKey(next);
+      if (seen.has(key)) continue;
+      if (!canStepTo(world, agent, layer, next)) continue;
+      seen.add(key);
+      queue.push(next);
+    }
+  }
+  return seen;
+}
+
+/**
+ * Somewhere the passenger can be PUT DOWN: a tile it may occupy, and dry.
+ *
+ * The dry part matters. A land agent may legally stand on a large body's
+ * shore ring (that is how it drinks — `canEnterWater`), so without this the
+ * search happily "landed" a ferry on the far bank's wading tile: the
+ * crossing worked, but the passenger was left standing in the lake instead
+ * of on the beach one tile further on. Caught by a test asserting where the
+ * landing actually was, not merely that one existed.
+ */
+function isFerryLanding(world: World, passenger: Agent, layer: Layer, pos: Vec2): boolean {
+  if (tileAt(world, layer, pos.x, pos.y)?.terrain === "water") return false;
+  return canStepTo(world, passenger, layer, pos);
+}
+
+/**
+ * Where a ferry should put this passenger down, or `undefined` for "do not
+ * start one".
+ *
+ * The destination is the passenger's OWN `homePos` side of the water — the
+ * same anchor the rescue carry already steers by. An earlier version aimed
+ * instead at "the nearest tile you could not reach on your own", which is a
+ * true statement about the far bank and a useless goal: measured in a real
+ * ticked world, the carrier landed its passenger on the far shore, and on
+ * the very next tick `maybeStartFerrying` found the NEAR shore was now the
+ * unreachable one and rowed it straight back. Two agents shuttled across a
+ * lake forever. A destination has to be somewhere the passenger is trying to
+ * get to, not merely somewhere it has not been.
+ *
+ * So the rules are:
+ *  - the passenger must have a `homePos` it cannot currently reach (if it
+ *    can walk home, it does not need a lift);
+ *  - the landing must be dry ground the passenger may stand on, outside its
+ *    own reachable area, and STRICTLY CLOSER to home than where it is now.
+ *
+ * That last clause is what makes the mechanic terminate: every completed
+ * ferry strictly decreases the passenger's distance to home, so a chain of
+ * them converges instead of oscillating. The best (closest to home) landing
+ * found inside the carrier's bounded flood wins.
+ *
+ * Both floods are bounded, so a landing far enough around a shoreline to
+ * fall outside the search box can read as unreachable when a very long walk
+ * would in fact get there. That is a deliberate horizon, not an oversight:
+ * an agent that would have to walk 20+ tiles around a lake is one the ferry
+ * is meant to help.
+ *
+ * The built-in control lives here too: a passenger that can already swim
+ * (Water/Flying/`watercraft`) has the carrier's whole water-crossing flood
+ * inside its OWN flood, so nothing is ever outside its reach and this
+ * returns `undefined` without needing a special case.
+ */
+function findFerryLanding(world: World, carrier: Agent, passenger: Agent): Vec2 | undefined {
+  const layer = carrier.layer;
+  const home = passenger.homePos;
+  if (!home) return undefined;
+
+  const passengerReach = ferryReachable(world, passenger, passenger.pos, layer);
+  if (passengerReach.has(ferryKey(home))) return undefined; // it can walk home itself
+
+  const startDistance = manhattan(passenger.pos, home);
+  let best: Vec2 | undefined;
+  let bestDistance = startDistance;
+
+  const seen = new Set<string>([ferryKey(carrier.pos)]);
+  const queue: Vec2[] = [carrier.pos];
+  while (queue.length > 0 && seen.size < FERRY_SEARCH_LIMIT) {
+    const cur = queue.shift()!;
+    for (const offset of FERRY_NEIGHBORS) {
+      const next = { x: cur.x + offset.x, y: cur.y + offset.y };
+      if (Math.abs(next.x - carrier.pos.x) > FERRY_SEARCH_RADIUS || Math.abs(next.y - carrier.pos.y) > FERRY_SEARCH_RADIUS) continue;
+      const key = ferryKey(next);
+      if (seen.has(key)) continue;
+      if (!canStepTo(world, carrier, layer, next)) continue;
+      seen.add(key);
+      queue.push(next);
+      if (passengerReach.has(key)) continue;
+      const distance = manhattan(next, home);
+      if (distance >= bestDistance) continue;
+      if (!isFerryLanding(world, passenger, layer, next)) continue;
+      best = next;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+/** Ends a ferry: the passenger is put down on `at`, both agents' carry state is cleared, and a `setDown` is logged. */
+function landFerryPassenger(world: World, carrier: Agent, passenger: Agent, at: Vec2, log?: EventLog): void {
+  passenger.beingCarriedBy = undefined;
+  passenger.pos = { ...at };
+  passenger.layer = carrier.layer;
+  carrier.carryingId = undefined;
+  carrier.ferryLanding = undefined;
+  log?.record({
+    kind: "setDown",
+    tick: world.tick,
+    carrierId: carrier.id,
+    carrierSpecies: carrier.species,
+    carriedId: passenger.id,
+    carriedSpecies: passenger.species,
+    reason: "arrived",
+  });
+}
+
+/**
+ * Who a carrier will pick up: an adjacent herd-mate, or an adjacent agent on
+ * the other end of a follow bond in either direction (`Agent.followingId` —
+ * ROADMAP.md M6's follower door).
+ *
+ * The follow bond is not decoration here, it is what makes the ferry
+ * REACHABLE AT ALL. `nearbyHerdmates` is species-scoped (`isSameHerd` checks
+ * `a.species === b.species`), so a herd-mate of a Water-typed Surf user is
+ * itself a Water type and can already swim — routed through herd-mates
+ * alone, every candidate would fail the "can it already cross?" test and
+ * this mechanic could never once fire in a real run. A follower is the
+ * engine's existing CROSS-SPECIES ally relation, and a land Pokemon
+ * following a Water one to the edge of a lake is exactly the situation the
+ * ask describes. The herd path stays because it is the right answer for a
+ * land species that knows Surf carrying its own kind.
+ */
+function ferryCandidates(world: World, agent: Agent): Agent[] {
+  const out = nearbyHerdmates(world, agent, ADJACENT_RADIUS);
+  const seen = new Set(out.map((a) => a.id));
+  for (const other of world.agents) {
+    if (other.id === agent.id || seen.has(other.id)) continue;
+    if (other.alive === false || other.layer !== agent.layer) continue;
+    if (manhattan(other.pos, agent.pos) > ADJACENT_RADIUS) continue;
+    if (other.followingId !== agent.id && agent.followingId !== other.id) continue;
+    out.push(other);
+  }
+  return out;
+}
+
+/**
+ * A `watercraft` carrier picks up an adjacent, conscious, land-bound ally
+ * that is stuck on ground it cannot leave, and commits to taking
+ * it to a landing it could not reach on its own.
+ *
+ * Every one of the skip conditions below exists to keep this from firing
+ * where it would do nothing: an ally that can already cross water needs no
+ * boat, an ally too heavy for the carrier's spare capacity cannot be lifted
+ * (the same `remainingCarryCapacity` gate the rescue carry uses), and an
+ * ally with no unreachable landing nearby has nowhere to be taken.
+ */
+export function maybeStartFerrying(world: World, agent: Agent, log?: EventLog): boolean {
+  if (!ridesWater(agent)) return false;
+  if (agent.carryingId || agent.beingCarriedBy || agent.fainted || agent.isEgg) return false;
+
+  for (const ally of ferryCandidates(world, agent)) {
+    if (ally.fainted || ally.beingCarriedBy || ally.carryingId || ally.isEgg) continue;
+    // Already amphibious under its own power — nothing to ferry it over.
+    if (ridesWater(ally) || ally.types?.includes("water") || ally.types?.includes("flying")) continue;
+    if (remainingCarryCapacity(world, agent) < bodyWeightOf(ally)) continue;
+
+    const landing = findFerryLanding(world, agent, ally);
+    if (!landing) continue;
+
+    agent.carryingId = ally.id;
+    agent.ferryLanding = landing;
+    ally.beingCarriedBy = agent.id;
+    log?.record({
+      kind: "carrying",
+      tick: world.tick,
+      carrierId: agent.id,
+      carrierSpecies: agent.species,
+      carriedId: ally.id,
+      carriedSpecies: ally.species,
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Continues an in-progress ferry: the carrier walks toward its landing with
+ * the passenger's position mirroring its own (same as `applyCarrying`), and
+ * sets the passenger down the moment it arrives. Returns true only when the
+ * ferry was this tick's action.
+ *
+ * Unlike `applyCarrying` this does NOT drop its passenger for a nearby
+ * predator. Dropping a land Pokémon mid-lake would put it on a tile it
+ * cannot occupy, which is a worse outcome than carrying it clear — the
+ * rescue carry can bail because its passenger is always on ground it could
+ * already stand on.
+ */
+export function applyFerrying(world: World, agent: Agent, log?: EventLog): boolean {
+  const landing = agent.ferryLanding;
+  if (!agent.carryingId || !landing) return false;
+
+  const passenger = world.agents.find((a) => a.id === agent.carryingId);
+  if (!passenger || passenger.alive === false) {
+    if (passenger) passenger.beingCarriedBy = undefined;
+    agent.carryingId = undefined;
+    agent.ferryLanding = undefined;
+    return false;
+  }
+
+  if (agent.pos.x === landing.x && agent.pos.y === landing.y) {
+    landFerryPassenger(world, agent, passenger, landing, log);
+    return false;
+  }
+
+  logBehaviorChange(log, world, agent, "carryAlly");
+  agent.behavior = "carryAlly";
+  const next = stepToward(world, agent.layer, agent.pos, landing, agent, agent);
+  if (next.x === agent.pos.x && next.y === agent.pos.y) {
+    // Wedged. Put the passenger down on any tile it can actually occupy
+    // rather than hold it hostage; if there is no such tile the carrier is
+    // mid-water, so keep hold of it and try again next tick.
+    const spot = [agent.pos, ...FERRY_NEIGHBORS.map((o) => ({ x: agent.pos.x + o.x, y: agent.pos.y + o.y }))].find((p) =>
+      canStepTo(world, passenger, agent.layer, p)
+    );
+    if (spot) {
+      landFerryPassenger(world, agent, passenger, spot, log);
+      return false;
+    }
+    return true;
+  }
+
+  agent.pos = next;
+  passenger.pos = { ...agent.pos };
+  passenger.layer = agent.layer;
   return true;
 }

@@ -8360,6 +8360,51 @@ Two smaller things worth remembering, both measured:
   by injecting one. Folding it into `check-proposed-trees.ts` would be the
   natural next step.
 
+## Round seven shipped: Rain Dance and Grassy Terrain — four defects the build found
+
+Both are live at 45 nodes. Full writeup, tables and live verification in
+MOVES_DESIGN.md's "Round seven SHIPPED" section. Four things it turned up in
+EXISTING code, none of them caused by these trees, all measured:
+
+- **A species that knows two utility moves only ever uses the first.**
+  `maybeUseUtilityMove` (utilityMoves.ts) returns on the first eligible move
+  in movepool order. Oddish knows Growth before Grassy Terrain, so Grassy
+  Terrain fired **0 times in 1,500 ticks** with both in hand. The in-combat
+  half already picks the best candidate rather than the first
+  (`combatUtilityValue`); the out-of-combat half never got the same fix.
+
+- **`mateDrive` locks a healthy adult out of every utility move.**
+  `chooseBehavior` returns `"idle"` only while every need is satisfied, and
+  `mateDrive` climbs to 1 and stays there until an agent mates — urgency 0.5
+  against an idle threshold of 0.3. Measured: 3-23 free uses per 1,500 ticks
+  against 55-110 when the same call is driven on a cadence. Affects Growth,
+  Agility, Harden, Roost, Safeguard, all of them.
+
+- **Both moves unlock at or above the population's p99 level.** Dratini 45,
+  Oddish 44, Gyarados 51, Gloom 51, Vileplume 51, Dragonair/Dragonite 53,
+  against a measured live distribution of p50 27 / p90 37 / p99 52 / max 52
+  (3 seeds x 4,000 ticks). Ninety nodes of tree sit behind that. A curated
+  unlock level would fix it and is a balance call, so it is logged here
+  rather than taken.
+
+- **Purchase order can DOWNGRADE an overwrite ladder, seen live.** A real
+  rolled Dratini build took *One Sky* (`statusImmunityAura` 120/r5) via the
+  bridge route, then later bought *Shared Shelter* (60/r3) from earlier on
+  the same chain, and finished with 60/r3. The "one ancestry chain per
+  overwrite field" rule assumes purchase order follows ancestry; a bridge
+  breaks that. Every shipped ladder has the same exposure. The fix is a
+  strongest-wins resolver for `selfHeal`/`statusImmunityAura`/
+  `fertilityBoost`/`drainNeeds`/`matingRadiusBoost`, matching what
+  `statChangesOnHit`/`allyEffects` already do.
+
+Also worth remembering from this round: **`fertilityBoost` moves nothing at
+all on a freshly generated map** — 0 of ~9,200-10,400 land tiles on each of
+three seeds, because worldgen writes every non-loam tile's fertility AT its
+own ceiling and loam reads `undefined` as 1. The new `fertilityCeilingBoost`
+(MoveSpec + `Tile.fertilityCeilingBonus` + flora.ts's
+`raiseFertilityCeiling`, clamped at loam's 1.0) is the lever the round-six
+TODO entry above asked for, and it closes that entry's second bullet.
+
 ## Side note from the master merge: runner reaches into web's source
 
 `packages/runner/src/rollBuilds.ts` deep-imports `describeMoveTreeNode` and
@@ -8717,6 +8762,112 @@ finding (order-dependent tests mean some shared state is leaking
 somewhere — possibly `Math.random` used unseeded in a test that doesn't
 pass its own `rng`), just not one worth chasing mid-task; flagging for
 whoever next has reason to look at `simulation.test.ts`.
+
+## Built: wild human archetypes (spawn tendency, gear, tool-moves, emoji) — see DESIGN.md/HUMANS_DESIGN.md
+
+- [x] Direct ask: "can we make humans spawn with different types... hunter
+      (weapons)/forager/traveler/merchant/wanderer, sex should affect
+      emoji, items lootable when fainted." Built the full visible slice:
+      `Agent.archetype`, real starting gear from the existing `ITEMS`
+      catalog, real tool-granted moves (needed closing a real plumbing gap
+      — `world.items`/`playerBaseMoves` were only ever wired into the two
+      player scenarios, never the general overworld path — user chose
+      "build the plumbing too" over shipping inert tool-moves), and
+      per-archetype+sex emoji in the renderer. Verified via a real,
+      permanent runner script (`validateHumanArchetypes.ts`, 200 rolls,
+      asserts all 5 archetypes appear, hunter's knife actually grants
+      Scratch, player stays untouched) since natural immigration is far too
+      rare to wait on (0 wild humans in a real 3x8000-tick run). Full
+      engine (1443) and data (387) suites green, all three packages
+      typecheck/build clean.
+
+## Side notes / open, not done this round
+
+- [ ] **Earned archetype confirmation is NOT built.** Wild humans have no
+      dedicated behavior AI at all (same generic tree as every other
+      species) — nothing to earn a role from yet. See HUMANS_DESIGN.md's
+      open question 7.
+- [ ] **`ItemDef.capacity` (forage pouch's `capacity: 8`) is dead data.**
+      `carryCapacityOf` (support.ts) only ever reads `agent.maxHp` — an
+      inventory item's own `capacity` field is never read anywhere. Found
+      while picking forager's starting gear; not fixed, since it's a
+      pre-existing gap unrelated to this ask.
+- [ ] **No trading mechanic exists.** Merchant's starting "trade goods"
+      (fiber/cordage) are real, lootable items, but there is no actual
+      trade action/UI yet — merchant is cosmetically distinct only, same
+      as forager/traveler today (nobody but the player has gather/equip/
+      craft actions to act on their gear with).
+- [ ] Visual emoji rendering (archetype + sex, renderer.ts) was NOT live-
+      verified in a real browser session this round — forcing a wild
+      archetype human onto screen would need a debug-injection hook that
+      doesn't exist. Confirmed instead via direct function-level tests
+      (real emoji string picked per archetype/sex) and a clean `vite
+      build`. Said plainly rather than claimed as seen.
+
+## Finding: utility moves are unreachable for some species, not all
+
+Surfaced while building the status trees, confirmed against
+`validateUtilityMoves.ts` on a real run:
+
+| species | utility uses |
+|---|---|
+| ivysaur | growth 68, leech_seed 44 |
+| bulbasaur | growth 13, leech_seed 6 |
+| pidgeot | roost 3 |
+| fearow | agility 1 |
+| squirtle | withdraw 1 |
+| **pidgeotto** | **0** |
+| **chansey** | **0** |
+
+Not a balance spread — a structural one. There are exactly two ways a utility
+move ever fires, and a species can miss both:
+
+1. **Out of combat** (`needs.ts`) requires `chooseBehavior(needs) === "idle"`
+   and then a 15% roll. A grazer idles constantly; a bird measured `idle` on
+   **30 of 33,597 alive-ticks (0.09%)**.
+2. **In combat** (`predation.ts:1303`) is called with the ATTACKER only, then
+   rolls 20%. A species that does not initiate fights never reaches it — a
+   DEFENDER cannot spend an action bracing, healing or warding, which is
+   precisely when a defensive status move is worth using.
+
+So Roost, Withdraw, Defense Curl and Safeguard can be fully specced and
+almost never fire on the species that learn them. That is the
+unreachable-content rule, and it is worth deciding on rather than tuning
+quietly. Options, in order of how much they change:
+
+1. **Let the defender use one too.** The narrowest fix and the one that most
+   matches what these moves are FOR — bracing is a defensive act. One extra
+   call site.
+2. **Loosen the out-of-combat gate** from strict `idle` to "no urgent need",
+   so a bird between errands can preen.
+3. **Raise the rolls** (15% / 20%). Cheapest, least targeted, and does nothing
+   for a species that reaches neither gate.
+
+Not acted on — the shape of the fix changes how these species behave, which
+is a design call.
+
+## Defect: `matingRadiusBoost.multiplier` is inert
+
+Found while building the status trees, confirmed at both call sites (not a
+probabilistic thing — the field is simply never read):
+
+- `utilityMoves.ts` stores only the duration: `agent.matingRadiusBoostTicksRemaining = move.matingRadiusBoost.ticks`.
+- `reproduction.ts`'s `mateSearchRadius` returns `base * MATING_RADIUS_BOOST_MULTIPLIER`, a flat `2`.
+
+So every declared multiplier delivers exactly ×2. Growth ships three nodes at
+**1.6, 2.2 and 3.0** — the 1.6 node quietly over-delivers, the 3.0 node
+under-delivers by a third, and the atlas prints "×3 mate-search radius" for
+something that gives ×2. The two new Safeguard/Withdraw nodes were written as
+`2` so at least their labels are honest.
+
+Not fixed, because either repair is a balance change:
+1. **Read the field.** Labels become true; Growth's capstone gets a real buff
+   (2 → 3) and its opener a real nerf (2 → 1.6).
+2. **Drop `multiplier` from the type** and let the flat constant be the rule.
+   Nothing changes in play; three node descriptions get rewritten.
+
+I'd take 1 — an advertised number that does nothing is the same class of
+defect as unreachable content — but it moves real numbers, so it is yours.
 
 ## Measured: the dispersal offer's "the sim already correlates the two" claim — false in practice
 
@@ -10318,3 +10469,366 @@ suite (established convention this session: typecheck + build + live
 Playwright verification for UI-only changes) — all four fixes plus the
 AOE preview were exercised live in a real browser session, not just
 read from the diff.
+
+## Built: wild humans feel like a threat despite weak stats, plus valuable loot — see DESIGN.md
+
+- [x] Direct ask: "make the humans feel a little more like a threat
+      despite having weak stat blocks. plus having valuable loot." Widened
+      the player-only threat-signature system (`threat.ts`) to any human —
+      an armed wild hunter now gives nearby prey the same real flee-radius
+      bump an armed player does, purely from held/worn gear, no stat
+      retuning. Hunter's weapon is now a weighted roll (flintKnife/club
+      common, machete uncommon, axe rare) using the crafting table's own
+      real cost ladder as the rarity signal; merchant gets a real 30%
+      chance at a bonus finished item on top of its trade goods. Verified:
+      full suites green (engine 1533/1533, data 468/468), all packages
+      typecheck/build clean, `validateHumanArchetypes.ts` rewritten (400
+      rolls) to assert the weapon→move mapping, the weapon-tier
+      distribution, the merchant bonus rate, and that an armed hunter's
+      threat signature actually reads above baseline while an unarmed
+      wanderer doesn't.
+- [ ] **Making a hunter an actual predator of other creatures was NOT
+      built.** `HUNT_RULES` is a static species-wide table
+      (`SPECIES.isPredator` at module load), not a per-agent flag —
+      setting `agent.isPredator` on one wild human instance does nothing.
+      Making hunters real hunters would mean either flagging the whole
+      `human` species predator (too broad) or restructuring
+      `isHunterSpecies`/`HUNT_RULES` to take a per-agent override — a
+      bigger, separate change if wanted later.
+- [ ] The threat-signature widening was verified at the function level
+      (`threatSignatureOf` directly), not with a fresh live-tick scenario
+      watching real prey flee farther from an armed wild hunter than an
+      unarmed wanderer in an actual running sim. The underlying formula
+      was already live-validated for the player (`validateBond.ts`); that
+      specific live check was not re-run for a wild human this round.
+
+## Built: waterskin (real mechanic), bedroll, coin pouch — see DESIGN.md
+
+- [x] Direct ask: "any other flavorful items that are not for combat to
+      add to them? ... waterskin, bedroll, coin pouch. can you also make
+      water skin when held, allow 'gather' from water sources and filling
+      it up." Waterskin has a real mechanic (fill via `gather` near water,
+      drink away from water using charges — 3 per fill, known-at-start
+      recipe). Bedroll and coin pouch are pure flavor/loot, no mechanic,
+      as scoped — coin pouch deliberately has no recipe (loot-only, no
+      economy to spend it in). Forager holds the waterskin, traveler
+      carries the bedroll, merchant carries the coin pouch (guaranteed).
+      Verified live: new `validateWaterskin.ts` drives the real
+      `applyPlayerAction` against a real generated scenario end to end
+      (fill, cap, drink-away-from-water, drain, regression checks) — all
+      pass. Full suites green (engine 1533/1533, data 468/468).
+- [x] **Real gotcha found and fixed while building the live test, not
+      swept under.** The first version of `validateWaterskin.ts` placed
+      water directly next to the player to test the fill fallback, but
+      that also satisfied `harvest.ts`'s separate "lichen grows near
+      water" rule (underground only) — `gather` silently picked up lichen
+      instead of filling the waterskin, and the test's own assertion
+      caught it (0 charges instead of 1). Fixed by moving the test to the
+      surface layer, where that rule doesn't apply.
+
+## Built: humans render as real trainer sprites — see DESIGN.md
+
+- [x] Direct ask: "Wow they have animations too... Do trainer to human
+      including player." Ripped 6 characters (72 frames) out of the
+      never-touched `trainer sprites.png` into real per-archetype art, plus
+      the player's own character. Extractor kept at
+      `packages/web/scripts/rip_trainer_sprites.py` — the previous rips'
+      scripts were never checked in, which is why this sheet's layout had to
+      be re-derived from scratch. Emoji kept as a load-time fallback.
+- [x] **Two real mistakes caught by looking, not by the build**: a fixed
+      96x128 grid bled neighbouring backgrounds into frames as stray lines
+      (the sheet's grid drifts by a pixel or two per row), and a
+      "brightest pixels are the face" heuristic silently dropped 41 of 80
+      characters. Both fixed; both written up in the script and DESIGN.md.
+- [ ] **Walk frames are on disk but not yet animated.** Each character has
+      `_1`/`_2` step frames alongside the standing pose; nothing reads them
+      yet. Doing it properly means re-ripping the Pokemon sheet with its
+      frames too, so creatures and humans animate alike — otherwise humans
+      would be the only things that walk.
+- [ ] Still no debug hook to force a wild human on screen, so the
+      per-archetype sprites are verified as correct files + a total mapping,
+      not watched live. Same gap flagged last round.
+
+## Built: tile art for all 15 crops — see DESIGN.md
+
+- [x] Direct ask: "Add crops." Eleven crops had no art and rendered as
+      coloured letters, four of them cooking ingredients. All 15 CROP_IDS
+      now have real tiles; extractor kept at
+      `packages/web/scripts/rip_crop_tiles.py`. Verified live: the browser
+      fetched three of the *new* crop tiles (200) while rendering.
+- [x] Pumpkin was re-picked after the first choice read as a flowering
+      plant rather than a gourd — misleading art is worse than a glyph.
+- [ ] Rice, groundnut and potato are the closest available shape on a
+      berry-plant sheet rather than exact matches. Fine at tile size, worth
+      revisiting if a real crop sheet ever turns up.
+
+## Built: canvas fidelity — smoothing off, oversized textures windowed
+
+- [x] Direct report: "Are the pixels getting super ugly compressed when
+      rendered? I think we are losing a lot of fidelity." Two faults:
+      `imageSmoothingEnabled` was never set false on the main canvas (only
+      on the macro map), and 128px/144px surface textures were being
+      squashed whole into 20px tiles every frame. Both fixed; before/after
+      shows visibly sharper water and shorelines.
+- [x] **The "square and ugly" complaint is fixed** — see the biome section
+      below. Both offenders listed here turned out to be real, and two more
+      were found while measuring.
+- [ ] Sources between 1x and 2x the tile (water/sand at 32x32, floor_stone
+      at 32x26) still resample 32->20, now with smoothing off, so they
+      point-sample. Cleanest fix is an offline one-time area-resample to
+      exactly 20px, but the water EDGE strips are cropped by math that may
+      assume a 32px source — check that before touching them.
+
+## Built: all 151 Pokemon re-ripped with walk frames — see DESIGN.md
+
+- [x] Direct ask: "Do the Pokémon too. And make sure they aren't compressed."
+      1208 frames (151 species x 4 facings x 2 frames) from the never-touched
+      `kanto sprites.png`, at native 32x32 drawn 1:1. Extractor kept at
+      `packages/web/scripts/rip_pokemon_frames.py`.
+- [x] **Not compressed, confirmed by measurement**: shipped sprites were
+      already native 32x32 drawing at exactly 1:1. The real blur was the
+      canvas filter fixed in the previous commit.
+- [x] **Found a real pre-existing bug**: `nidoranf` was showing Sandslash art
+      and `sandslash` was showing Sandshrew — an off-by-one in the old rip,
+      proven by exact pixel match. Fixed by the re-rip.
+- [x] Two wrong mapping approaches were caught and thrown away (a computed
+      grid pitch, then a greedy assignment that put Arcanine on Venusaur's
+      block) before landing on the verified dex formula. Both written up.
+- [ ] Only the 2 mislabels above are *proven*. Others in that stretch looked
+      wrong by eye but their old art came from a different sheet, so they
+      can't be proven the same way — worth a look if any species seems off.
+- [ ] Walk cycle is 2 frames (stand/step). The trainer sheet has 3 frames per
+      facing, so humans could use a richer cycle than Pokemon currently do.
+
+## Fixed: nearest-neighbour downscale was deleting 1 pixel row in 5 — see DESIGN.md
+
+- [x] Direct report: "Krabbys left eye is missing a black pixel...?" The
+      #scene canvas is 1800x1200 shown at 1440x960 (0.8) with
+      `image-rendering: pixelated`, so nearest-neighbour deleted every 5th
+      row/column and one-pixel features vanished. `setZoom` now uses
+      `pixelated` only at/above 1:1 and `auto` below it.
+- [x] Confirmed the renderer is lossless: dumping the canvas at true 1:1
+      shows `kingler_down` drawn with 251/251 opaque pixels byte-identical to
+      the source PNG. The loss was purely the final CSS scale.
+- [x] Method: `page.screenshot()` captures the CSS-scaled view, so every
+      screenshot this session was an 0.8 downscale. Use
+      `canvas.toDataURL()` for true-resolution checks.
+- [ ] **Game-feel call, not taken:** below 1:1 the map is now softer rather
+      than losing pixels. Perfect crispness at all times would mean never
+      scaling below 1:1 — default zoom 100%, or snapping zoom to whole ratios
+      (1x/2x) — at the cost of fitting less world on screen. Your call.
+
+## Built: biome art dissected and layered — see DESIGN.md
+
+Direct ask: *"Then like biomes need work too. All our tile maps are so square
+and ugly. The biome png art is so beautiful. It uses advanced techniques to
+avoid the ugly tiling repetition. Can we separate out layers and kinda use
+decals and shit"* then *"Yeah, let's do biomes. I want you to use the art from
+the biomes. Dissect it and make it good quality"*.
+
+- [x] `packages/web/scripts/rip_biome_ground.py` — the sheet is 14 pre-composed
+      128x320 scene panels on an internal 16px grid, not a tileset. Produces
+      `public/tiles/ground/*.png` (9 multi-tile ground patches) and
+      `public/tiles/decal/*.png` (15 transparent scatter decals).
+- [x] **Measured finding that reframed the job:** the source art does NOT
+      avoid tiling repetition with base variety. Its grass, water and cave
+      ground are each ONE 16x16 tile repeated, byte-identical (1 distinct cell
+      out of 15/14/53 clean ones). Only dirt (14), stone (16), field (31) and
+      snow (6) have real multi-tile variety. What makes the panels read as
+      non-repeating is the SCATTER layer and irregular non-grid boundaries.
+- [x] Grassland and forest were resolving to `floor_cave_2` — a cave floor. The
+      whole overworld rendered gray-brown. Real grass art now exists for them.
+- [x] Four separate causes of the rectangular look, all found by measuring a
+      live frame rather than by reading code:
+      1. One 16x16 crop stamped per tile -> world-space windowing into a 6x6
+         patch, so neighbouring tiles draw neighbouring source pixels.
+      2. `featheredOverlayStamp` decals masked to exactly one tile at the tile
+         origin -> replaced by an off-grid scatter pass at hash-jittered
+         sub-tile offsets, run after every base is down.
+      3. Per-tile elevation shading, quantising a smooth field into flat
+         plateaus (two adjacent regions measured 231,224,182 and 195,182,141 —
+         a uniform 0.84 multiply with a hard rectangular edge) -> one
+         map-sized bilinear wash.
+      4. A mosaic of tonally different source cells is itself a checkerboard.
+         Cells within a panel differ in mean colour by up to 15 (sand), 30
+         (dirt), 43 (field) — the rip now keeps only same-tone cells.
+- [x] **Shorelines.** Two per-tile attempts failed and are written up in the
+      code: full squares give a literal staircase; rounded/inset per-tile
+      shapes fix lakes but turn a diagonal river into circles — with gaps
+      ("the rivers have holes in em") or, once bridged, beads ("Looks like
+      train tracks. Not contiguous.."). No per-tile rule can work, because two
+      diagonal tiles share a point, not an edge. Now the whole water mask is
+      rasterised one pixel per tile, bilinearly upscaled and thresholded, so
+      any two touching tiles connect and the outline is smooth.
+- [x] Measured the world to answer *"Is that supposed to be water?"* — yes.
+      90x60 surface, **43.8% water**, 2364 tiles; 1426 have all four
+      orthogonal neighbours water (big bodies), and 44 have none, 43 of which
+      are diagonal-only. The diagonal chains are real terrain, not a render
+      artifact.
+- [x] **Regression I shipped, now fixed:** `tileWindow` decided "is this a
+      tiling surface?" from image size alone, and `tree_6` (48x55) and
+      `tree_7` (48x57) clear the 2x-tile threshold — so two of seven tree
+      variants rendered as a random 20x20 crop out of the middle of a tree.
+      Direct report: "The trees are kina incorrectly cropped there." Now gated
+      on terrain kind (`mud`, `wall`), not size.
+- [x] **Decal cutouts, two reported faults, both fixed and re-verified at 8x
+      zoom on a checkerboard:** "Some are transparent in the wrong spots" —
+      the alpha key punched holes wherever a decal's own colour matched the
+      ground, fixed by a border-connected flood fill (with a size cap, since
+      reeds and moss ring most of their own crop). And small opaque fragments
+      of neighbouring scenery clipped at the crop border are now dropped.
+- [x] Dropped the mushroom decals — "the mushroom decals are a little messy".
+      Panel 3's mushrooms are drawn in PERSPECTIVE, caps seen from the side on
+      long stems. The cutout was fine; the art is side-on and the map is
+      top-down. Replaced with flowers and tufts from panel 10.
+- [x] Water animation is now one global frame tiled as a pattern instead of a
+      per-tile phase. The per-tile phase was its own grid artifact — open
+      water shimmered in squares.
+- [ ] **Render perf is ~8-10 fps in headless software Chromium**, before and
+      after this work (baseline paused 8.2 / after 10.0; max sim speed 6.8 ->
+      5.8). Not a regression, but the 1800x1200 canvas is not cheap; worth a
+      look on real hardware.
+- [ ] `field` (the farm panel's gold crop ground) is ripped but unused —
+      savanna keeps `sand` plus its gold tint, because `field` reads as an
+      agricultural field, furrow dashes and all.
+- [ ] Ground-type (soil) tints still paint hard per-tile rectangles. Measured
+      at ~4% brightness difference, so it is mild, and it is the deliberate
+      "mechanics visible on the map" feature — softening it is a design call,
+      your shout.
+- [ ] Lily-pad decals are in the mangrove pool but land on GROUND, not on
+      water — the water layer draws over the ground pass. Lily pads on open
+      water would need their own pass after `drawWaterLayer`.
+- [ ] `bush_3` (the palm) has an opaque background block behind it from an
+      older rip — not touched here.
+- [ ] Fog-of-war in play mode still has hard tile-square edges; the same
+      smoothed-mask trick `drawWaterLayer` uses would fix it.
+
+## Built: plants stop being squashed, and the black bars were a sheet grid line
+
+Direct asks: *"can you make the berries and the decal they are on better?"*,
+*"The black lines are problematic too"*, *"You see the straight lines around the
+tiles with berries on em?"*
+
+- [x] **Every standing object was squashed into a 20x20 box.** Berry plants are
+      21x34 and trees are 32x42/48x57, so all of them were vertically
+      compressed by about a third and read squat. `drawStandingSprite` now fits
+      width to the tile, keeps the source aspect, and anchors the base on the
+      tile's bottom edge (capped at 1.7 tiles tall). Tiles draw top-to-bottom,
+      so the overflow lands on rows already painted.
+- [x] **The fertile patch was a flat saturated green rectangle.** `floor_grass_1`
+      is a solid bright green with a dot pattern, so a berry's soil mound sat on
+      it like a plant in a tray. It now uses the real `grass_deep` ground art,
+      windowed in world space, with a rounder and softer mask.
+- [x] **The black bars were a black top row baked into every `seedling_*.png`** —
+      a 1px sheet grid rule the original rip cropped in. Squashed into 20px it
+      passed for part of the sprite; drawn at true aspect it became a crisp
+      black bar one tile wide floating above every seedling. 47 of them in one
+      frame, now 0.
+- [x] Method worth keeping: the bars were found by monkey-patching
+      `fillText`/`drawImage`/`fillRect` on the scene canvas for ONE frame,
+      dumping the canvas in the same evaluate, and correlating the artifact's
+      pixel coordinates with the draw that produced them. Four guesses from
+      reading the code (highlight boxes, move flashes, a missing emoji glyph,
+      the fertile stamp) were all wrong, and two of them were disproven by
+      disabling the code and re-counting the artifact.
+- [x] `scripts/strip_sheet_gridlines.py` erases solid-black opaque edge rules
+      from ripped tiles. Idempotent; also caught a left-edge rule on
+      `food_cheri.png`. The seedlings' own rip script was never committed, which
+      is why this is a separate maintenance pass rather than a fix in the rip.
+- [ ] Some berry sprites' soil mounds read as hard brown rectangles rather than
+      rounded mounds — likely the same class of rip artifact, not checked.
+
+## Fixed: lattice rivers, and the trainers were moonwalking
+
+- [x] **Lattice rivers were a worldgen defect, not a rendering one.** Direct
+      report: "You have the shitty lattice rivers." Steepest descent searches
+      all 8 neighbours, so rivers routinely step diagonally — and two tiles on
+      a diagonal touch only at a corner. `carveRiverWidening` then carved a
+      second tile *perpendicular to the flow*, which for a diagonal flow is
+      itself diagonal, so a diagonal reach came out as two parallel diagonal
+      chains with the land between them untouched.
+- [x] Fix: a diagonal step now carves a corner connector — the lower of the
+      two tiles sharing an edge with both the current tile and the next —
+      instead of the perpendicular widening. Orthogonal steps keep the old
+      widening, which was already fine.
+- [x] Measured over 8 seeds with `validateRiverConnectivity.ts`:
+
+      | | before | after |
+      |---|---|---|
+      | diagonal-only water tiles | 254 | 3 |
+      | land tiles enclosed by water | 90 | 8 |
+      | total water tiles | 21279 | 21277 |
+
+      Water volume is the control: essentially unchanged, so this connected
+      the channels rather than flooding the map.
+- [x] This was never only cosmetic. An enclosed land tile is a one-tile island
+      a walker can be stranded on, and a channel connected only at its corners
+      is not swimmable end to end.
+- [x] **Trainers moonwalked** — direct report: "the trainer is moonwalking. I
+      think its facing left and right sprites have to be switched."
+      `getSprite` applies a global left/right swap, correct for the Pokemon
+      sheet (whose `_left`/`_right` files are genuinely mislabelled), but the
+      trainer rip classifies each frame's facing from its own pixels and
+      writes the file under the direction it actually depicts. The swap was
+      flipping correct labels. Now scoped to non-`human_` keys.
+- [x] Verified at 9x on a checkerboard before changing anything: `pikachu_left`
+      has its face on the image's RIGHT (mislabelled), `human_hunter_left` has
+      its face on the LEFT (correct). Then verified live: ArrowRight moves the
+      player x50 -> x56 and loads `human_player_right.png`; ArrowLeft moves to
+      x44 and loads `human_player_left.png`.
+- [ ] **Mud is real art but reads as a flat slab**, answering "Are mud tiles
+      just a buncha flat squares?" `mud.png` is a real 128x128 texture, and
+      mud is one of only two terrains (with `wall`) that get a per-tile window
+      rather than being squashed — so it is not a flat fill. But the texture
+      is one brown with sparse 1px speckles and no structure, so it reads flat
+      anyway, and its boundary against sand/floor is a hard 90-degree tile
+      step: `drawBiomeEdgeBlend` only blends BIOME grounds, and mud is a
+      terrain. Two things would fix it: mine a real marsh/mud texture off the
+      biome sheet's marsh panel (it has proper bank art), and give terrain
+      grounds the same world-space windowing and edge blending the biome
+      grounds now get. Not done — your call on whether it's worth it.
+- [ ] Mud also does not appear on a default map at all: it comes from drought
+      drying a water tile, a Sludge hit, or mangrove generation. A fresh world
+      at tick 90 has zero mud tiles, so this was checked by painting a patch
+      into a live world.
+
+## Built: one ground texture per biome, plus a sparse landmark layer
+
+Direct ask: *"Mine stuff for all our biomes. Our like wetlands or whatever look
+great. The rest are struggling."*
+
+- [x] **`grass` and `grass_deep` were BYTE-IDENTICAL**, so jungle rendered
+      exactly like grassland. Found by diffing the emitted patches against each
+      other, not by looking at them — the seeds were different, the output was
+      not. The rip script now refuses to emit two identical grounds.
+- [x] **`wetland` had no entry at all** in either `BIOME_GROUND` or
+      `BIOME_SCATTER`, so it fell through to the cave floor.
+- [x] Twelve biomes now have twelve distinct grounds, each seeded off a
+      measured tone in the sheet: grass / grass_forest / grass_deep / marsh /
+      dirt / shore / sand / clay / grass_dry / stone / frost / snow.
+- [x] **The seed pixel now actually decides the tone.** `same_tone` re-anchored
+      on the panel's most populous cluster, so a seed aimed at warm highland
+      rock drifted to the panel's cool grey and highland came out identical to
+      tundra. The seed is the anchor now.
+- [x] Two mis-seeded targets caught by eye at the contact-sheet stage, both
+      "low contrast" but not ground: jungle's first seed sampled hedge CANOPY,
+      and mangrove's sampled a cave WALL.
+- [x] New sparse FEATURE layer (`BIOME_FEATURES`, `FEATURE_ONE_IN = 47`):
+      cactus x2, palm, boulder, cattail, fallen log. Separate from the fine
+      scatter because size and density are coupled — a three-tile cactus at
+      one-in-seven reads as a hedge.
+- [x] **Regression I introduced and fixed in the same pass:** routing `sand`
+      TERRAIN through the ground patch put it in the tile loop, which runs
+      AFTER `drawElevationShade` — so every sand tile kept full brightness
+      while its surroundings were shaded, a scatter of pale squares. Moved
+      into the ground pass. Unshaded-bright pixels in a frame: 28690 -> 53.
+- [ ] **The default scenario map only contains 3 biomes** (beach 83%, jungle,
+      forest), which is why everything looked sandy for several rounds. Across
+      40 seeds every biome shows up somewhere, so this is that seed, not the
+      generator — but it does make the default world a poor advertisement for
+      the biome system. Worth picking a richer default seed.
+- [ ] The `#seed-input` control does not appear to change the generated world
+      from a script (set value + input/change events, then Watch) — every seed
+      produced the same 3-biome map. Not chased down; it blocked capturing the
+      other 9 biomes on screen, which were verified by data + contact sheet
+      instead of live render.

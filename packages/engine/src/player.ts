@@ -159,16 +159,35 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       return true;
     }
     case "drink": {
-      if (!waterWithinReach(world, agent)) return false;
-      consume(agent.needs, "seekWater");
+      if (waterWithinReach(world, agent)) {
+        consume(agent.needs, "seekWater");
+      } else if ((agent.waterskinCharges ?? 0) > 0) {
+        // Direct ask: "make waterskin... allow gather from water sources
+        // and filling it up" — the payoff for having filled it: a real
+        // drink away from any water tile, same relief a drink at the
+        // water's edge gives (not weakened — same "a tool is not a tax on
+        // top of the thing it enables" reasoning this codebase already
+        // applies to tool-granted moves).
+        consume(agent.needs, "seekWater");
+        agent.waterskinCharges!--;
+      } else {
+        return false;
+      }
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "thirst" });
       signalMirrorToFollowers(world, agent, "drink");
       return true;
     }
     case "gather": {
-      if (harvestLeft(world, agent.layer, agent.pos) <= 0 || harvestableAt(world, agent.layer, agent.pos).length === 0) return false;
-      if (carriedWeight(agent) >= carryCapacityOf(world, agent)) return false;
+      const canHarvest =
+        harvestLeft(world, agent.layer, agent.pos) > 0 &&
+        harvestableAt(world, agent.layer, agent.pos).length > 0 &&
+        carriedWeight(agent) < carryCapacityOf(world, agent);
+      // Direct ask: "make waterskin when held, allow gather from water
+      // sources and filling it up" — a real vessel, standing (or reaching)
+      // adjacent to water, not already full. Weight-blind on purpose: this
+      // tops off gear you're already carrying, not new cargo.
+      if (!canHarvest && !canFillWaterskin(world, agent)) return false;
       agent.activity = { kind: "gather", turnsLeft: GATHER_TURNS, turnsTotal: GATHER_TURNS };
       signalMirrorToFollowers(world, agent, "gather");
       return true;
@@ -543,6 +562,13 @@ function freeTileBeside(world: World, agent: Agent): { x: number; y: number } | 
   return undefined;
 }
 
+/** The held item, if it's a waterskin (or any future `holdsWater` item) with room in reach of water. */
+function canFillWaterskin(world: World, agent: Agent): boolean {
+  const held = agent.equipment?.held ? world.items?.[agent.equipment.held] : undefined;
+  if (!held?.holdsWater) return false;
+  return waterWithinReach(world, agent) && (agent.waterskinCharges ?? 0) < (held.waterCapacity ?? 0);
+}
+
 function finishGather(world: World, agent: Agent, out: PlayerActionOutcome): boolean {
   const capacity = carryCapacityOf(world, agent);
   const taken = takeHarvest(world, agent.layer, agent.pos);
@@ -553,7 +579,16 @@ function finishGather(world: World, agent: Agent, out: PlayerActionOutcome): boo
     gathered.push({ itemKey: m, count: 1 });
   }
   out.gathered = gathered;
-  return gathered.length > 0;
+  if (gathered.length > 0) return true;
+  // Nothing here to take (or the pack was full) — top off the waterskin
+  // instead, same one-take-per-gather-turn cadence ordinary harvesting uses.
+  if (canFillWaterskin(world, agent)) {
+    const held = world.items![agent.equipment!.held!]!;
+    agent.waterskinCharges = Math.min(held.waterCapacity ?? 0, (agent.waterskinCharges ?? 0) + 1);
+    out.filledWater = agent.waterskinCharges;
+    return true;
+  }
+  return false;
 }
 
 function finishCraft(world: World, agent: Agent, recipeId: string, out: PlayerActionOutcome): boolean {

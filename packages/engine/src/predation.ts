@@ -23,6 +23,7 @@ import { MATERIALS, type MaterialId } from "./harvest.js";
 import { invalidateResourceIndex } from "./resourceIndex.js";
 import { waterSoil } from "./flora.js";
 import { igniteNear } from "./fire.js";
+import { foulTile } from "./sludge.js";
 import { recordPredatorPressure } from "./herdMigration.js";
 import { isNight, isTwilight, lightLevel } from "./daynight.js";
 import { playerFleeRadius } from "./threat.js";
@@ -524,7 +525,7 @@ export function hasNearbyThreat(world: World, agent: Agent, rules: HuntRules): b
     // creature awake; a bonded creature sleeps beside a standing one. This
     // is the Presence verb's precondition — traced: with the flat radius
     // no creature would ever fall asleep within watch range of the player.
-    if (other.controlledBy === "player") return manhattan(agent.pos, other.pos) <= playerFleeRadius(world, other, FLEE_DETECT_RADIUS, agent);
+    if (other.species === "human") return manhattan(agent.pos, other.pos) <= playerFleeRadius(world, other, FLEE_DETECT_RADIUS, agent);
     return isGenuineThreat(rules, agent, other);
   });
 }
@@ -1387,7 +1388,26 @@ function resolveHitAgainstTarget(
     return false;
   }
 
-  if (isPrimaryTarget && !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0) {
+  const landedCleanly = !diedTrue && !wasFaintedBefore && !isDead(defender) && !defender.fainted && (defender.hp ?? 0) > 0;
+
+  // Status is the one on-hit effect a build can push out to the whole area.
+  // Base behaviour is unchanged — primary target only — and `areaStatus` is
+  // what a skill-tree notable sets to change it. Direct: "I do not like the
+  // aoe status thing. That's fine as a base but should be modified with
+  // notable nodes in the skill tree."
+  //
+  // Only status. Forced movement and `positionSwap` stay primary-only below,
+  // because their geometry is defined relative to the ONE deliberately-picked
+  // defender — "swap places with the target" has no meaning against five of
+  // them at once.
+  if (landedCleanly && !isPrimaryTarget && move.areaStatus) {
+    maybeInflictStatus(defender, attacker.id, move, world, log, rng);
+    if (move.statusSpreads && defender.status) {
+      maybeSpreadStatus(defender, attacker.id, defender.status.kind, world, log, rng, move.statusSeverity);
+    }
+  }
+
+  if (isPrimaryTarget && landedCleanly) {
     // A landed, damaging, non-killing hit — the one place status, the
     // defender-side stat change, on-hit forced movement, and a position
     // swap get a chance to apply.
@@ -1425,7 +1445,12 @@ function resolveHitAgainstTarget(
     }
     if (move.terrainFill) {
       const tile = tileAt(world, defender.layer, defender.pos.x, defender.pos.y);
-      if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
+      // Sludge has its own rules — it ruins water into mud and kills plants,
+      // neither of which `TERRAIN_FILLABLE` allows — so it routes through
+      // `foulTile` instead of the plain fill. See sludge.ts.
+      if (move.terrainFill.terrain === "sludge") {
+        foulTile(world, defender.layer, defender.pos.x, defender.pos.y, log);
+      } else if (tile && TERRAIN_FILLABLE.has(tile.terrain)) {
         setTile(world, defender.layer, defender.pos.x, defender.pos.y, move.terrainFill.terrain);
         // Direct ask: "Pokémon that help, like watering it via water
         // moves." `terrainFill` is currently exclusive to Water Gun's
@@ -2077,15 +2102,19 @@ export function applyPredationInstincts(
   const threats = agent.asleep
     ? []
     : agentsWithin(world, agent, wideFleeRadius).filter((other) => {
-        // ROADMAP.md M6: the player is not a predator by flag any more.
-        // Prey read the player's threat signature (threat.ts) — a crouched,
-        // unarmed, still human is half the ordinary radius; a running one
-        // with a club is well past it. Under 1 tile reads as no threat.
-        if (other.controlledBy === "player") {
+        // ROADMAP.md M6: a human is not a predator by flag. Prey read the
+        // human's threat signature (threat.ts) — a crouched, unarmed,
+        // still human is half the ordinary radius; a running one with a
+        // club is well past it. Under 1 tile reads as no threat. Widened
+        // from player-only to any human: direct ask, "make the humans
+        // feel a little more like a threat despite having weak stat
+        // blocks" — an armed wild hunter now reads exactly like an armed
+        // player.
+        if (other.species === "human") {
           // Backlog: "a tolerant-trust follower can flee its own leader" —
           // trustFleeFactor("tolerant") is 0.5, not 0, so a follower short
           // of "bonded" still had a real (if reduced) chance to bolt from
-          // the very player it was actively following. A follower doesn't
+          // the very human it was actively following. A follower doesn't
           // treat its own leader as a threat at all, regardless of trust
           // stage; it can still flee anything else normally.
           if (agent.followingId === other.id) return false;

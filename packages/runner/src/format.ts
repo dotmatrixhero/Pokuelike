@@ -97,7 +97,7 @@ export function formatEvent(event: SimEvent): string {
     case "longSleepBonus":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) got a long-sleep exp bonus (+${event.exp}) at (${event.pos.x},${event.pos.y})`;
     case "statusInflicted":
-      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind} by ${event.inflictedBy}`;
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) was ${event.statusKind === "burn" ? "burned" : event.statusKind === "poison" ? "poisoned" : event.statusKind === "confusion" ? "confused" : event.statusKind} by ${event.inflictedBy}`;
     case "statusCleared":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) ${event.reason} (${event.statusKind})`;
     case "supported":

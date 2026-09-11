@@ -765,7 +765,29 @@ function carveRiver(
     const flowDx = Math.sign(bestX - x);
     const flowDy = Math.sign(bestY - y);
     tileAt(world, "surface", x, y)!.flowDirection = { x: flowDx, y: flowDy };
-    carveRiverWidening(world, width, height, x, y, flowDx, flowDy, oceanMask, visited, elevationSnapshot);
+    // A DIAGONAL step gets a corner connector instead of the perpendicular
+    // widening, because "perpendicular to a diagonal" is itself diagonal.
+    //
+    // Both halves of that mattered. Steepest descent searches all 8
+    // neighbours, so a river routinely steps diagonally — and two tiles on a
+    // diagonal touch only at a corner, never at an edge. The widening then
+    // carved a second tile that was ALSO only diagonally attached, so a
+    // diagonal reach came out as two parallel diagonal chains with the land
+    // between them untouched: 43 water tiles with no orthogonal water
+    // neighbour at all, and 19 land tiles completely enclosed by water.
+    // Direct report: "You have the shitty lattice rivers."
+    //
+    // That was never only a rendering problem. Those enclosed land tiles are
+    // one-tile islands a walker can be stranded on, and a channel that is
+    // only diagonally connected is not swimmable end-to-end. Carving the
+    // lower of the two tiles that share an edge with BOTH the current tile
+    // and the next one makes the channel properly 4-connected, which is what
+    // a river actually is.
+    if (flowDx !== 0 && flowDy !== 0) {
+      carveRiverCorner(world, width, height, x, y, flowDx, flowDy, oceanMask, visited, elevationSnapshot);
+    } else {
+      carveRiverWidening(world, width, height, x, y, flowDx, flowDy, oceanMask, visited, elevationSnapshot);
+    }
 
     x = bestX;
     y = bestY;
@@ -814,6 +836,47 @@ function carveRiverWidening(
   const widenedTile = tileAt(world, "surface", pick.nx, pick.ny)!;
   widenedTile.waterKind = "river";
   widenedTile.flowDirection = { x: flowDx, y: flowDy };
+}
+
+/**
+ * Carves the corner tile that makes a diagonal river step 4-connected — see
+ * `carveRiver`'s own "diagonal step" comment for why this exists instead of
+ * the perpendicular widening on diagonal reaches.
+ *
+ * Stepping from `(x, y)` to `(x + flowDx, y + flowDy)` diagonally, the two
+ * tiles that share an edge with both ends are `(x + flowDx, y)` and
+ * `(x, y + flowDy)`. Carving the lower of the two turns the corner into a
+ * real channel rather than a pinch point, and doubles as that reach's
+ * width. Same guards as `carveRiverWidening`: never across the ocean mouth,
+ * never a tile already visited or already water.
+ */
+function carveRiverCorner(
+  world: World,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  flowDx: number,
+  flowDy: number,
+  oceanMask: MacroElevation,
+  visited: Set<string>,
+  elevationSnapshot: Float64Array
+): void {
+  const candidates = ([[flowDx, 0], [0, flowDy]] as const)
+    .map(([dx, dy]) => ({ nx: x + dx, ny: y + dy }))
+    .filter(({ nx, ny }) => nx >= 0 && ny >= 0 && nx < width && ny < height)
+    .filter(({ nx, ny }) => !visited.has(`${nx},${ny}`))
+    .filter(({ nx, ny }) => !oceanMask.isOcean(nx, ny))
+    .filter(({ nx, ny }) => tileAt(world, "surface", nx, ny)?.terrain !== "water")
+    .sort((a, b) => elevationSnapshot[a.ny * width + a.nx]! - elevationSnapshot[b.ny * width + b.nx]!);
+
+  const pick = candidates[0];
+  if (!pick) return;
+  visited.add(`${pick.nx},${pick.ny}`);
+  setTile(world, "surface", pick.nx, pick.ny, "water", 0);
+  const corner = tileAt(world, "surface", pick.nx, pick.ny)!;
+  corner.waterKind = "river";
+  corner.flowDirection = { x: flowDx, y: flowDy };
 }
 
 /** Carves every river for this map — see `carveRiver`'s doc comment for the per-river rule. Runs once, after the full terrain grid (land/ocean/biome/obstacle) is already in place, so steepest descent has real final elevations to work from. */

@@ -1493,6 +1493,62 @@ describe("situational bonus wired into real combat (resolveHit)", () => {
   });
 });
 
+describe("areaStatus: a notable can push status out to the whole area", () => {
+  /**
+   * Base behaviour is primary-target-only and stays that way — that is the
+   * documented rule `resolveHitAgainstTarget` has always had. `areaStatus` is
+   * what a skill-tree node sets to buy out of it. Direct: "I do not like the
+   * aoe status thing. That's fine as a base but should be modified with
+   * notable nodes in the skill tree."
+   *
+   * The control is the same move WITHOUT the flag: if the bystander got
+   * statused there too, this test would be measuring nothing.
+   */
+  const CLOUD: MoveSpec = {
+    ...TEST_MOVE,
+    id: "status-cloud",
+    shape: { kind: "ring", radius: 1 },
+    hitsArea: true,
+    statusChance: 1,
+    statusKind: "poison",
+  };
+
+  function statusesAfterHit(move: MoveSpec): { primary?: string; bystander?: string } {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary" });
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander" });
+    const hunter = predator({ x: 5, y: 5 }, undefined, { moves: [move] });
+    world.agents.push(hunter, primaryTarget, bystander);
+    tickWorld(world, undefined, RULES);
+    return { primary: primaryTarget.status?.kind, bystander: bystander.status?.kind };
+  }
+
+  it("CONTROL: without the flag, only the aimed-at target is statused", () => {
+    const got = statusesAfterHit(CLOUD);
+    expect(got.primary).toBe("poison");
+    expect(got.bystander).toBeUndefined();
+  });
+
+  it("with areaStatus, everyone caught in the area is statused", () => {
+    const got = statusesAfterHit({ ...CLOUD, id: "status-cloud-wide", areaStatus: true });
+    expect(got.primary).toBe("poison");
+    expect(got.bystander).toBe("poison");
+  });
+
+  it("areaStatus does NOT push forced movement out to bystanders — that stays primary-only", () => {
+    const world = createWorld(10, 10, AB_COMPARISON_SEED);
+    const primaryTarget = prey({ x: 6, y: 5 }, { id: "bulbasaur-primary" });
+    const bystander = prey({ x: 5, y: 6 }, { id: "bulbasaur-bystander" });
+    const hunter = predator({ x: 5, y: 5 }, undefined, {
+      moves: [{ ...CLOUD, id: "shoving-cloud", areaStatus: true, forcedMovement: { mover: "defender", direction: "away", tiles: 1, timing: "onHit" } }],
+    });
+    world.agents.push(hunter, primaryTarget, bystander);
+    tickWorld(world, undefined, RULES);
+    expect(bystander.status?.kind).toBe("poison"); // status did reach it
+    expect(bystander.pos).toEqual({ x: 5, y: 6 }); // but it was not shoved
+  });
+});
+
 describe("chargeAttack silently voids hitsArea (regression)", () => {
   /**
    * `resolveHit` commits a charge and RETURNS before it ever reaches its own

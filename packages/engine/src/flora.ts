@@ -289,7 +289,37 @@ export function groundTypeParams(tile: Tile | undefined) {
 export function fertilityCeiling(tile: Tile | undefined): number {
   const base = groundTypeParams(tile).fertilityCeiling;
   const degraded = tile?.groundDegraded ?? 0;
-  return Math.max(0.05, base * (1 - degraded));
+  const built = tile?.fertilityCeilingBonus ?? 0;
+  return Math.max(0.05, Math.min(MAX_BUILT_FERTILITY_CEILING, base * (1 - degraded) + built));
+}
+
+/**
+ * The hardest ceiling any amount of soil-building can reach — loam's own
+ * `fertilityCeiling`. Built ground can become as good as the best natural
+ * ground in the world and no better, so `fertilityCeilingBonus` can never
+ * push a tile past the scale every other fertility number is written on.
+ */
+export const MAX_BUILT_FERTILITY_CEILING = 1.0;
+
+/**
+ * Permanently raises this tile's own fertility ceiling (`Tile.
+ * fertilityCeilingBonus`) and brings its current fertility up with it, so
+ * the tile is better ground from this moment rather than merely allowed to
+ * become better later. The only caller is utilityMoves.ts's
+ * `fertilityCeilingBoost` effect.
+ *
+ * This is the lever MOVES_DESIGN.md recorded as missing: `raiseFertility`
+ * caps at the ceiling, and worldgen writes a rocky/sandy tile's fertility
+ * AT its ceiling already (worldgen.ts's `GROUND_TYPE_STARTING_FERTILITY`),
+ * so on exactly the ground a "make this grow" move most wants to work,
+ * `fertilityBoost` alone moves nothing at all.
+ */
+export function raiseFertilityCeiling(tile: Tile | undefined, amount: number): void {
+  if (!tile || amount <= 0) return;
+  const before = fertilityCeiling(tile);
+  tile.fertilityCeilingBonus = (tile.fertilityCeilingBonus ?? 0) + amount;
+  const after = fertilityCeiling(tile);
+  if (after > before) tile.fertility = Math.min(after, (tile.fertility ?? before) + (after - before));
 }
 
 /** Bumps this tile's fertility, capped at its own `fertilityCeiling` (not a flat 1 any more — see `GroundType`) — shared by waterSoil/tendSoil below, the harvest-recovery reset in growFlora, and utilityMoves.ts's `fertilityBoost` effect (Growth/Grassy Terrain). */

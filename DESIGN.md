@@ -15626,3 +15626,505 @@ ${moveName} on ${defender}!"`, same `findMoveUsed` lookup the other two
 cases already use. Verified live (Playwright, real tick run): "Kingler
 used Hammer Arm on Golduck!", "Golduck used Psybeam on Kingler!" — real
 move names, not the old placeholder text. Web build clean.
+
+## Wild human archetypes: spawn tendency, real gear, real tool-moves
+
+Direct ask, in the same message as the clash-log report above: "can we make
+humans spawn with different types... depending on type they can have
+different items on their inventory, lootable when they are fainted. could
+also have items. Should also have sex and that should affect which emoji
+you choose for them. hunter (weapons, can use more moves), forager
+(collects crops...), traveler, merchant, wanderer."
+
+**Design collision, resolved.** `HUMANS_DESIGN.md`'s already-decided item 5
+says roles are inherited/earned, not a spawn table — a direct conflict with
+"spawn with different types." Put to the user as a menu; chosen: **"Hybrid:
+spawn with a tendency, but it's provisional until earned."** Separately
+confirmed the player stays purely-earned (no spawn tendency at all) — only
+wild/NPC humans get a tendency, since "humans are randomly spawning in the
+world" already, unintentionally (see below).
+
+**Real gap found, not assumed.** Grepped for any human-specific AI branch
+outside `player.ts` — none exists. Wild humans run the exact same generic
+animal behavior tree as every other species; there is no gather/craft/trade
+AI to ever "earn" a role from. So the earned-confirmation half of the
+hybrid is NOT built — it would have nothing real to hook into, and faking a
+timer-based promotion would be inventing a signal, not tracking one.
+Flagged as an open question in `HUMANS_DESIGN.md` instead.
+
+**What IS real and built:**
+- `Agent.archetype` — set once at spawn by `assignHumanArchetype`
+  (engine/immigration.ts), never on the player.
+- Real starting gear from the existing `@pokuelike/data` `ITEMS` catalog:
+  hunter → flint knife (held), forager → forage pouch + 2 berries, traveler
+  → camouflage cloak (worn), merchant → raw trade goods (fiber/cordage),
+  wanderer → nothing. All of it lands in `agent.inventory`, so the
+  already-existing corpse-loot mechanic (`support.ts`) makes it lootable on
+  faint for free — no new mechanic needed there, confirmed by reading it
+  before assuming otherwise.
+- Real tool-granted moves: a hunter's flint knife actually grants Scratch,
+  same as the player's would. This needed a genuine plumbing gap closed
+  first (below) — without it, a wild archetype's weapon would sit in
+  inventory doing nothing.
+- Renderer: any human (not just the player) now gets a real emoji keyed by
+  archetype + sex — 🥷 hunter, 👨‍🌾/👩‍🌾 forager, 🚴‍♂️/🚴‍♀️ traveler, 🙋‍♂️/🙋‍♀️
+  merchant, 🧘‍♂️/🧘‍♀️ wanderer (same backing-disc treatment the player's 👱
+  already used).
+
+**The plumbing gap.** `world.items`/`playerBaseMoves` (and `recipes`) were
+only ever set inside the two hand-built player-scenario constructors
+(`scenario.ts`) — the general overworld path (`overworldScenario.ts` →
+`promoteZone`) never set them at all, confirmed by grep before building
+anything. So a wild human spawned via ordinary immigration into any real
+zone had `syncPlayerMoves`-equivalent logic silently no-op — no catalog to
+read from. User explicitly chose to build this properly now rather than
+ship items with inert tool-moves: `ImmigrationContext` gained an optional
+`itemCatalog` field (same injected-context shape `LevelingContext` already
+uses), `@pokuelike/data`'s `IMMIGRATION_CONTEXT` wires it to the real
+`ITEMS`/`RECIPES`/`BARE_HANDS_MOVES`, and `promoteZone` now stamps it onto
+every zone `World` it creates — the same "carry it down once, at
+promotion" treatment `territoryName`/`sanctuaryDistance` already get.
+
+**Verification.** Typecheck clean on all three packages (engine, data,
+web — the latter via the real `vite build`, not just `tsc --noEmit`,
+per this project's own standing lesson about the two diverging). Full
+suites green: engine 1443/1443, data 387/387 — no regressions.
+
+A real 3-seed × 8000-tick `tickMacroWorld` run (this project's standard
+verification suite) found **0 wild humans** in the focused zone across all
+three seeds — not a bug: "human" is 1 of 108 roster species, and ordinary
+immigration only fires a handful of times total across the WHOLE roster
+per run (immigration.ts's own doc comment: ~6 rolls per 3000 ticks). Waiting
+on a natural spawn to verify this empirically was impractical, so built a
+real, permanent runner script instead —
+`packages/runner/src/validateHumanArchetypes.ts` — that calls the exact
+same `spawnAgent`/`assignHumanArchetype` functions the engine calls at both
+real call sites, with the real `IMMIGRATION_CONTEXT`. 200 rolls: all 5
+archetypes appeared (distribution `{merchant: 33, wanderer: 38, traveler:
+43, forager: 47, hunter: 39}` — roughly even, as expected from an
+unweighted roll), every hunter actually gained Scratch from its knife, and
+the player came out completely untouched (no archetype, moves still just
+`[tackle]`). This is real function-level verification, not a code-review
+claim — but it is NOT the same as having watched a wild archetype human on
+screen in a live browser session; that visual check (Playwright against
+the dev server) was not done this round, since forcing a wild human onto
+screen would need a debug-injection hook that doesn't exist yet. Said
+plainly rather than blurred together.
+
+## Synced branch with roguelike-sim and master (two merges, both clean)
+
+Asked "how hard is it to add items/recipes... another agent is adding
+cooking recipes via crafting at a campfire" → "oh just pull actually from
+roguelike-sim" → then "hm try pull master" once roguelike-sim turned out
+not to have the cooking work.
+
+Merged `origin/claude/pokemon-roguelike-sim-5rje5a` (226 files, skill
+trees/move trees/surf/sludge/weather — no crafting content, that branch's
+`crafting.ts` predates the axe/machete work) then `origin/master` (found
+the actual cooking work: deployable campfire, 4 fixed dishes — Roasted
+Apple/Berry Stew/Potato Mash/Vegetable Stew — heal-on-eat, rapport bonus).
+
+Both merges touched every file this session's archetype feature had just
+added to (`types.ts`, `immigration.ts` x2, `overworld.ts`, `crafting.ts`,
+`renderer.ts`). Real conflicts: `TODO.md` twice (trivial — both sides just
+appended new sections) and `needs.ts` once (a real one: two branches
+independently extended the same `support.js` import line — HEAD added
+`applyFerrying`/`maybeStartFerrying`, master added `healFromCookedFood` —
+resolved by keeping both). Everything else, including every file the
+archetype feature touches, auto-merged clean with no markers.
+
+Verified after each merge (not assumed): grepped for `assignHumanArchetype`/
+`itemCatalog`/`archetype?:`/`HUMAN_ARCHETYPE_EMOJI` to confirm the
+archetype feature's own code survived intact, then full typecheck (all 4
+packages) + `vite build` + full test suites both times. Final state:
+engine 1533/1533, data 468/468, `validateHumanArchetypes.ts` still passes
+identically post-merge (same 200-roll distribution).
+
+## Humans feel like a threat despite weak stats, plus valuable loot
+
+Direct ask, follow-up to the archetype work: "make the humans feel a
+little more like a threat despite having weak stat blocks. plus having
+valuable loot."
+
+**The real lever, found by reading the code, not guessing.** `human`'s
+base stats (species.ts) are genuinely weak next to a real Pokémon's, and
+there's no cheap way to make a specific archetype an active hunter of
+other creatures: `HUNT_RULES` (data/predation.ts) is a static table built
+once from `SPECIES.isPredator` at module load — a per-agent `isPredator`
+flag on one wild human instance does nothing, `isHunterSpecies` only ever
+reads the species-wide table. Making one archetype a real predator would
+mean either flagging the whole `human` species predator (too broad — every
+wanderer too) or restructuring `isHunterSpecies`/`HUNT_RULES` to accept a
+per-agent override, a materially bigger change than this ask needs. Not
+built; flagged here rather than silently skipped.
+
+**What was built instead — real, and already proven.** `threat.ts`'s
+signature system (crouched ×0.5, held-item `+threat`, worn-item
+`×(1+threat)`, clamped 0..2) was player-only
+(`agent.controlledBy !== "player"` gated it) even though it reads
+`agent.equipment`/`agent.posture`, fields any human can have. Widened the
+gate to `agent.species !== "human"` in `threat.ts` and its three real call
+sites (`predation.ts` x2 — the sleep-threat check and the active
+flee/mob-target scan — plus `tells.ts`'s `hasNoticed`). An armed wild
+hunter now reads to nearby prey exactly like an armed player does: a flint
+knife/club/axe/machete adds real `threat` to their signature, so prey give
+them a bigger flee radius purely from what's in their hand — no stat
+retuning, same coefficients this whole session already validated. An
+unarmed wanderer still reads as harmless.
+
+**Valuable loot.** Hunter's weapon is now a weighted roll instead of
+always a flint knife — `crafting.ts`'s own recipe cost ladder set the
+weights: flintKnife/club common (35/35, 6-10 turns to craft), machete
+uncommon (18, 11 turns + cordage), axe rare (12, 14 turns — the single
+most expensive recipe in the game). Merchant keeps its base trade goods
+(fiber/cordage) but now has a real 30% chance of one finished, more
+valuable piece of wares on top (poultice/forage pouch/camouflage cloak) —
+a trader who's actually made a sale.
+
+**Verification.** All 3 packages typecheck, `vite build` clean, engine
+1533/1533, data 468/468 — no regressions from widening the threat gate.
+Rewrote `validateHumanArchetypes.ts` (400 rolls) to also assert: every
+hunter's rolled weapon grants the matching real move (knife→Scratch,
+club→Pound, axe→Fell, machete→Clear), all 4 weapon tiers appear across
+400 rolls (real distribution: flintKnife 31, club 31, machete 14, axe 8 —
+close to the 35/35/18/12 target), merchant bonus-wares rate lands at
+30.4% (24/79, target ~30%), an armed hunter's `threatSignatureOf` reads
+above 1 (more threatening than baseline) while an unarmed wanderer reads
+at exactly 1 (baseline, unchanged). This is real function-level
+verification of the exact code the engine calls — it does NOT include a
+fresh full-tick scenario watching real prey actually flee farther from a
+wild hunter than a wild wanderer in a live sim; that would reuse the same
+already-live-validated mechanism (`validateBond.ts` proved this formula
+against the player), so it wasn't rebuilt here, but it also wasn't
+watched directly this round. Said plainly rather than implied.
+
+## Non-combat flavor items: waterskin (real mechanic), bedroll, coin pouch
+
+Direct ask, follow-up to the threat/loot round: "any other flavorful items
+that are not for combat to add to them?" I proposed waterskin/bedroll/coin
+pouch (waterskin as the one with real mechanical payoff, since the
+user's own original archetype ask had already said "waterskin, etc." for
+forager and it was never built) — chosen: "waterskin, bedroll, coin pouch.
+can you also make water skin when held, allow 'gather' from water sources
+and filling git up."
+
+**Waterskin — real mechanic, not flavor.** New `ItemDef.holdsWater`/
+`waterCapacity` fields; `Agent.waterskinCharges` tracks fill state the
+same "lives on the agent, not the inventory stack" shape `torchFuel`
+already uses. `player.ts`:
+- `gather` now also succeeds when nothing is harvestable at the tile but
+  the held item holds water, water is in reach, and it isn't already
+  full — `canFillWaterskin`. Weight-blind on purpose (topping off gear
+  you already carry isn't new cargo).
+- `finishGather` prefers real harvested materials when both are possible
+  (matches real intuition: a water's edge with lichen on it still gives
+  you the lichen); only falls back to a water-fill when nothing else came
+  out of the tile.
+- `drink` now also succeeds away from water if the held item has charges
+  left — same `consume(needs, "seekWater")` relief a drink at the water's
+  edge gives, not weakened (this codebase's standing "a tool is not a tax
+  on what it enables" rule).
+- Capacity: 3 charges. Real reachability: known at start (water is core
+  survival, same tier as torch/club), cordage(1)+fiber(2), 6 turns.
+
+**Bedroll and coin pouch — pure flavor, no mechanic**, as scoped. Bedroll
+craftable (fiber×3 + cordage×1, 7 turns, not known at start). Coin pouch
+is deliberately loot-only — no recipe — since there's no economy to spend
+coin in yet; it's "valuable loot," not a new resource sink.
+
+**Archetype wiring**, matching the user's own original phrasing for each:
+forager now holds a waterskin (their exact words from the first ask:
+"collects crops, puts in inventory, waterskin, etc."), traveler carries a
+bedroll on top of its cloak, merchant carries a coin pouch on top of its
+base trade goods (guaranteed, not rolled — it's the one item that reads
+"merchant" on sight).
+
+**Verification — real, live-tick, not just function calls this time.**
+New `packages/runner/src/validateWaterskin.ts` drives the actual
+`applyPlayerAction` against a real generated scenario (`createCaveScenario`,
+forced onto a hand-cleared surface patch so the cave's own "lichen grows
+near water" rule doesn't mask the water-fill fallback — a real gotcha
+found empirically: the first version of this test failed because placing
+water right next to the player ALSO satisfied harvest.ts's separate
+lichen-near-water condition, so `gather` picked up lichen instead of
+filling the waterskin. Root-caused, fixed by moving the test to the
+surface layer, said here plainly rather than silently patched over):
+gather-fills to a real charge count, refuses past the 3-charge cap,
+drinks away from water using only skin charges (thirst 0.2 → 0.60,
+matching `consume`'s real formula), drains to empty and correctly refuses
+further drinks, and a no-waterskin-at-all agent still can't drink away
+from water (regression). All pass.
+
+Extended `validateHumanArchetypes.ts` further: forager holds a real
+waterskin, traveler carries a real bedroll, merchant carries a real coin
+pouch — all asserted across the same 400-roll run.
+
+Full suites after all three items: engine 1533/1533, data 468/468, all 4
+packages typecheck/build clean.
+
+## Humans render as real trainer sprites, not emoji
+
+Direct ask after an art-utilisation audit turned up `trainer sprites.png`
+sitting completely unripped: "Wow they have animations too... Do trainer to
+human including player."
+
+**What the sheet actually is.** 80 characters, 10 across and 8 down, each a
+3x4 grid of 32x32 frames — 3 walk frames per facing. That is where the
+"they have animations too" observation lands: every character has a real
+walk cycle, not just a standing pose.
+
+**Two things that had to be measured, because assuming them produced
+visibly wrong output first — both caught by looking, not by a passing
+build:**
+
+1. **The grid drifts.** It is very nearly 96x128 per character but not
+   exactly: block starts read `0,96,192,288,479,...` on one row and
+   `0,95,191,287,383,...` on another, and the row bands measure
+   `128,127,129,128,...`. Cutting a fixed 96x128 grid bled the neighbouring
+   block's flat background into frames as stray coloured lines under the
+   sprites' feet — clearly visible once rendered on a checkerboard. Block
+   edges are now read per row-band off the flattest scanline in that band
+   (the gap between two sprite rows, pure background across all ten
+   characters), and each frame is found from its own content. Two earlier
+   attempts at that scanline are recorded in the script: a fixed row near
+   the band top over-split wherever hair or hats reach the cell top, and
+   per-column dominant colour over-split worse still, since a sprite
+   outnumbers background down the middle of its own cell.
+
+2. **The frame order is not a standard charset.** It reads cleanly as
+   neither row-major nor column-major directions. So nothing is assumed
+   about packing: each cell is classified from its own pixels — horizontal
+   self-mirror difference separates the symmetric facings (up/down) from
+   the side ones, head-region colour count separates up (a solid mass of
+   hair) from down (hair plus face), and a **per-character skin palette**
+   decides which way a side frame looks. That palette is learned by diffing
+   the colours in a character's front-view head against their back-view
+   head. A first version instead took "the brightest pixels in the head"
+   and silently dropped **41 of the 80 characters** — hats, helmets, big
+   hair and dark-skinned characters all defeated it. Left vs right is then
+   decided *within* each mirror-matched pair, a relative call rather than an
+   absolute threshold, which is what makes it hold for all 80.
+
+**Confidence scoring, and why the eye still made the call.** `confidence()`
+scores each character on front/back separation and left/right mirror
+quality. It correctly flagged the two picks that were actually broken — a
+bald monk scored -2.8 (the back of a bald head is as skin-coloured as the
+face, so the front/back test has nothing to grip) and a backpacker scored
+12.0 and had a duplicated front frame where a side frame belonged. It is
+used to narrow the field, not to decide: all six final characters were
+checked by eye across all four facings before being fixed in `ROLES`.
+
+**What shipped.** Six characters, 72 frames: the player keeps their own
+character (a red-capped protagonist) rather than sharing an archetype's,
+since their role is earned through play rather than rolled at spawn
+(HUMANS_DESIGN.md). Hunter is a bearded man in olive field gear, forager a
+straw-hatted farmer, traveler wears a green bandana and light travelling
+clothes, merchant a peaked cap and gold-trimmed coat, wanderer is bald and
+bearded in a plain robe. Backgrounds are knocked out to real alpha.
+
+The emoji branches in `renderer.ts` are kept as a fallback (`&& !sprite`)
+for the frame or two before a PNG loads — the same graceful-degradation
+shape the Pokemon sprite path already uses.
+
+**Verification.** The player was checked live in a real browser (Playwright
+driving the dev server, Play mode): the red-cap trainer sprite draws with a
+transparent background over the cave floor, no 404s, web build clean. All
+six characters' 24 standing frames were rendered on a checkerboard and read
+by eye — that is what caught both the bleed lines and the two bad picks.
+Every one of the 72 expected files exists and every archetype the engine can
+assign (plus the undefined fallback) maps to a real key. Stated plainly: a
+wild archetype human was **not** seen on screen — they are far too rare to
+wait for, and the debug hook that would force one is still the open TODO it
+was last round. What is shared with the verified player path is the whole
+draw call; what is unverified is only that specific agent reaching it.
+
+## All 15 crops have tile art
+
+Direct ask: "Add crops." The art audit found `crops.ts` defines 15 real
+crops but only the four original berries (Oran, Pecha, Sitrus, Cheri) ever
+had tiles — the other eleven fell through to `FLAVOR_GLYPH`'s coloured
+letter, including four the cooking recipes actually consume (apple, potato,
+tomato, corn).
+
+Ripped from the same `berry sprites.png` the existing four came from
+(`packages/web/scripts/rip_crop_tiles.py`): 4 bands x 16 plants, three
+growth stages each, duplicated across two adjacent columns. Only the ripe
+stage is taken, matching the existing four. Grid lines are measured, not
+assumed. Background comes off by flooding in from the cell border rather
+than keying out every white pixel, so highlights and pale petals *inside* a
+plant survive.
+
+These are fantasy berry plants, not crop photographs, so each mapping is a
+judgement about what reads as that crop at ~20 pixels. Corn (a yellow cob),
+apple (a tree hung with red fruit), wheat (tall golden blades) and mushroom
+(grey caps) are strong; rice and groundnut are the closest available shape.
+Pumpkin was picked twice — the first choice rendered as a red-and-yellow
+flowering plant, which is worse than a glyph because it actively misleads;
+swapped for a ridged golden gourd after putting five candidates side by
+side. Every tile was checked on a checkerboard against the four existing
+berries as a control, to confirm both the transparency and that the new art
+sits on the same soil-mound baseline.
+
+**Verification.** All 15 `CROP_IDS` now resolve to a real file; web build
+clean. Live in a browser (Playwright, Watch mode): the page fetched
+`food_herbs.png`, `food_mango.png` and `food_rice.png` with 200s while
+rendering, alongside the pre-existing berries — three of the new crops
+genuinely drawn on screen rather than glyph-substituted. Only 7 of 15
+appeared in that run because crop growth is biome- and season-gated, which
+is the system working, not a gap.
+
+## Fidelity: the main canvas was bilinear-filtering all its pixel art
+
+Direct report, mid-task: "Are the pixels getting super ugly compressed when
+rendered? I think we are losing a lot of fidelity." Correct on both counts,
+and it was two separate faults stacking.
+
+**1. Smoothing was never turned off on the game canvas.** `macroMap.ts` sets
+`imageSmoothingEnabled = false`; the main renderer never did, so the context
+kept the browser default of ON. Almost no tile art is exactly `TILE_SIZE`
+(20px) — sources measure 16x16, 32x32, 32x42, 128x128, 144x144 — so nearly
+every `drawImage` resampled, and every one of those got bilinear-filtered
+into the backing store. The CSS `image-rendering: pixelated` on the canvas
+(which *is* set, so the final upscale was never the problem) then faithfully
+enlarged an already-blurred bitmap. Fixed by setting the flag right after
+`canvas.width`/`height` are assigned — those assignments reset all context
+state, which is exactly why it has to live there rather than once at
+startup.
+
+Worth noting what this also fixes for free: the Pokemon and trainer sprites
+are 32x32 and draw at `TILE_SIZE * SPRITE_SCALE` = 32, i.e. exactly 1:1.
+They were being blurred by a filter that had no resampling to do.
+
+**2. Oversized surface textures were squashed whole into one tile.**
+`mud.png` is 128x128 and `wall_1.png` is 144x144, both drawn as
+`drawImage(img, dx, dy, 20, 20)` — the entire texture crushed into a 20px
+tile, keeping about 2% of its pixels, every frame. It also meant every mud
+tile and every wall tile was identical, since all of them showed the same
+squashed image. Now a tile-sized window is taken out of the source and drawn
+1:1 (`tileWindow`, sprites.ts): zero resampling, and the window is chosen
+per tile position, so the same change that restores the detail also breaks
+up the repetition. Measured: mud yields 36 distinct crops, wall 49, with
+zero out-of-bounds windows across a 200x200 sweep. Object icons (a tree at
+32x42, a bush at 16x35) fail the "at least twice the tile in both
+dimensions" test and are still drawn whole, as they must be.
+
+**Verified** with a before/after of the identical view and seed: the water's
+wave detail and the shoreline read visibly sharper, where before they were
+smeared. Web build clean. Stated plainly: mud and wall tiles were not in
+that particular view, so `tileWindow`'s effect on screen is unverified —
+what is verified is the arithmetic (in-bounds, deterministic, correct
+distinct-crop counts) and that object icons are untouched.
+
+**Not fixed, and still the actual "square and ugly" complaint:** the
+land/water boundary is a hard 90-degree staircase, and plain ground still
+shows a faint lattice of lighter/darker 20px squares, because floor decals
+are tile-sized stamps drawn at the tile origin. Those are a separate piece
+of work from fidelity — see TODO.md.
+
+## Pokemon: re-ripped from one sheet, with walk frames — and two were the wrong species
+
+Direct ask: "Do the Pokémon too. And make sure they aren't compressed."
+
+**On "compressed": they weren't, and now nothing is.** The 604 shipped sprites
+measure native 32x32 (their 2x2-block uniformity is 0.62-0.81, nowhere near
+the ~1.0 that would mean an upscale from 16x16) and they draw at
+`TILE_SIZE * SPRITE_SCALE` = 32, i.e. exactly 1:1. The real fidelity loss was
+the canvas filter documented in the previous entry, which was blurring art
+that needed no resampling at all; with `imageSmoothingEnabled = false` these
+now land pixel-exact.
+
+**Why a full re-rip rather than just adding frames.** `kanto sprites.png` —
+never touched before — holds all 151 species as per-species blocks of 4
+facings x 2 frames at native 32x32. But only 27 of the 151 shipped sprites
+match it pixel-for-pixel, so most came from a different sheet; walk frames
+taken from here would have jittered against those stand poses. Taking both
+frames from one sheet keeps every species internally consistent.
+
+**Mapping the sheet took three attempts, and the first two were wrong.**
+1. A computed block pitch. The grid drifts (real starts are
+   `0,65,130,195,259,324,389,...`), so a constant pitch was a pixel off on
+   most columns — enough that only Bulbasaur, sitting at offset 0, matched
+   exactly. That one anomaly is what exposed it.
+2. A greedy best-match assignment over silhouette+palette features. It
+   reproduced all 27 exact anchors, which looked like success — but it still
+   mis-assigned elsewhere, because once a block is taken the loser silently
+   gets its next best option. Arcanine ended up on Venusaur's spare block.
+   Ranking assignments by confidence and *looking* at the worst ones is what
+   caught it.
+3. What shipped: dex order with two inserted blocks — a spare Venusaur at
+   index 3, and Pikachu holding two (25 male, 26 female; adjacent-block
+   similarity 16.6 against 159 for the next closest pair). So
+   `block = (dex - 1) + (dex >= 4) + (dex >= 26)`. Verified by reading blocks
+   22-45 and 143-157 straight off the sheet: every one matches its predicted
+   species, through the ambiguous Pikachu/Nidoran stretch and out to Mew.
+
+**Two shipped sprites were the wrong species, and had been all along.**
+Measured by exact pixel comparison of old art against new: 26 species are
+byte-identical, 123 are a different artist's version of the same creature,
+and **2 were plain mislabels** — `nidoranf` was showing Sandslash and
+`sandslash` was showing Sandshrew, a run of off-by-one in the old rip. The
+sheet is unambiguous (Raichu at 27, Sandshrew at 28, Sandslash at 29), so the
+re-rip corrects them. Worth being precise about the limit here: those two are
+*proven* by exact match; neighbouring species in that stretch looked wrong by
+eye too, but since their old art came from another sheet entirely they cannot
+be proven the same way, so they are not claimed.
+
+The emitted `_left`/`_right` files deliberately keep the existing convention
+(the roles were read off cells that shipped files matched at score 0.0), so
+`getSprite`'s long-standing deliberate left/right swap keeps working untouched.
+
+**Animation.** `getSprite` takes a frame; frame 0 keeps the plain
+`<key>_<dir>.png` name every sprite has always used, walk frames are `_1`, and
+a missing walk frame falls back to standing so nothing can break. The cycle
+alternates stand/step on each tile an agent actually enters — the sim moves a
+whole tile at a time, so tile changes are the footfalls; driving it off a wall
+clock would have everything paddling in place at one rate no matter how fast
+it was really moving. The rest timeout is in MILLISECONDS, not render frames:
+a frame-counted version expired between every footfall at 60fps against slow
+sim ticks, leaving the step pose on screen for a single frame — invisible.
+
+**Verification.** Live in a browser with the sim actually running (the first
+attempt measured a paused world at tick 0 and saw nothing): by tick 52 the
+page had fetched 32 sprite files of which **16 were walk frames** —
+`kabutops_up_1`, `kingler_left_1`, `golduck_up_1`, `omastar_left_1` and so on,
+all 200. Engine 1533/1533, data 468/468, web build clean.
+
+## The canvas was deleting one pixel row in five (and my screenshots hid it)
+
+Direct report: "Uhhh I don't think the screenshot you sent was actually full
+res... Krabbys left eye is missing a black pixel...?" Right on both counts,
+and the second half is a real rendering defect, not a screenshot artefact.
+
+**Measured on the live page.** The `#scene` canvas has a backing store of
+1800x1200 and is displayed at 1440x960 — a **0.8 CSS downscale** — while
+carrying `image-rendering: pixelated`. Pixelated means nearest-neighbour, and
+nearest-neighbour at 0.8 does not blend anything: it throws away every fifth
+row and column outright. A one-pixel feature — an eye, an outline, a
+highlight — lands on a discarded row and simply ceases to exist. At the
+default zoom that is 20% of the image deleted; zoomed further out it is worse
+(30% at 0.7, 40% at 0.6).
+
+This is the exact inverse of the earlier fidelity fix. `pixelated` is correct
+when scaling UP (it keeps pixel art crisp rather than smearing it) and
+destructive when scaling DOWN. So `setZoom` now picks per direction:
+`pixelated` at or above 1:1, `auto` below it. Below 1:1 the result is softer,
+but every source pixel contributes to the output instead of four in five
+surviving and the fifth vanishing.
+
+**The renderer itself was never at fault**, which is worth stating precisely
+because it would have been easy to go hunting in the rip. Dumping the canvas
+backing store at true 1:1 via `toDataURL` and locating a sprite in it,
+`kingler_down` is drawn with **251 of 251 opaque pixels byte-identical** to
+the PNG on disk. The art is lossless all the way to the backing store; only
+the final CSS scale to the screen was lossy.
+
+**Method note for future checks.** Playwright's `page.screenshot()` captures
+the CSS-scaled view, so at the default zoom it is an 0.8 downscale — which is
+why every screenshot in this session understated the real fidelity. Dump
+`canvas.toDataURL()` instead to inspect what was actually rendered.
+
+**Left as a decision, not taken unilaterally:** the softening below 1:1 only
+disappears if the view never scales down — e.g. defaulting to 100% zoom, or
+snapping zoom to whole ratios (1x, 2x) and letting the viewport show less of
+the map. That trades how much world fits on screen for perfect crispness,
+which is a game-feel call.

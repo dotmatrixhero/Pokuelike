@@ -4,15 +4,20 @@ import { SPECIES } from "@pokuelike/data";
 import {
   getFertilePatch,
   getFloorBaseName,
-  getFloorOverlay,
-  getFloorTexture,
+  getGroundPatch,
+  getScatterDecal,
+  getFeatureDecal,
+  GROUND_CELL,
+  GROUND_PATCH_CELLS,
   getFloraSprite,
   getFoodSprite,
   getSeedlingSprite,
   getSprite,
+  humanSpriteKey,
   getTileSprite,
-  getWaterEdge,
-  getWaterInterior,
+  tileWindow,
+  getWaterFrame,
+  currentWaterFrame,
   type SpriteDirection,
 } from "./sprites.js";
 import type { ActivePopup } from "./eventPopups.js";
@@ -42,6 +47,22 @@ import {
 } from "./palette.js";
 
 export const TILE_SIZE = 20;
+
+/**
+ * A wild human's emoji, keyed by `Agent.archetype` (engine's
+ * `assignHumanArchetype`) and `Agent.sex`. Direct ask's own proposed set —
+ * hunter/forager/traveler/merchant/wanderer — with the plainest gendered
+ * variant available for each; the ninja emoji has no official female
+ * variant, so hunter is unisex. `wanderer` also doubles as the fallback for
+ * a human with no `archetype` set (the player, or a pre-archetype save).
+ */
+const HUMAN_ARCHETYPE_EMOJI: Record<"hunter" | "forager" | "traveler" | "merchant" | "wanderer", { male: string; female: string }> = {
+  hunter: { male: "🥷", female: "🥷" },
+  forager: { male: "👨‍🌾", female: "👩‍🌾" },
+  traveler: { male: "🚴‍♂️", female: "🚴‍♀️" },
+  merchant: { male: "🙋‍♂️", female: "🙋‍♀️" },
+  wanderer: { male: "🧘‍♂️", female: "🧘‍♀️" },
+};
 /**
  * Real sprite art is drawn larger than one tile and bottom-anchored (feet on
  * the tile, head/body overflowing upward into the tile above) rather than
@@ -144,31 +165,30 @@ function dominantBiomeAt(world: World, x: number, y: number): string | undefined
   return cache[idx] || undefined;
 }
 
+/**
+ * One tile's ground, windowed out of its biome's multi-tile ground patch in
+ * WORLD space: tile `(x, y)` draws source cell `(x % 6, y % 6)`, so two
+ * neighbouring tiles draw two neighbouring source cells and a run of ground
+ * reads as one continuous surface instead of the same sixteen pixels stamped
+ * over and over. See sprites.ts's `BIOME_GROUND` for what that does and does
+ * not buy (measured: some of the source grounds are genuinely one repeated
+ * tile, and for those the win comes from the scatter layer instead).
+ */
 function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: number, y: number, elevation: number): void {
   const biome = dominantBiomeAt(world, x, y);
-  const texture = getFloorTexture(biome);
-  if (texture) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
-    ctx.drawImage(texture, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-    ctx.restore();
+  // A "sand" TERRAIN tile is ground, so it is painted here in the ground pass
+  // rather than in the tile loop. Drawn in the loop it landed AFTER
+  // `drawElevationShade`, so every sand tile kept full brightness while the
+  // ground around it was shaded — a scatter of pale squares, which is the
+  // exact artifact this pass exists to remove.
+  const terrain = world.tiles[activeViewLayer][y * world.width + x]!.terrain;
+  const patch = terrain === "sand" ? getGroundPatch("beach", "surface") : getGroundPatch(biome, activeViewLayer);
+  if (patch && patch.width >= GROUND_CELL) {
+    drawPatchCell(ctx, patch, x, y);
+    // Elevation shading is NOT applied here — see `drawElevationShade`.
   } else {
     ctx.fillStyle = rgbToCss(shade(TERRAIN_BG.floor, elevation));
     ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-  }
-
-  // A sparse, semi-transparent decal on top of the consistent base — see
-  // sprites.ts's getFloorOverlay doc comment for why this replaced N
-  // competing full-strength base textures. Most tiles get none (null).
-  // Feathered to a soft blob (see featheredOverlayStamp) rather than
-  // drawn as a hard-edged square, direct ask: "make decals a little less
-  // square."
-  const overlay = getFloorOverlay(x, y, biome);
-  if (overlay) {
-    ctx.save();
-    ctx.globalAlpha = 0.48;
-    ctx.drawImage(featheredOverlayStamp(overlay), x * TILE_SIZE, y * TILE_SIZE);
-    ctx.restore();
   }
 
   // Direct ask: "border edging around different tiles to blend would be
@@ -176,6 +196,141 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
   // generated gradient blend rather than real edge art.
   drawBiomeEdgeBlend(ctx, world, x, y, elevation, biome);
 }
+
+/**
+ * An object that STANDS on a tile — a tree, a bush, a berry plant — drawn at
+ * its own aspect ratio, fitted to the tile's width and anchored so its base
+ * sits on the tile's bottom edge.
+ *
+ * Every one of these used to be squashed into a TILE_SIZE square: `tree_1` is
+ * 32x42 and the berry plants are 21x34, so they were being vertically
+ * compressed by a third and rendered squat. They are drawn in top-to-bottom
+ * row order, so the overflow above the tile lands on rows already painted.
+ * Height is capped so a very tall sprite can't cover the tile two rows up.
+ */
+const STANDING_MAX_TILES = 1.7;
+function drawStandingSprite(ctx: CanvasRenderingContext2D, sprite: CanvasImageSource, srcW: number, srcH: number, x: number, y: number): void {
+  const height = Math.min(TILE_SIZE * STANDING_MAX_TILES, (srcH / srcW) * TILE_SIZE);
+  ctx.drawImage(sprite, x * TILE_SIZE, (y + 1) * TILE_SIZE - height, TILE_SIZE, height);
+}
+
+/** Draws tile `(x, y)`'s cell of a multi-tile ground patch, windowed in world space so neighbouring tiles are continuous. */
+function drawPatchCell(ctx: CanvasRenderingContext2D, patch: HTMLImageElement, x: number, y: number): void {
+  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
+  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
+  ctx.drawImage(patch, sx, sy, GROUND_CELL, GROUND_CELL, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+}
+
+/** How dark the lowest-elevation ground gets. */
+const GROUND_ELEVATION_SHADE = 0.16;
+
+/**
+ * Elevation shading for the whole ground layer, as one smoothly interpolated
+ * wash instead of a per-tile fill.
+ *
+ * Elevation is a smooth field, but shading it a tile at a time quantises it
+ * into flat rectangular plateaus — measured on a live frame, two adjacent
+ * ground regions read 231,224,182 and 195,182,141, a uniform 0.84 multiply
+ * with a hard rectangular boundary, which looks exactly like the "square and
+ * ugly" tiling this whole pass is about. (The version before it, a per-tile
+ * `globalAlpha` on the ground texture, had the same shape of bug.)
+ *
+ * So the field is rasterised once into a canvas ONE PIXEL PER TILE and then
+ * blown up to map size with image smoothing deliberately turned on — the
+ * browser's bilinear filter does the interpolation, in one drawImage, and
+ * smoothing is restored afterwards so nothing else in the frame gets
+ * filtered (it is off globally, on purpose: see main.ts). The small canvas is
+ * cached per World, since elevation doesn't change over a world's life.
+ */
+const elevationShadeCache = new WeakMap<World, Partial<Record<Layer, HTMLCanvasElement>>>();
+function drawElevationShade(ctx: CanvasRenderingContext2D, world: World): void {
+  let perLayer = elevationShadeCache.get(world);
+  if (!perLayer) {
+    perLayer = {};
+    elevationShadeCache.set(world, perLayer);
+  }
+  // Keyed by layer as well as by world: surface and underground are separate
+  // tile arrays with their own elevations, and the world object is the same
+  // for both, so a world-only key would show the cave the surface's relief.
+  let small = perLayer[activeViewLayer];
+  if (!small) {
+    small = document.createElement("canvas");
+    small.width = world.width;
+    small.height = world.height;
+    const sctx = small.getContext("2d")!;
+    const image = sctx.createImageData(world.width, world.height);
+    const tiles = world.tiles[activeViewLayer];
+    for (let i = 0; i < world.width * world.height; i++) {
+      image.data[i * 4 + 3] = Math.round((1 - tiles[i]!.elevation) * GROUND_ELEVATION_SHADE * 255);
+    }
+    sctx.putImageData(image, 0, 0);
+    perLayer[activeViewLayer] = small;
+  }
+  const smoothing = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(small, 0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  ctx.imageSmoothingEnabled = smoothing;
+}
+
+/**
+ * The ground, drawn for the whole visible grid BEFORE anything else, in two
+ * passes: every tile's base, then every tile's scatter decal.
+ *
+ * Both the two-pass split and the separate loop are load-bearing. A decal is
+ * drawn at its NATIVE size at a hash-jittered sub-tile offset — that is the
+ * entire point, it's what stops the decal layer from being a lattice — so a
+ * 32x24 decal overhangs its own tile. Drawn inside the main tile loop it
+ * would be overpainted by the next tile's base a moment later, and the
+ * overhang would only ever survive upward and leftward. Drawn here, after
+ * every base is down, it survives in all four directions.
+ */
+function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      drawGroundBacking(ctx, world, x, y, world.tiles[activeViewLayer][y * world.width + x]!.elevation);
+    }
+  }
+  drawElevationShade(ctx, world);
+  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA);
+  // Landmarks go down after the fine detail so a boulder sits ON the tufts,
+  // not under them.
+  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1);
+}
+
+type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => { image: HTMLImageElement; jitterX: number; jitterY: number } | null;
+
+/** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
+function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
+  for (let y = 0; y < world.height; y++) {
+    for (let x = 0; x < world.width; x++) {
+      const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
+      if (!decal) continue;
+      const scale = TILE_SIZE / GROUND_CELL;
+      const w = decal.image.width * scale;
+      const h = decal.image.height * scale;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      // Bottom-anchored like every other standing art: a cactus three tiles
+      // tall should have its base on its own tile, not be centred across the
+      // two tiles above it.
+      ctx.drawImage(
+        decal.image,
+        (x + decal.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2,
+        (y + decal.jitterY + 1) * TILE_SIZE - h,
+        w,
+        h
+      );
+      ctx.restore();
+    }
+  }
+}
+
+/** One tile in N gets a scatter decal. Decals are up to two tiles across, so this is sparser than it sounds. */
+const SCATTER_ONE_IN = 7;
+/** One tile in N gets a landmark. Far sparser than the fine scatter — see `BIOME_FEATURES` (sprites.ts). */
+const FEATURE_ONE_IN = 47;
+/** Slightly translucent so a decal reads as part of the ground rather than an object sitting on it — real objects (trees, boulders, crops) are drawn opaque later and need to stay distinguishable from ground detail. */
+const SCATTER_ALPHA = 0.85;
 
 /**
  * A low-opacity color wash for this tile's `groundType` — direct design
@@ -221,13 +376,15 @@ function tintedSprite(sprite: HTMLImageElement, key: string, tint: Rgb): HTMLCan
   let cached = tintedSpriteCache.get(cacheKey);
   if (cached) return cached;
   const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
+  // The sprite's own pixel size, not a TILE_SIZE box — `drawStandingSprite`
+  // does the fitting, and pre-squashing here would undo it.
+  canvas.width = sprite.width;
+  canvas.height = sprite.height;
   const tctx = canvas.getContext("2d")!;
-  tctx.drawImage(sprite, 0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.drawImage(sprite, 0, 0);
   tctx.globalCompositeOperation = "source-atop";
   tctx.fillStyle = rgbaToCss(tint, 0.4);
-  tctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+  tctx.fillRect(0, 0, canvas.width, canvas.height);
   tintedSpriteCache.set(cacheKey, canvas);
   cached = canvas;
   return cached;
@@ -293,7 +450,10 @@ function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, 
   } else if (plantSprite) {
     ctx.save();
     ctx.globalAlpha = tile.terrain === "seedling" ? 0.7 : 0.4 + (tile.stock ?? 1) * 0.6;
-    ctx.drawImage(plantSprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    // Berry plants are 21x34 — drawn into a TILE_SIZE square they were
+    // squashed by a third and read as squat potted things. Same
+    // stands-on-the-tile treatment trees and bushes get.
+    drawStandingSprite(ctx, plantSprite, plantSprite.width, plantSprite.height, x, y);
     ctx.restore();
   } else if (unripe) {
     ctx.save();
@@ -372,29 +532,32 @@ function isFertileDecalTerrain(terrain: TerrainKind): boolean {
   return terrain === "food" || terrain === "flora" || terrain === "seedling";
 }
 
-const contiguousStampCache = new Map<HTMLImageElement, Map<number, HTMLCanvasElement>>();
-function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: boolean, openLeft: boolean, openRight: boolean): HTMLCanvasElement {
-  const key = (openUp ? 8 : 0) | (openDown ? 4 : 0) | (openLeft ? 2 : 0) | (openRight ? 1 : 0);
-  let perImage = contiguousStampCache.get(img);
-  if (!perImage) {
-    perImage = new Map();
-    contiguousStampCache.set(img, perImage);
+let patchScratch: HTMLCanvasElement | undefined;
+function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: boolean, openLeft: boolean, openRight: boolean, x: number, y: number): HTMLCanvasElement {
+  if (!patchScratch) {
+    patchScratch = document.createElement("canvas");
+    patchScratch.width = TILE_SIZE;
+    patchScratch.height = TILE_SIZE;
   }
-  const cached = perImage.get(key);
-  if (cached) return cached;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
-  const octx = canvas.getContext("2d")!;
-  octx.drawImage(img, 0, 0, TILE_SIZE, TILE_SIZE);
+  const octx = patchScratch.getContext("2d")!;
+  octx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "source-over";
+  octx.filter = "none";
+  // The source is a multi-tile ground patch now, so it gets the same
+  // world-space windowing every other ground draw uses — a run of fertile
+  // tiles is continuous ground, not the same cell stamped repeatedly. Built
+  // on a shared scratch canvas rather than cached per (image, sides), since
+  // the right cell now depends on the tile.
+  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
+  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
+  octx.drawImage(img, sx, sy, GROUND_CELL, GROUND_CELL, 0, 0, TILE_SIZE, TILE_SIZE);
   octx.globalCompositeOperation = "destination-in";
-  octx.filter = "blur(1.5px)";
-  const r = TILE_SIZE / 3;
-  const left = openLeft ? 0 : 1;
-  const top = openUp ? 0 : 1;
-  const right = TILE_SIZE - (openRight ? 0 : 1);
-  const bottom = TILE_SIZE - (openDown ? 0 : 1);
+  octx.filter = "blur(2.5px)";
+  const r = TILE_SIZE / 2.2;
+  const left = openLeft ? 0 : 2;
+  const top = openUp ? 0 : 2;
+  const right = TILE_SIZE - (openRight ? 0 : 2);
+  const bottom = TILE_SIZE - (openDown ? 0 : 2);
   octx.beginPath();
   octx.roundRect(left, top, right - left, bottom - top, [
     openUp || openLeft ? 0 : r, // top-left
@@ -404,14 +567,13 @@ function contiguousPatchStamp(img: HTMLImageElement, openUp: boolean, openDown: 
   ]);
   octx.fillStyle = "black";
   octx.fill();
-  perImage.set(key, canvas);
-  return canvas;
+  return patchScratch;
 }
 
 /**
  * Procedural biome-floor edge blend — direct ask: "border edging around
  * different tiles to blend would be nice." Unlike water's shoreline
- * (`getWaterEdge`), there's no dedicated hand-drawn edge art for a
+ * (`drawWaterLayer`), there's no dedicated hand-drawn edge art for a
  * desert-meets-cave or cave-meets-stone seam, so this generates the
  * transition instead of cropping one: a linear alpha gradient, strongest
  * at the tile edge and fading out over roughly 60% of the tile, masks the
@@ -453,25 +615,30 @@ function edgeGradientMask(direction: EdgeDirection): HTMLCanvasElement {
   return canvas;
 }
 
-const edgeBlendStampCache = new Map<HTMLImageElement, Partial<Record<EdgeDirection, HTMLCanvasElement>>>();
-function edgeBlendStamp(texture: HTMLImageElement, direction: EdgeDirection): HTMLCanvasElement {
-  let perImage = edgeBlendStampCache.get(texture);
-  if (!perImage) {
-    perImage = {};
-    edgeBlendStampCache.set(texture, perImage);
+/**
+ * The neighbour's ground, masked to a one-directional fade. Not cached per
+ * (image, direction) the way it used to be: the neighbour's ground is now a
+ * multi-tile patch windowed in world space (see drawGroundBacking), so the
+ * right source cell depends on the tile, and caching 6x6x4 stamps per texture
+ * to avoid one drawImage on boundary tiles only isn't worth it. Reuses one
+ * scratch canvas instead of allocating per call.
+ */
+let edgeScratch: HTMLCanvasElement | undefined;
+function edgeBlendStamp(texture: HTMLImageElement, direction: EdgeDirection, x: number, y: number): HTMLCanvasElement {
+  if (!edgeScratch) {
+    edgeScratch = document.createElement("canvas");
+    edgeScratch.width = TILE_SIZE;
+    edgeScratch.height = TILE_SIZE;
   }
-  const cached = perImage[direction];
-  if (cached) return cached;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_SIZE;
-  canvas.height = TILE_SIZE;
-  const octx = canvas.getContext("2d")!;
-  octx.drawImage(texture, 0, 0, TILE_SIZE, TILE_SIZE);
+  const octx = edgeScratch.getContext("2d")!;
+  octx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+  octx.globalCompositeOperation = "source-over";
+  const sx = (x % GROUND_PATCH_CELLS) * GROUND_CELL;
+  const sy = (y % GROUND_PATCH_CELLS) * GROUND_CELL;
+  octx.drawImage(texture, sx, sy, GROUND_CELL, GROUND_CELL, 0, 0, TILE_SIZE, TILE_SIZE);
   octx.globalCompositeOperation = "destination-in";
   octx.drawImage(edgeGradientMask(direction), 0, 0);
-  perImage[direction] = canvas;
-  return canvas;
+  return edgeScratch;
 }
 
 const EDGE_NEIGHBORS: readonly { dir: EdgeDirection; dx: number; dy: number }[] = [
@@ -502,7 +669,7 @@ function drawBiomeEdgeBlend(ctx: CanvasRenderingContext2D, world: World, x: numb
     if (neighbor.terrain === "water") continue;
     const neighborBiome = dominantBiomeAt(world, nx, ny);
     if (getFloorBaseName(neighborBiome) === ownBase) continue;
-    const neighborTexture = getFloorTexture(neighborBiome);
+    const neighborTexture = getGroundPatch(neighborBiome, activeViewLayer);
     if (!neighborTexture) continue;
     // Only ONE flowing blend per tile — direct ask, after seeing this
     // draw all 4 directions independently: "the gradient should flow in
@@ -518,10 +685,176 @@ function drawBiomeEdgeBlend(ctx: CanvasRenderingContext2D, world: World, x: numb
     // boundaries — a real, deliberate trade for a much cleaner look.
     ctx.save();
     ctx.globalAlpha = Math.min(1, 0.82 + elevation * 0.18);
-    ctx.drawImage(edgeBlendStamp(neighborTexture, dir), x * TILE_SIZE, y * TILE_SIZE);
+    ctx.drawImage(edgeBlendStamp(neighborTexture, dir, x, y), x * TILE_SIZE, y * TILE_SIZE);
     ctx.restore();
     return;
   }
+}
+
+/**
+ * The water layer: every water tile on the map, drawn as ONE smoothed body
+ * rather than tile by tile.
+ *
+ * Water is grid terrain, so a lake outline is always a run of 90-degree
+ * steps, and a river that runs diagonally is a checkerboard of tiles that
+ * touch only at their corners. Two per-tile attempts at this failed in ways
+ * worth recording, because both looked plausible in code:
+ * - Full square tiles: the outline is a literal staircase. On a map that is
+ *   roughly half water this was the loudest thing on screen.
+ * - Per-tile rounded/inset shapes, flush on water-facing sides and pulled
+ *   back on land-facing ones: lakes came out fine, but every tile of a
+ *   diagonal river has land on all four sides, so each one became a circle.
+ *   With no bridging the run had gaps ("the rivers have holes in em"); with
+ *   corner bridges it became a string of beads ("Looks like train tracks.
+ *   Not contiguous.."). No per-tile rule can fix that, because per-tile is
+ *   the problem: two diagonal tiles share a point, not an edge.
+ *
+ * So the shape is computed for the whole map at once. The water mask is
+ * rasterised ONE PIXEL PER TILE, scaled up to map size with image smoothing
+ * on (the browser's bilinear filter does the work), and thresholded. Any two
+ * tiles that touch — orthogonally or diagonally — end up above the threshold
+ * in between, so a diagonal run comes out as one continuous ribbon with a
+ * smooth, non-grid outline, and so does a coastline. Same trick as
+ * `drawElevationShade`, used for shape instead of shading.
+ *
+ * The whole composed layer is cached per animation frame, so a render frame
+ * costs one drawImage; it is rebuilt only when the water actually changes
+ * (drought, a dug spring), detected by hashing the water tiles.
+ */
+const WATER_THRESHOLD = 0.42;
+/** Width of the threshold ramp, for an anti-aliased waterline instead of a jagged one. */
+const WATER_EDGE_SOFT = 0.1;
+/** Everything under this much mask coverage is shallows — the band between the waterline and open water. */
+const WATER_SHALLOW_TO = 0.78;
+const SHALLOW_ALPHA = 0.3;
+const SHALLOW_TINT: Rgb = [214, 238, 246];
+
+type WaterLayer = {
+  signature: number;
+  /** Alpha = how much of the smoothed body covers this pixel, already thresholded. */
+  body: HTMLCanvasElement;
+  /** Alpha = the shallows ring only. */
+  shallow: HTMLCanvasElement;
+  /** Alpha = per-tile depth darkening, smoothly interpolated and masked to the body. */
+  depth: HTMLCanvasElement;
+  frames: Map<number, HTMLCanvasElement>;
+};
+
+const waterLayerCache = new WeakMap<World, Partial<Record<Layer, WaterLayer>>>();
+
+/** Cheap hash of which tiles are water, so the cached layer rebuilds when the map's water actually changes and not otherwise. */
+function waterSignature(tiles: readonly Tile[]): number {
+  let h = 2166136261;
+  for (let i = 0; i < tiles.length; i++) {
+    if (tiles[i]!.terrain === "water") h = Math.imul(h ^ i, 16777619);
+  }
+  return h >>> 0;
+}
+
+function scratchCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+/** Upscales a one-pixel-per-tile alpha field to map size with bilinear smoothing. */
+function upscaleField(world: World, alphaAt: (index: number) => number): ImageData {
+  const small = scratchCanvas(world.width, world.height);
+  const sctx = small.getContext("2d")!;
+  const image = sctx.createImageData(world.width, world.height);
+  for (let i = 0; i < world.width * world.height; i++) image.data[i * 4 + 3] = alphaAt(i);
+  sctx.putImageData(image, 0, 0);
+  const big = scratchCanvas(world.width * TILE_SIZE, world.height * TILE_SIZE);
+  const bctx = big.getContext("2d")!;
+  bctx.imageSmoothingEnabled = true;
+  bctx.drawImage(small, 0, 0, big.width, big.height);
+  return bctx.getImageData(0, 0, big.width, big.height);
+}
+
+function buildWaterLayer(world: World, tiles: readonly Tile[], signature: number): WaterLayer {
+  const width = world.width * TILE_SIZE;
+  const height = world.height * TILE_SIZE;
+  const coverage = upscaleField(world, (i) => (tiles[i]!.terrain === "water" ? 255 : 0));
+  const depthField = upscaleField(world, (i) => {
+    if (tiles[i]!.terrain !== "water") return 0;
+    const x = i % world.width;
+    // "Deep water is darker" — direct ask. Interpolated across the map for
+    // the same reason elevation is: per-tile it quantises into flat squares.
+    return Math.round(waterDepthFactor(world, { x, y: (i - x) / world.width }) * WATER_DEPTH_DARKEN_MAX * 255);
+  });
+
+  const body = scratchCanvas(width, height);
+  const shallow = scratchCanvas(width, height);
+  const depth = scratchCanvas(width, height);
+  const bodyData = new ImageData(width, height);
+  const shallowData = new ImageData(width, height);
+  const depthData = new ImageData(width, height);
+  for (let p = 0; p < width * height; p++) {
+    const cover = coverage.data[p * 4 + 3]! / 255;
+    const inside = Math.max(0, Math.min(1, (cover - WATER_THRESHOLD) / WATER_EDGE_SOFT));
+    bodyData.data[p * 4 + 3] = Math.round(inside * 255);
+    // Shallows fade out as coverage climbs toward open water.
+    const shallowness = Math.max(0, Math.min(1, (WATER_SHALLOW_TO - cover) / (WATER_SHALLOW_TO - WATER_THRESHOLD)));
+    shallowData.data[p * 4 + 0] = SHALLOW_TINT[0];
+    shallowData.data[p * 4 + 1] = SHALLOW_TINT[1];
+    shallowData.data[p * 4 + 2] = SHALLOW_TINT[2];
+    shallowData.data[p * 4 + 3] = Math.round(inside * shallowness * SHALLOW_ALPHA * 255);
+    depthData.data[p * 4 + 3] = Math.round(inside * (depthField.data[p * 4 + 3]! / 255) * 255);
+  }
+  body.getContext("2d")!.putImageData(bodyData, 0, 0);
+  shallow.getContext("2d")!.putImageData(shallowData, 0, 0);
+  depth.getContext("2d")!.putImageData(depthData, 0, 0);
+  return { signature, body, shallow, depth, frames: new Map() };
+}
+
+/**
+ * The composed water layer for one animation frame: the water texture tiled
+ * across the map, masked to the smoothed body, then the depth wash and the
+ * shallows ring.
+ *
+ * The texture is one repeating pattern for the whole map rather than a
+ * per-tile phase-shifted sprite, which is what it used to be. That per-tile
+ * phase was itself a grid artifact — adjacent tiles animated out of step, so
+ * open water visibly shimmered in squares.
+ */
+function waterLayerFrame(layer: WaterLayer, frame: HTMLImageElement, index: number): HTMLCanvasElement | null {
+  const cached = layer.frames.get(index);
+  if (cached) return cached;
+  const composed = scratchCanvas(layer.body.width, layer.body.height);
+  const cctx = composed.getContext("2d")!;
+  const pattern = cctx.createPattern(frame, "repeat");
+  if (!pattern) return null;
+  cctx.imageSmoothingEnabled = false;
+  cctx.fillStyle = pattern;
+  cctx.fillRect(0, 0, composed.width, composed.height);
+  cctx.drawImage(layer.depth, 0, 0);
+  cctx.drawImage(layer.shallow, 0, 0);
+  cctx.globalCompositeOperation = "destination-in";
+  cctx.drawImage(layer.body, 0, 0);
+  layer.frames.set(index, composed);
+  return composed;
+}
+
+/** Draws the whole water layer. Called once, between the ground and the tile loop. */
+function drawWaterLayer(ctx: CanvasRenderingContext2D, world: World): void {
+  const tiles = world.tiles[activeViewLayer];
+  const index = currentWaterFrame();
+  const frame = getWaterFrame();
+  if (!frame || !frame.complete || frame.naturalWidth === 0) return;
+  let perLayer = waterLayerCache.get(world);
+  if (!perLayer) {
+    perLayer = {};
+    waterLayerCache.set(world, perLayer);
+  }
+  const signature = waterSignature(tiles);
+  let layer = perLayer[activeViewLayer];
+  if (!layer || layer.signature !== signature) {
+    layer = buildWaterLayer(world, tiles, signature);
+    perLayer[activeViewLayer] = layer;
+  }
+  const composed = waterLayerFrame(layer, frame, index);
+  if (composed) ctx.drawImage(composed, 0, 0);
 }
 
 export type RenderStyle = "tile" | "ascii";
@@ -540,10 +873,13 @@ export type RenderStyle = "tile" | "ascii";
  */
 const lastFacing = new Map<string, SpriteDirection>();
 const lastPos = new Map<string, { x: number; y: number }>();
+/** Set by `facingOf` each frame: did this agent change tile since the last draw? Read by `walkFrameOf`. */
+const movedThisFrame = new Map<string, boolean>();
 
 function facingOf(agent: Agent): SpriteDirection {
   const prev = lastPos.get(agent.id);
   lastPos.set(agent.id, { x: agent.pos.x, y: agent.pos.y });
+  movedThisFrame.set(agent.id, !!prev && (prev.x !== agent.pos.x || prev.y !== agent.pos.y));
   if (!prev) return lastFacing.get(agent.id) ?? "down";
 
   const dx = agent.pos.x - prev.x;
@@ -555,6 +891,35 @@ function facingOf(agent: Agent): SpriteDirection {
   return direction;
 }
 
+/**
+ * Which walk frame an agent is on. Every species now has a standing pose and
+ * one step frame per facing (see packages/web/scripts/rip_pokemon_frames.py),
+ * so the cycle is simply stand/step alternating on each tile the agent
+ * actually enters — the sim moves agents a whole tile at a time, so tile
+ * changes ARE the footfalls, and driving the animation off a wall clock
+ * instead would have everything paddling in place at the same rate regardless
+ * of how fast it is really moving.
+ *
+ * An agent that has stopped settles back to standing rather than freezing
+ * mid-stride, but the timeout is measured in MILLISECONDS, not render frames:
+ * the canvas redraws at ~60fps while agents move on much slower sim ticks, so
+ * a frame-counted timeout expired between every footfall and the step pose was
+ * only ever on screen for a single frame — i.e. invisible.
+ */
+const walkPhase = new Map<string, { parity: number; lastMoveMs: number }>();
+const WALK_REST_MS = 400;
+
+function walkFrameOf(agent: Agent, moved: boolean): number {
+  const now = performance.now();
+  const state = walkPhase.get(agent.id) ?? { parity: 0, lastMoveMs: 0 };
+  if (moved) {
+    state.parity ^= 1;
+    state.lastMoveMs = now;
+  }
+  walkPhase.set(agent.id, state);
+  return now - state.lastMoveMs > WALK_REST_MS ? 0 : state.parity;
+}
+
 /** Drops facing/position memory for agent ids no longer in the world (dead, despawned) so the maps don't grow forever. */
 function pruneStaleFacings(world: World): void {
   const liveIds = new Set(world.agents.map((a) => a.id));
@@ -563,6 +928,8 @@ function pruneStaleFacings(world: World): void {
       lastPos.delete(id);
       lastFacing.delete(id);
       renderPos.delete(id);
+      walkPhase.delete(id);
+      movedThisFrame.delete(id);
     }
   }
 }
@@ -736,6 +1103,8 @@ function drawWorldTiles(
 
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
+  drawGroundLayer(ctx, world);
+  drawWaterLayer(ctx, world);
 
   ctx.save();
   // Emoji fonts appended as fallback, not a replacement — plain ASCII
@@ -755,16 +1124,11 @@ function drawWorldTiles(
       // a roguelike's open ground, deliberately ignoring elevation shading
       // (which is still visible on every non-floor terrain).
       if (tile.terrain === "floor") {
-        // A real texture (see sprites.ts's getFloorTexture — cave-floor/
-        // dirt-path crops, picked per individual tile so it reads as
-        // natural grain rather than a patchwork of chunks) drawn at
-        // near-full strength — direct follow-up ask after an earlier pass
-        // shipped this at a barely-visible opacity: "why is the ground
-        // tile on tile mode not the nice dirt ones we put in?" The dirt
-        // art itself already has real tonal variation, so it doesn't need
-        // to be faded down to avoid looking like a flat loud fill the way
-        // a single solid color would.
-        drawGroundBacking(ctx, world, x, y, tile.elevation);
+        // The ground texture itself is already down — `drawGroundLayer`
+        // painted every tile's base plus the off-grid scatter decals before
+        // this loop started (see its doc comment for why it has to be a
+        // separate pass). Only the per-tile tints and the faint glyph are
+        // left to do here.
         drawGroundTypeTint(ctx, tile, x, y);
         drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
         ctx.fillStyle = rgbaToCss(shade([120, 128, 140], tile.elevation), 0.35);
@@ -773,46 +1137,10 @@ function drawWorldTiles(
         continue;
       }
 
-      // Water always draws the seamless interior fill, then overlays a
-      // sandy edge strip cropped from the bordered source art only on the
-      // side(s) that actually face a non-water neighbor — real per-side
-      // shorelines built by compositing, not a single all-or-nothing
-      // border (see sprites.ts's getWaterEdge for why there's no separate
-      // per-direction art to draw from instead). Off the edge of the map
-      // counts as a non-water neighbor too, so the map border gets a
-      // shore lip as well.
-      if (tile.terrain === "water") {
-        const interior = getWaterInterior(x, y);
-        if (interior) {
-          ctx.drawImage(interior, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          const isWater = (nx: number, ny: number) =>
-            nx >= 0 && nx < world.width && ny >= 0 && ny < world.height && surface[ny * world.width + nx]!.terrain === "water";
-          const edge = getWaterEdge(x, y);
-          if (edge) {
-            const src = edge.width; // bordered source is always square (48x48)
-            const strip = src / 6; // border ring is ~8px of a 48px tile
-            const dx = x * TILE_SIZE;
-            const dy = y * TILE_SIZE;
-            const dstStrip = TILE_SIZE / 6;
-            if (!isWater(x, y - 1)) ctx.drawImage(edge, 0, 0, src, strip, dx, dy, TILE_SIZE, dstStrip);
-            if (!isWater(x, y + 1)) ctx.drawImage(edge, 0, src - strip, src, strip, dx, dy + TILE_SIZE - dstStrip, TILE_SIZE, dstStrip);
-            if (!isWater(x - 1, y)) ctx.drawImage(edge, 0, 0, strip, src, dx, dy, dstStrip, TILE_SIZE);
-            if (!isWater(x + 1, y)) ctx.drawImage(edge, src - strip, 0, strip, src, dx + TILE_SIZE - dstStrip, dy, dstStrip, TILE_SIZE);
-          }
-          // "Deep water is darker" — direct ask. The interior/edge sprites
-          // above are real art, not a flat fill `shade`/`waterDepthShade`
-          // could tint directly, so this composites a translucent black
-          // wash on top instead, scaled by the same body-size-based depth
-          // factor the ASCII render mode uses — a small puddle stays
-          // essentially untinted, a real lake/ocean reads visibly deeper.
-          const depth = waterDepthFactor(world, { x, y });
-          if (depth > 0) {
-            ctx.fillStyle = rgbaToCss([0, 0, 0], depth * WATER_DEPTH_DARKEN_MAX);
-            ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-          }
-          continue;
-        }
-      }
+      // Water is not drawn per tile at all — `drawWaterLayer` already put
+      // the whole body down over the ground, before this loop. See its doc
+      // comment for why it cannot be a per-tile shape.
+      if (tile.terrain === "water") continue;
 
       // Real tile art (see sprites.ts's getTileSprite) takes priority when it
       // exists for this terrain kind. "shelter" keeps its dynamic per-owner
@@ -820,6 +1148,13 @@ function drawWorldTiles(
       // treatment right below instead — neither has a fixed piece of art to
       // swap in — so those always fall through here regardless of art
       // availability.
+      // "sand" terrain is ground, and `drawGroundLayer` already painted it —
+      // see drawGroundBacking's own note on why it cannot be drawn here.
+      if (tile.terrain === "sand") {
+        drawTileVignette(ctx, x, y);
+        continue;
+      }
+
       if (tile.terrain !== "shelter" && tile.terrain !== "food" && tile.terrain !== "flora" && tile.terrain !== "seedling") {
         const sprite = getTileSprite(tile.terrain, x, y);
         if (sprite) {
@@ -828,7 +1163,6 @@ function drawWorldTiles(
           // those corners instead of the near-black canvas base. "water" is
           // its own full-tile opaque surface, not an object standing on
           // ground, so it's excluded.
-          if (tile.terrain !== "water") drawGroundBacking(ctx, world, x, y, tile.elevation);
           // Biome-flavored recolor for tree/bush only (see BIOME_FLORA_TINT's
           // own doc comment, palette.ts) — boulder/wall/sand/mud already read
           // fine as plain, and a recolored rock/wall would just look wrong.
@@ -840,9 +1174,21 @@ function drawWorldTiles(
             // most a few tinted copies total, reused across every tile that
             // happens to roll the same variant, instead of one cache entry
             // per map tile ever drawn.
-            ctx.drawImage(tintedSprite(sprite, sprite.src, floraTint), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            const tinted = tintedSprite(sprite, sprite.src, floraTint);
+            drawStandingSprite(ctx, tinted, tinted.width, tinted.height, x, y);
           } else {
-            ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            // A tiling surface texture far bigger than a tile (mud is
+            // 128x128, wall 144x144) gets a tile-sized window drawn 1:1
+            // instead of the whole image squashed down — full fidelity, and a
+            // different crop per tile so the terrain stops repeating. See
+            // sprites.ts's `tileWindow`; null for object icons like trees,
+            // which are drawn whole however big their art is.
+            const win = tileWindow(sprite, tile.terrain, x, y, TILE_SIZE);
+            if (win) {
+              ctx.drawImage(sprite, win.sx, win.sy, TILE_SIZE, TILE_SIZE, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            } else {
+              drawStandingSprite(ctx, sprite, sprite.width, sprite.height, x, y);
+            }
           }
           drawTileVignette(ctx, x, y);
           continue;
@@ -859,11 +1205,10 @@ function drawWorldTiles(
       // Ported that same treatment here instead of the old mix-to-full-color
       // fill.
       if (tile.terrain === "food" || tile.terrain === "flora" || tile.terrain === "seedling") {
-        // Real ground texture underneath, not the old flat dark wash — same
-        // "black behind transparent corners" fix as boulders/trees/etc.
-        // above, since the real berry-plant art (below) also has transparent
-        // corners around the plant itself.
-        drawGroundBacking(ctx, world, x, y, tile.elevation);
+        // Real ground texture underneath comes from `drawGroundLayer`'s
+        // whole-grid pass, not from here — same "black behind transparent
+        // corners" fix as boulders/trees/etc. above, since the real
+        // berry-plant art (below) also has transparent corners.
         drawGroundTypeTint(ctx, tile, x, y);
         drawBiomeTint(ctx, dominantBiomeAt(world, x, y), x, y);
 
@@ -888,8 +1233,8 @@ function drawWorldTiles(
           const openLeft = x > 0 && isFertileDecalTerrain(surface[y * world.width + (x - 1)]!.terrain);
           const openRight = x < world.width - 1 && isFertileDecalTerrain(surface[y * world.width + (x + 1)]!.terrain);
           ctx.save();
-          ctx.globalAlpha = 0.15 + fertility * 0.4;
-          ctx.drawImage(contiguousPatchStamp(fertilePatch, openUp, openDown, openLeft, openRight), x * TILE_SIZE, y * TILE_SIZE);
+          ctx.globalAlpha = 0.18 + fertility * 0.42;
+          ctx.drawImage(contiguousPatchStamp(fertilePatch, openUp, openDown, openLeft, openRight, x, y), x * TILE_SIZE, y * TILE_SIZE);
           ctx.restore();
         }
 
@@ -1188,7 +1533,14 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
   // lets any species with real art render it, curated or not; getSprite
   // already degrades to null (and drawAgent to the letter) for a species
   // with genuinely no art.
-  const sprite = getSprite(def?.spriteKey ?? agent.species, direction);
+  // A human resolves to one of the ripped trainer sprites (by archetype, or
+  // the player's own character) rather than to `def.spriteKey` — "human" has
+  // no art in the Pokemon sheet. See sprites.ts's `humanSpriteKey`.
+  const spriteKey =
+    agent.species === "human"
+      ? humanSpriteKey(agent.controlledBy === "player", agent.archetype)
+      : (def?.spriteKey ?? agent.species);
+  const sprite = getSprite(spriteKey, direction, walkFrameOf(agent, movedThisFrame.get(agent.id) ?? false));
   const isCorpse = agent.alive === false;
 
   // Faux drop shadow — direct ask: "faux shadows under the Pokémon, just
@@ -1227,7 +1579,10 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     ctx.font = `${TILE_SIZE * 0.85}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
     ctx.fillStyle = "#fff"; // the backing circle's 0.28 alpha would otherwise apply to the egg — see the player branch
     ctx.fillText("🥚", px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE / 2 + jitterY);
-  } else if (agent.controlledBy === "player") {
+  } else if (agent.controlledBy === "player" && !sprite) {
+    // Fallback only, now that real trainer art exists (see `humanSpriteKey`):
+    // this still draws for the frame or two before the PNG finishes loading,
+    // and if the file is ever missing.
     // Direct ask: "change the player icon to a 👱 emoji." The human has no
     // sprite art, and the letter fallback read as one more glyph among
     // the terrain. Same backing-circle treatment as the egg so it holds up
@@ -1254,6 +1609,29 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     // report: "It's still semi transparent." Opaque fill before every emoji.
     ctx.fillStyle = "#fff";
     ctx.fillText("👱", cx, cy);
+  } else if (agent.species === "human" && !sprite) {
+    // Fallback only — real per-archetype trainer art is the normal path now.
+    // A wild/NPC human — direct ask: "make humans spawn with different
+    // types... Should also have sex and that should affect which emoji
+    // you choose for them." Same backing-disc treatment as the player
+    // branch above (no sprite art exists for "human" either), keyed by
+    // `agent.archetype` (immigration.ts's `assignHumanArchetype`) and
+    // `agent.sex`. No official gendered variant for the ninja emoji, so
+    // hunter reads the same either way.
+    const cx = px + TILE_SIZE / 2 + jitterX;
+    const cy = py + TILE_SIZE * 0.45 + jitterY;
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE_SIZE * 0.68, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${TILE_SIZE * 1.15}px "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(HUMAN_ARCHETYPE_EMOJI[agent.archetype ?? "wanderer"][agent.sex === "female" ? "female" : "male"], cx, cy);
   } else if (sprite) {
     // Bigger than one tile (see SPRITE_SCALE) and bottom-anchored so the
     // sprite's feet sit on its actual tile instead of the whole thing being

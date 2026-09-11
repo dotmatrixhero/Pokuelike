@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
@@ -379,6 +379,16 @@ function resetUiForNewWorld(): void {
 
   canvas.width = world.width * TILE_SIZE;
   canvas.height = world.height * TILE_SIZE;
+  // Setting canvas.width/height RESETS every context property, so this has to
+  // be re-applied here rather than once at startup. Without it the context
+  // keeps the browser default (smoothing ON) and every drawImage that resamples
+  // — which is nearly all of them, since almost no tile art is exactly
+  // TILE_SIZE — gets bilinear-filtered into the backing store. The CSS
+  // `image-rendering: pixelated` then faithfully upscales an already-blurred
+  // image, so the blur survives to the screen. macroMap.ts always did this;
+  // the main canvas never did. Direct report: "Are the pixels getting super
+  // ugly compressed when rendered? I think we are losing a lot of fidelity."
+  ctx.imageSmoothingEnabled = false;
   applyZoom();
 
   eventLogPanel.reset();
@@ -2005,6 +2015,14 @@ function setZoom(next: number): void {
   zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
   canvas.style.width = `${canvas.width * zoom}px`;
   canvas.style.height = `${canvas.height * zoom}px`;
+  // `image-rendering: pixelated` is right when scaling UP — it keeps pixel art
+  // crisp instead of smearing it. Scaling DOWN it is actively destructive:
+  // nearest-neighbour at 0.8 throws away every fifth row and column outright,
+  // so one-pixel features simply vanish. Direct report: "Krabbys left eye is
+  // missing a black pixel...?" — measured at the time as a 1800x1200 canvas
+  // displayed at 1440x960. Below 1:1, let the browser filter instead: softer,
+  // but every pixel contributes rather than one in five being deleted.
+  canvas.style.imageRendering = zoom < 1 ? "auto" : "pixelated";
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
 }
 function applyZoom(): void {
@@ -2355,6 +2373,19 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
   (window as unknown as { __pokuelike: unknown }).__pokuelike = {
     get world() {
       return world;
+    },
+    /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
+    biomeAt(x: number, y: number): string | undefined {
+      const weights = biomeWeightsAt(world.biomeSeeds, x, y);
+      let best: string | undefined;
+      let bestWeight = 0;
+      for (const [name, weight] of Object.entries(weights)) {
+        if (weight > bestWeight) {
+          bestWeight = weight;
+          best = name;
+        }
+      }
+      return best;
     },
   };
 }

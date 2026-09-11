@@ -4,6 +4,7 @@ import { tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { growCanopyFood, growFlora, growUndergroundFlora, maybeDropSeed } from "./flora.js";
 import { applyFireDamage, tickFires } from "./fire.js";
+import { applySludgeEffects, tickSludge } from "./sludge.js";
 import { tickHerds } from "./herds.js";
 import { decayShelters } from "./shelter.js";
 import { tickEgg } from "./eggs.js";
@@ -462,6 +463,11 @@ export function tickWorld(
   tickHerds(world, log);
   tickFires(world, log, rng);
   applyFireDamage(world, log, rng);
+  // Same slot as fire, same shape: count the hazard tiles down, then apply
+  // what standing in one does. Sludge does not spread, so there is no
+  // equivalent of fire's neighbour roll.
+  tickSludge(world);
+  applySludgeEffects(world, log, rng);
   // Once per tick, after every system that can kill has run (the agent loop
   // above, plus applyFireDamage immediately before) and before
   // `pruneStaleCorpses` below removes this tick's corpses — see witness.ts.

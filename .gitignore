@@ -4,3 +4,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .claude/worktrees/
+
+# Python bytecode from the asset-rip scripts
+__pycache__/
+*.pyc
