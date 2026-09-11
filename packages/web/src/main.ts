@@ -4,7 +4,9 @@ import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, 
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
+import { examineTile, verbsForTile, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
+import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
@@ -616,6 +618,241 @@ function say(text: string): void {
   hudMessageEl.textContent = text;
   actionLogPanel.say(world.tick, text);
 }
+
+const tileMenu = new TileMenu(mapAreaEl);
+const tileTipEl = document.getElementById("tile-tip") as HTMLElement;
+
+/**
+ * A tile the radial already chose, waiting for the command menu to say which
+ * move to use on it. Undefined during the ordinary verb-first flow, where the
+ * move is picked first and the tile tapped afterwards.
+ */
+let pendingTargetTile: Vec2 | undefined;
+
+/** Issuing an order is the player's own turn to spend, same as every other verb — `agentId` undefined means the player's own swing. */
+function commitMove(agentId: string | undefined, moveId: string, target: Vec2): void {
+  if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
+  else playerAct({ kind: "command", agentId, moveId, target });
+}
+
+const TERRAIN_WORDS: Partial<Record<string, string>> = {
+  floor: "Bare floor",
+  wall: "Solid wall",
+  water: "Water",
+  food: "Food growing",
+  flora: "Plants",
+  sunbeam: "A shaft of light",
+  seedling: "A seedling",
+  tree: "A tree",
+  boulder: "A boulder",
+  bush: "Thick bush",
+  sand: "Sand",
+  mud: "Mud",
+  shelter: "Shelter",
+  sludge: "Fouled ground",
+  stone: "Rock outcrop",
+  fire: "Fire",
+  ice: "Ice",
+  stairsDown: "Stairs down",
+  stairsUp: "Stairs up",
+  exit: "The way out",
+};
+
+/**
+ * What a tile is, in the player's own voice. Direct ask: "seeing what items
+ * are harvestabls, what kind of terrain and what effects standing on it does."
+ *
+ * Two sentences at most, per the house style — the first says what the ground
+ * is and what it does to you, the second what you could take from it. Vague
+ * words are a bug here: if there is nothing to say about a tile, say "Nothing
+ * grows here", not "not much".
+ */
+function describeTile(report: TileReport): string {
+  const name = TERRAIN_WORDS[report.terrain] ?? report.terrain;
+  const effects: string[] = [];
+  if (report.poisons) effects.push("it poisons what stands in it");
+  if (report.conceals) effects.push("you are hidden here");
+  if (!report.walkable) effects.push("you cannot pass");
+  if (report.lit) effects.push("it is lit");
+  const first = effects.length > 0 ? `${name} — ${effects.join(", ")}.` : `${name}.`;
+
+  if (report.occupantId) {
+    const who = world.agents.find((a) => a.id === report.occupantId);
+    if (who) return `${first} ${SPECIES[who.species]?.name ?? who.species} stands here.`;
+  }
+  if (report.corpseId) {
+    const body = world.agents.find((a) => a.id === report.corpseId);
+    if (body) return `${first} A dead ${SPECIES[body.species]?.name ?? body.species} lies here.`;
+  }
+  if (report.harvestable.length > 0 && report.harvestsLeft > 0) {
+    return `${first} ${report.harvestable.map((m: string) => itemName(m)).join(" and ")} here.`;
+  }
+  return `${first} Nothing to take.`;
+}
+
+/** Where a tile currently sits inside #map-area, accounting for zoom and the wrap's scroll. */
+function tileScreenPos(tile: Vec2): { x: number; y: number } {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const areaRect = mapAreaEl.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect();
+  const scale = canvasRect.width / canvas.width;
+  return {
+    x: canvasRect.left - areaRect.left + (tile.x + 0.5) * TILE_SIZE * scale,
+    y: canvasRect.top - areaRect.top + (tile.y + 0.5) * TILE_SIZE * scale,
+  };
+}
+
+function runTileVerb(verb: TileVerb, tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  switch (verb) {
+    case "examine": {
+      // Free: costs no turn, which is what makes looking before you commit a
+      // real option rather than a tax on not already knowing.
+      const report = examineTile(world, viewLayer(), tile);
+      if (report) say(describeTile(report));
+      return;
+    }
+    case "moveHere":
+      travelTo(tile);
+      return;
+    case "gather":
+      playerAct({ kind: "gather" });
+      runActivity();
+      return;
+    case "drink":
+      playerAct({ kind: "drink" });
+      return;
+    case "loot":
+      playerAct({ kind: "loot" });
+      return;
+    case "butcher":
+      playerAct({ kind: "butcher" });
+      return;
+    case "useStairs":
+      tryUseStairs();
+      return;
+    case "attack":
+    case "command":
+      // Both need a move picked, and the command menu is where moves live —
+      // but the tile is already decided, so it commits on the pick instead of
+      // asking for a target again.
+      pendingTargetTile = tile;
+      openCommandMenu();
+      return;
+  }
+}
+
+function openTileMenu(tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me || playerDead || playerWon) return;
+  const verbs = verbsForTile(world, me, viewLayer(), tile);
+  if (verbs.length === 0) return;
+  const report = examineTile(world, viewLayer(), tile);
+  tileMenu.open(tileScreenPos(tile), menuItemsFor(verbs), report ? (TERRAIN_WORDS[report.terrain] ?? report.terrain) : "Tile", (verb) => runTileVerb(verb, tile));
+}
+
+/**
+ * Long-press opens the radial on touch; a drag opens nothing, because a drag
+ * is how you pan the map. `LONG_PRESS_MS` is the usual ~400ms: shorter and an
+ * ordinary tap-to-walk starts triggering menus.
+ */
+const LONG_PRESS_MS = 400;
+const DRAG_SLOP = 10;
+let pressTimer: number | undefined;
+let pressStart: { x: number; y: number } | undefined;
+/** A long-press ends with a click event the browser still delivers; without this it would also walk the player to the tile. */
+let suppressNextClick = false;
+
+function cancelPress(): void {
+  if (pressTimer !== undefined) window.clearTimeout(pressTimer);
+  pressTimer = undefined;
+  pressStart = undefined;
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!playerMode || event.button !== 0) return;
+  if (tileMenu.isOpen) return;
+  pressStart = { x: event.clientX, y: event.clientY };
+  const tile = tileAtPointer(event);
+  const pointerId = event.pointerId;
+  pressTimer = window.setTimeout(() => {
+    pressTimer = undefined;
+    suppressNextClick = true;
+    openTileMenu(tile);
+    // Capture, or the drag half of press-drag-release simply does not work:
+    // the radial's wedges sit above the canvas, so once the menu is open every
+    // pointermove lands on a wedge and never reaches the canvas listener that
+    // arms them. Measured — the wedge never armed and the hub never changed
+    // until this was added. Released on pointerup below.
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      /* the pointer may already be gone; the click-a-wedge path still works */
+    }
+  }, LONG_PRESS_MS);
+});
+
+canvas.addEventListener("pointermove", (event) => {
+  if (tileMenu.isOpen) {
+    tileMenu.track({ x: event.clientX, y: event.clientY });
+    return;
+  }
+  if (!pressStart) return;
+  // Moved far enough to be a pan, not a press.
+  if (Math.hypot(event.clientX - pressStart.x, event.clientY - pressStart.y) > DRAG_SLOP) cancelPress();
+});
+
+// On the window, not the canvas: a drag that ends outside the canvas still has
+// to resolve the menu rather than leaving it stuck open.
+window.addEventListener("pointerup", (event) => {
+  if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  if (tileMenu.isOpen) {
+    // Only a genuine drag-release commits. A press-and-release in place leaves
+    // the menu up so the wedges can be tapped one at a time instead.
+    if (tileMenu.release()) suppressNextClick = true;
+  }
+  cancelPress();
+});
+
+// Desktop: right-click is the same menu, no press delay.
+canvas.addEventListener("contextmenu", (event) => {
+  if (!playerMode) return;
+  event.preventDefault();
+  openTileMenu(tileAtPointer(event));
+});
+
+// Clicking anywhere else dismisses an open radial, the way every other menu
+// in this app behaves.
+mapAreaEl.addEventListener("pointerdown", (event) => {
+  if (tileMenu.isOpen && !(event.target as HTMLElement).closest("#tile-menu")) tileMenu.close();
+});
+
+/**
+ * Desktop hover: examine for free. Direct ask: "hover and right click on
+ * desktop to do stuff." Knowing what a tile is should not cost a turn or even
+ * a click — this is the "informed decisions" pillar made ambient.
+ */
+canvas.addEventListener("mousemove", (event) => {
+  if (!playerMode || tileMenu.isOpen || targeting) {
+    tileTipEl.hidden = true;
+    return;
+  }
+  const tile = tileAtPointer(event);
+  const report = examineTile(world, viewLayer(), tile);
+  if (!report) {
+    tileTipEl.hidden = true;
+    return;
+  }
+  tileTipEl.textContent = describeTile(report);
+  const areaRect = mapAreaEl.getBoundingClientRect();
+  tileTipEl.style.left = `${event.clientX - areaRect.left + 14}px`;
+  tileTipEl.style.top = `${event.clientY - areaRect.top + 14}px`;
+  tileTipEl.hidden = false;
+});
+canvas.addEventListener("mouseleave", () => {
+  tileTipEl.hidden = true;
+});
 
 /**
  * Autosave cadence. Long enough that holding a movement key doesn't compress
@@ -1241,6 +1478,15 @@ function openCommandMenu(): void {
       row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
         if (onCooldown) return;
         closeCommandMenu();
+        // The radial already asked "what do you want to do to THIS tile", so
+        // there is nothing left to target — go straight to the swing rather
+        // than asking for a tile the player just picked.
+        if (pendingTargetTile) {
+          const target = pendingTargetTile;
+          pendingTargetTile = undefined;
+          commitMove(undefined, move.id, target);
+          return;
+        }
         targeting = { moveId: move.id };
         hudMessageEl.textContent = `Targeting with ${move.name} — tap a tile. Esc to cancel.`;
       })
@@ -1277,6 +1523,12 @@ function openCommandMenu(): void {
         row(move.name, onCooldown ? "on cooldown" : "tap, then tap a tile to target it", () => {
           if (onCooldown) return;
           closeCommandMenu();
+          if (pendingTargetTile) {
+            const target = pendingTargetTile;
+            pendingTargetTile = undefined;
+            commitMove(partner.id, move.id, target);
+            return;
+          }
           targeting = { agentId: partner.id, moveId: move.id };
           hudMessageEl.textContent = `Targeting for ${name}'s ${move.name} — tap a tile. Esc to cancel.`;
         })
@@ -1289,6 +1541,7 @@ function openCommandMenu(): void {
 
 function closeCommandMenu(): void {
   commandMenuEl.hidden = true;
+  pendingTargetTile = undefined;
 }
 commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
 
@@ -2141,16 +2394,43 @@ speedSlider.addEventListener("input", () => {
   autoCamera.noteManualSpeedChange();
 });
 
-canvas.addEventListener("click", (event) => {
+/**
+ * Where on the map a pointer event landed. The canvas is drawn at its
+ * intrinsic tile size and then CSS-scaled, so screen pixels are not canvas
+ * pixels and the ratio has to come out of the live bounding box.
+ *
+ * Extracted because this arithmetic was inlined three times (click,
+ * mousemove, and renderer.ts's own hit test) and the tile menu would have
+ * made a fourth.
+ */
+function tileAtPointer(event: { clientX: number; clientY: number }): Vec2 {
+  const { x, y } = canvasPixelAt(event);
+  return { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+}
+
+/** The same event in the canvas's own pixel space — what `agentAtCanvasPos` and the engagement-box hit test want. */
+function canvasPixelAt(event: { clientX: number; clientY: number }): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((event.clientY - rect.top) / rect.height) * canvas.height,
+  };
+}
+
+canvas.addEventListener("click", (event) => {
+  // A long-press already acted on this tile; the browser still delivers the
+  // trailing click, which would otherwise also walk the player there.
+  if (suppressNextClick) {
+    suppressNextClick = false;
+    return;
+  }
+  const { x, y } = canvasPixelAt(event);
   // Direct ask: "select a move and target a space with it." Any tile —
   // whether or not something's standing on it — becomes the order's target,
   // ahead of the ordinary agent-select/tap-to-walk handling right below, the
   // same way a real target-a-tile UI would consume the next click outright.
   if (targeting) {
-    const target = { x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) };
+    const target = tileAtPointer(event);
     const { agentId, moveId } = targeting;
     targeting = undefined;
     targetPreviewTiles = [];
@@ -2160,8 +2440,7 @@ canvas.addEventListener("click", (event) => {
     // `agentId` undefined means this is the player's OWN targeted swing
     // (direct ask: "change attack for player moves to also be targeted,
     // like allies moves") rather than an order for a bonded partner.
-    if (agentId === undefined) playerAct({ kind: "attack", dx: lastFacing.dx, dy: lastFacing.dy, moveId, target });
-    else playerAct({ kind: "command", agentId, moveId, target });
+    commitMove(agentId, moveId, target);
     return;
   }
   // Direct follow-up ask: "I should be able to click specific units in the
@@ -2183,7 +2462,7 @@ canvas.addEventListener("click", (event) => {
   // Play mode: tapping a tile walks there — direct ask: "I can't play at all
   // on mobile. Can you allow a click based control scheme?" See travelTo.
   if (playerMode && !playerDead) {
-    travelTo({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
+    travelTo(tileAtPointer(event));
     return;
   }
   // Direct ask: "draw the yellow bounding box anyways on all cool events
@@ -2213,10 +2492,7 @@ canvas.addEventListener("click", (event) => {
 // the actual committing, this only ever changes what's drawn.
 canvas.addEventListener("mousemove", (event) => {
   if (!targeting) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-  const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-  updateTargetPreview({ x: Math.floor(x / TILE_SIZE), y: Math.floor(y / TILE_SIZE) });
+  updateTargetPreview(tileAtPointer(event));
 });
 
 clearSelectionBtn.addEventListener("click", () => selectAgent(undefined));

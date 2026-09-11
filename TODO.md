@@ -11325,3 +11325,62 @@ This can be in said action log."*
 - [ ] Moves log nothing (a successful move's outcome text is empty). Probably
       right — "You move." twenty times is noise — but it does mean walking
       leaves no trace in the log at all.
+
+## Built: play-mode UX, Slice 3 — the radial tile menu
+
+Direct ask: *"Long press a tile to open radial, then drag up to one radial
+section examine it, seeing what items are harvestabls, what kind of terrain
+and what effects standing on it does. Another radial section like, let's you
+target it with an atk. Another let's you gather from that tile."*
+
+- [x] **The inversion.** The game was verb-first (press `g`, press `f` then
+      pick a target). It is now also noun-first: touch the tile and the tile
+      says what it offers. Which wedges exist IS the answer to "what can I do
+      here" — a corpse tile has Loot, a bare floor does not — so it is
+      self-documenting in a way a key list never is. This also fixes, as a
+      side effect, that **loot and butcher were keyboard-only with no button
+      at all** and therefore unreachable on mobile.
+- [x] New engine module `tileQuery.ts`: `examineTile` (terrain, harvestables,
+      standing effects, occupant, corpse, stairs) and `verbsForTile`. Put in
+      the engine, not the web app, because "what may this agent legally do
+      here" is a rules question — and because it can then be unit-tested
+      without a browser. **13 tests**, including that gather is offered only
+      on the tile you are standing on (it acts on `agent.pos`, so offering it
+      across the room would be a button that silently does nothing) and that
+      no tile ever offers more than six wedges.
+- [x] `examineTile` returns **facts, not a sentence**. The house rule is that
+      a vague word means the data is missing; returning fields makes it
+      impossible for the caller to write around a hole instead of going and
+      getting the value. Real output: **"Bare floor. Venonat stands here."**
+- [x] Desktop hover examines for free — no click, no turn. The "informed
+      decisions" pillar made ambient.
+- [x] Attack and Command reuse the existing command menu, with the tile
+      already chosen, so the move picker commits immediately instead of
+      asking for a target the player just picked.
+- [x] **Mobile pad trimmed to Wait + Crouch**, verbatim decision: *"Replace
+      but only on mobile I think?"* Every tile-contextual verb is in the
+      radial; the two with no tile stay as buttons. Desktop keeps the whole
+      pad — it has keys and right-click and no space pressure.
+- [x] **Bug found by measuring: drag-to-arm silently did not work.** The
+      wedges sit above the canvas, so once the menu opened every `pointermove`
+      landed on a wedge and never reached the canvas listener that arms them —
+      the wedge never highlighted and the hub never changed. Fixed with
+      `setPointerCapture` on the press. The verb legality checks had all been
+      passing the whole time, which is exactly why "the logic is right" is not
+      the same as "the feature works".
+- [x] Follow-up ask: *"make the radials a little larger and white bg black
+      text"* — ring radius 74→104px, wedges 62→82px, 22px icons, white on
+      black text with a drop shadow. It sits ON the map over terrain art, and
+      a dark panel over dark cave floor was hard to read.
+- [x] Verified live at 390px: **13/13 checks pass** — own tile offers Gather
+      and no "Go", an ally's tile offers Attack + Command + Go, every tile
+      offers Look, never more than six wedges, dragging arms a wedge, the hub
+      names what a release will do, release fires the verb into the action
+      log, the trailing click does not also walk the player, a pan does not
+      open the menu, and the mobile pad is down to Wait + Crouch. Zero console
+      errors. Full suite green (engine **1629**, data 475).
+- [ ] The radial covers the tile it is about — inherent to centring on it. The
+      hub names the terrain while nothing is armed, which mostly covers it,
+      but worth watching.
+- [ ] No keyboard equivalent for opening the radial on desktop. Right-click
+      and hover are there; a key (Tab to the facing tile?) would complete it.

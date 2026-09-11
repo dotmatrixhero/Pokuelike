@@ -486,6 +486,92 @@
       .herd-status-fill.low { background: #ff6b6b; }
       .herd-status-fill.fainted { background: #6b6f76; }
 
+      /* ===== The radial tile menu (PLAY_UX_DESIGN.md slice 3) =====
+         Long-press on mobile, right-click on desktop. Anchored on the tile
+         itself, so the thing you are acting on stays under the menu rather
+         than the menu appearing somewhere else and breaking the connection. */
+      #tile-menu {
+        position: absolute;
+        z-index: 32;
+        width: 0;
+        height: 0;
+        pointer-events: none; /* only the hub and wedges take input */
+      }
+      #tile-menu[hidden] { display: none; }
+      /* Light-on-dark, deliberately against the rest of the app's palette:
+         the radial sits ON the map, over whatever terrain art happens to be
+         underneath, and a dark panel over dark cave floor was hard to read at
+         a glance. White reads as "this is a thing on top", not part of the
+         world. Direct ask: "make the radials a little larger and white bg
+         black text". */
+      .tile-menu-hub {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        min-width: 96px;
+        max-width: 164px;
+        padding: 8px 11px;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+        color: #10141a;
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+        line-height: 1.35;
+      }
+      .tile-menu-wedge {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        width: 82px;
+        padding: 11px 5px;
+        border-radius: 13px;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        background: #ffffff;
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+        color: #10141a;
+        font-size: 12px;
+        cursor: pointer;
+        transition: transform 90ms ease, background 90ms ease;
+      }
+      .tile-menu-icon { font-size: 22px; line-height: 1; }
+      .tile-menu-label { font-weight: 700; }
+      /* "armed" is the drag-to state: the wedge a release would commit. Scaled
+         AND recoloured — under a thumb the scale is what you actually see,
+         since your hand is covering the colour. */
+      .tile-menu-wedge.armed {
+        background: var(--accent);
+        color: #ffffff;
+        border-color: #ffffff;
+        transform: translate(-50%, -50%) scale(1.16);
+      }
+      .tile-menu-wedge:hover { background: #eef2f7; }
+
+      /* Desktop hover: examine for free, no click and no turn spent. */
+      #tile-tip {
+        position: absolute;
+        z-index: 28;
+        pointer-events: none;
+        max-width: 220px;
+        padding: 5px 8px;
+        border-radius: 7px;
+        background: rgba(12, 16, 22, 0.95);
+        border: 1px solid var(--panel-border);
+        color: var(--text-dim);
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      #tile-tip[hidden] { display: none; }
+      #tile-tip b { color: var(--text); font-weight: 600; }
+
       /* ROADMAP.md M5 — the pack menu. */
       #pack-menu, #command-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
       #pack-menu[hidden], #command-menu[hidden] { display: none; }
@@ -538,6 +624,14 @@
         #player-hud { right: 10px; left: auto; top: auto; bottom: calc(var(--sheet-h, var(--sheet-peek)) + 12px); transition: bottom 0.18s ease; }
         #hud-pad { max-width: 180px; }
         #hud-pad button { min-height: 44px; min-width: 44px; }
+        /* Direct ask, verbatim: "Replace but only on mobile I think?" Every
+           tile-contextual verb (drink, look, gather, attack, stairs) is in the
+           long-press radial now, so keeping a button for it too is the clutter
+           that was being complained about. Wait and crouch stay: they have no
+           tile to long-press, so the radial has nowhere to put them. Desktop
+           keeps the whole pad — it has keys and right-click and no space
+           pressure, so the pad costs nothing there. */
+        body.player-mode #hud-pad button:not([data-act="wait"]):not([data-act="crouch"]) { display: none; }
         /* At full the sheet owns the screen and the pad has nowhere left to
            go — you are reading, not acting. Drag down to get it back. */
         body.player-mode.sheet-full #player-hud { display: none; }
@@ -1258,6 +1352,12 @@
                pill of controls and dropping a wide piece of prose into it
                would stretch the pill and push the buttons off centre. -->
           <div id="region-banner" hidden></div>
+
+          <!-- Desktop hover examine. Direct ask: "hover and right click on
+               desktop to do stuff" — hovering tells you the terrain, what is
+               harvestable and what standing there does, for free and without
+               spending a turn. -->
+          <div id="tile-tip" hidden></div>
 
           <div id="playback-hud">
             <button id="play-pause" title="Play/Pause">
