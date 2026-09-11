@@ -119,6 +119,26 @@ describe("gather (ROADMAP M5)", () => {
     expect(me.activity).toBeUndefined();
   });
 
+  it("Direct ask: \"G should lock you into finishing the action of gathering\" — re-issuing gather mid-gather is a no-op, not a restart", () => {
+    const world = cave();
+    const me = human(12, 10);
+    world.agents.push(me);
+    advancePlayerTurn(world, { kind: "gather" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS });
+    advancePlayerTurn(world, { kind: "continue" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS - 1 });
+    // A stray re-press of the same gather key — the exact real-play pitfall
+    // hit live in a Playwright session — used to fall through the "any
+    // action other than continue abandons it" rule straight back into the
+    // "gather" case, which unconditionally reset turnsLeft to GATHER_TURNS.
+    // Four rapid re-presses could never finish a 3-turn gather.
+    advancePlayerTurn(world, { kind: "gather" });
+    expect(me.activity).toMatchObject({ kind: "gather", turnsLeft: GATHER_TURNS - 1 });
+    for (let i = 0; i < GATHER_TURNS - 1; i++) advancePlayerTurn(world, { kind: "continue" });
+    expect(me.activity).toBeUndefined();
+    expect(countOf(me, "lichen")).toBe(1);
+  });
+
   it("three takes empty a tile; it regrows one take every HARVEST_REGROW_TICKS", () => {
     const world = cave();
     const me = human(12, 10);

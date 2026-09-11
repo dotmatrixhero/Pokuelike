@@ -62,6 +62,19 @@ export function applyPlayerAction(
   rng: () => number = world.rng,
 ): boolean {
   const outcome: PlayerActionOutcome = { action, ok: false, tick: world.tick };
+  // Direct ask: "G should lock you into finishing the action of
+  // gathering." Re-pressing the same gather key mid-gather used to fall
+  // into the "any action other than continue abandons it" rule below and
+  // then straight back into the "gather" case, which unconditionally
+  // resets `turnsLeft` — so a stray double-tap (or, as found live, four
+  // rapid presses in a playtest script) silently restarted the countdown
+  // forever instead of ever finishing. A genuine no-op here: activity,
+  // turnsLeft and everything else are left exactly as they were.
+  if (agent.activity?.kind === "gather" && action.kind === "gather") {
+    outcome.ok = true;
+    agent.lastActionOutcome = outcome;
+    return true;
+  }
   // Any action other than continuing the activity abandons it.
   if (agent.activity && action.kind !== "continue") agent.activity = undefined;
   // Anything other than waiting wakes the player up — see the "wait" case

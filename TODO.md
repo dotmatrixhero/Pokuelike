@@ -10079,3 +10079,40 @@ unit test.
 not flee its leader even when the player's move-triggered threat
 signature would have cleared the old radius. Full engine suite:
 1564/1564. `tsc --noEmit` clean across all 4 packages.
+
+## Fixed: gather no longer restarts when you press 'g' again mid-gather
+
+Direct ask, sent while I was reporting the playtest above: *"G should lock
+you into finishing the action of gathering unless you're attacked."* Asked
+which of two existing behaviors that covered: CRAFTING_LOOP.md's
+documented "something new walks into view, you stop and notice" rule, or
+just the redundant-keypress restart I'd hit live moments earlier. Answer:
+**fix the keypress bug, keep the sighting-stop** — the "something walked
+in" interrupt is deliberate design (CRAFTING_LOOP.md: "you are sitting in
+a cave twisting fiber... if something walks in you stop"), not the bug.
+
+**Root cause**: `player.ts`'s `applyPlayerAction` has one rule — "any
+action other than continuing the activity abandons it" — then falls
+straight into the `"gather"` case, which unconditionally sets
+`agent.activity = { turnsLeft: GATHER_TURNS, ... }`. A second `"gather"`
+action while already gathering hit both: cleared by the abandon rule,
+then immediately restarted from `GATHER_TURNS` by the case itself. Four
+rapid re-presses (exactly what a Playwright script — and plausibly a
+real, slightly impatient player — did) could never finish a 3-turn
+gather; each press reset the clock.
+
+**Fix**: a re-issued `"gather"` while `agent.activity?.kind === "gather"`
+is now a genuine no-op — `turnsLeft` untouched, nothing re-triggered.
+Move, a real attack landing, or anything else still abandons the
+activity exactly as before; only the same-action redundant re-press is
+now inert.
+
+**Live-verified**: walked onto a real stone outcrop (seed 77777), mashed
+`g` 4 times in ~90ms — `turnsLeft` stayed at 3 after the mash (previously
+would have reset every time), then the existing auto-continue loop
+finished it with no further input: `"You gather flint."`, 1 flint landed
+in the pack.
+
+**Tests**: `gather.test.ts` — re-issuing `gather` mid-gather doesn't reset
+`turnsLeft`, and the gather still completes normally afterward. Full
+engine suite: 1565/1565. `tsc --noEmit` clean across all 4 packages.
