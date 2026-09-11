@@ -56,6 +56,10 @@ export const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   stairsDown: [70, 60, 40],
   stairsUp: [70, 60, 40],
   exit: [120, 100, 20],
+  // Direct ask: "grab that [flint] in some stone tiles" — a lighter,
+  // warmer gray than `boulder`'s (same rock family, but this reads as
+  // ground you approach and gather from, not an obstacle).
+  stone: [72, 66, 58],
 };
 
 export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -77,6 +81,7 @@ export const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   stairsDown: [220, 190, 120],
   stairsUp: [220, 190, 120],
   exit: [255, 235, 180],
+  stone: [190, 182, 168],
 };
 
 /**
@@ -215,6 +220,7 @@ export const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   stairsDown: ">",
   stairsUp: "<",
   exit: "X",
+  stone: "n",
 };
 
 export const FLAVOR_GLYPH: Record<string, string> = {

@@ -47,6 +47,7 @@ const TERRAIN_GLYPH: Record<TerrainKind, string> = {
   stairsUp: "<",
   // "Done when: you emerge" — the one tile that ends the run.
   exit: "X",
+  stone: "n",
 };
 
 const TERRAIN_BG: Record<TerrainKind, Rgb> = {
@@ -68,6 +69,7 @@ const TERRAIN_BG: Record<TerrainKind, Rgb> = {
   stairsDown: [70, 60, 40],
   stairsUp: [70, 60, 40],
   exit: [120, 100, 20],
+  stone: [72, 66, 58],
 };
 
 const TERRAIN_FG: Record<TerrainKind, Rgb> = {
@@ -89,6 +91,7 @@ const TERRAIN_FG: Record<TerrainKind, Rgb> = {
   stairsDown: [220, 190, 120],
   stairsUp: [220, 190, 120],
   exit: [255, 235, 180],
+  stone: [190, 182, 168],
 };
 
 /**

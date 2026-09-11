@@ -226,6 +226,19 @@ export type TerrainKind =
   | "mud"
   | "shelter"
   /**
+   * Direct ask: "Can you collect flint in the cave? I think I want us to
+   * be able to grab that in some stone tiles" — a real, visible rock
+   * outcrop, not the invisible "floor next to a wall" rule flint
+   * gathering used to rely on entirely underground (`harvest.ts`'s
+   * `harvestableAt` — that rule stays as a fallback, this is the real,
+   * deliberate source now). Walkable, not opaque (absent from
+   * `UNWALKABLE_TERRAIN`/`OPAQUE_TERRAIN`, world.ts) — a patch of rocky
+   * ground you stand on and gather from, not an obstacle like `"boulder"`.
+   * Placed by `worldgen.ts`'s underground cave generation as a handful of
+   * small outcrops near cave walls.
+   */
+  | "stone"
+  /**
    * A tile that is actively on fire — see fire.ts. Walkable (you can run
    * through a fire, it just hurts) and not opaque. Burns down over
    * `Tile.burnTicksRemaining` and reverts to scorched "floor", spreading

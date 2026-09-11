@@ -1804,6 +1804,82 @@ function pickUndergroundWaterPocket(world: World, width: number, height: number,
 }
 
 /**
+ * How many separate rocky outcrops a cave gets — direct ask: "Can you
+ * collect flint in the cave? I think I want us to be able to grab that
+ * in some stone tiles." A handful of real, findable rock patches, not a
+ * single one (there's only one connected cave to spread them through)
+ * and not so many the cave reads as mostly rock.
+ */
+const STONE_OUTCROP_COUNT = 4;
+/** An outcrop is a small patch, not one lonely tile — reads as a real vein of exposed rock. */
+const STONE_OUTCROP_MAX_TILES = 3;
+/** Manhattan distance kept between outcrop centers so all four don't land bunched in one corner. */
+const STONE_OUTCROP_MIN_SPACING = 8;
+
+/**
+ * Picks the real underground cells a handful of rocky outcrops occupy.
+ * Candidates are real, dry floor cells adjacent to a wall (the same
+ * "cave walls are rock" reasoning `harvest.ts`'s own wall-adjacency
+ * fallback already uses) — an outcrop reads as rock breaking through
+ * from the wall it's next to, not scattered at random mid-floor. Picked
+ * with the same shuffle-then-greedy-space-them-out approach landmark
+ * placement (`placeLandmarks`) already uses elsewhere in this file, so a
+ * short seed with few candidates still gets whatever fits rather than
+ * failing outright.
+ */
+function pickUndergroundStoneOutcrops(width: number, height: number, grid: Uint8Array, waterCells: Set<number>, rng: () => number): Set<number> {
+  const candidates: number[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (grid[i] || waterCells.has(i)) continue; // must be real, dry floor
+      let nearWall = false;
+      for (let dy = -1; dy <= 1 && !nearWall; dy++) {
+        for (let dx = -1; dx <= 1 && !nearWall; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          if (grid[ny * width + nx]) nearWall = true;
+        }
+      }
+      if (nearWall) candidates.push(i);
+    }
+  }
+  if (candidates.length === 0) return new Set();
+
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const tmp = candidates[i]!;
+    candidates[i] = candidates[j]!;
+    candidates[j] = tmp;
+  }
+
+  const stone = new Set<number>();
+  const centers: Vec2[] = [];
+  for (const i of candidates) {
+    if (centers.length >= STONE_OUTCROP_COUNT) break;
+    const x = i % width;
+    const y = Math.floor(i / width);
+    if (centers.some((c) => Math.abs(c.x - x) + Math.abs(c.y - y) < STONE_OUTCROP_MIN_SPACING)) continue;
+    centers.push({ x, y });
+    stone.add(i);
+    let grown = 1;
+    for (let dy = -1; dy <= 1 && grown < STONE_OUTCROP_MAX_TILES; dy++) {
+      for (let dx = -1; dx <= 1 && grown < STONE_OUTCROP_MAX_TILES; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const ni = ny * width + nx;
+        if (grid[ni] || waterCells.has(ni) || stone.has(ni)) continue;
+        stone.add(ni);
+        grown++;
+      }
+    }
+  }
+  return stone;
+}
+
+/**
  * Generates cellular-automata cave structure for the Underground layer — see
  * this section's doc comment. Deterministic for a given rng, same contract
  * as every other generation step in this file.
@@ -1833,6 +1909,7 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
   keepOnlyLargestFloorRegion(grid, width, height);
 
   const waterCells = pickUndergroundWaterPocket(world, width, height, grid, rng);
+  const stoneCells = pickUndergroundStoneOutcrops(width, height, grid, waterCells, rng);
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -1841,6 +1918,8 @@ function generateUndergroundCaves(world: World, width: number, height: number, r
         setTile(world, "underground", x, y, "wall");
       } else if (waterCells.has(i)) {
         setTile(world, "underground", x, y, "water", 0);
+      } else if (stoneCells.has(i)) {
+        setTile(world, "underground", x, y, "stone");
       }
     }
   }

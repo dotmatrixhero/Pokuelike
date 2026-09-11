@@ -9953,3 +9953,89 @@ and live-verified. One real, separate finding surfaced along the way is
 still open, not part of this list: the "follower at 'tolerant' trust
 can flee its own leader" backlog item (below the wishlist entries),
 found while live-verifying item 1.
+
+## Built: real, visible "stone" tiles in the cave — flint's actual source now
+
+Direct ask: *"Can you collect flint in the cave? I think I want us to be
+able to grab that in some stone tiles..."*
+
+**What was actually true before touching anything.** Live-verified first,
+not assumed: flint was already gatherable underground, but only via an
+invisible rule (`harvest.ts`'s `rockNearby` check — a floor tile adjacent
+to a `"wall"` tile yields flint). Confirmed live: 355 such tiles on one
+real seed, and a real gather there did yield flint. But nothing on the
+map marked which floor tiles counted — the exact "mechanics hidden in a
+meter, not visible on the map" pattern this project keeps finding and
+fixing. Presented the choice (add a real visible stone tile vs. just
+document the existing rule); direct answer: *"Add it and render using a
+good ripped tile sprite."*
+
+**New terrain kind, not just a flag.** `"stone"` — a new `TerrainKind`
+(types.ts), walkable, not opaque, not an obstacle like `"boulder"`. Every
+place `TerrainKind` is exhaustively enumerated (`palette.ts`'s
+`TERRAIN_BG`/`TERRAIN_FG`/`TERRAIN_GLYPH`, `legend.ts`, runner's
+`ascii.ts`) needed — and got — a real entry; the compiler found all of
+them once `"stone"` was added to the union, exactly the "an exhaustive
+switch breaks in N packages at once" pattern this project already knows
+to watch for.
+
+**Placement — real, findable outcrops, not everywhere.** New
+`worldgen.ts` function `pickUndergroundStoneOutcrops`, run right after
+the cave's CA wall/floor grid and connected-region cleanup (same slot
+`pickUndergroundWaterPocket` already occupies for the guaranteed water
+pocket): candidates are real dry floor cells adjacent to a wall (rock
+breaking through from the wall it's beside, not scattered mid-floor at
+random), shuffled and greedily spaced apart so all outcrops don't land
+in one corner, each grown into a small 1-3 tile patch. `harvest.ts`'s
+flint check now also fires directly on a `"stone"` tile itself (not just
+tiles adjacent to it) — the wall-adjacency rule stays as a fallback, not
+replaced, so flint is never fully blocked by sparse outcrop placement.
+
+**Art — a genuine crop, not a placeholder.** Installed Pillow (this
+container had no image-editing tool otherwise) and manually located,
+then auto-scanned for low-color-variance, a clean 24×24 rounded-
+cobblestone patch from `legacy-cpp/data/sprites/"biome sprites
+unripped.png"` (the same sheet this project's other terrain art —
+`floor_stone`, `floor_desert`, etc. — was already ripped from,
+following that work's own documented "auto-scan for flat patches, then
+hand-verify" method to avoid repeating its one real past mistake, a
+"fake lava" crop that was just a flat background block). Verified
+`getextrema()` alpha is fully opaque (no background bleed) before
+saving to `packages/web/public/tiles/stone.png` — the existing
+`getTileSprite` convention (a plain `TerrainKind` not in
+`TILE_VARIANT_COUNTS` looks up `/tiles/<kind>.png` directly) picks it up
+automatically, zero renderer.ts changes needed. Deliberately a fresh
+crop, not a reuse of the already-wired `floor_stone.png` (a Highland-
+biome *floor* texture) — reusing that would have made an underground
+flint outcrop look pixel-identical to unrelated surface terrain
+elsewhere, undermining the entire "make this visible and distinct"
+point of the ask.
+
+**Tests.** `gather.test.ts`: a stone tile always yields flint, and so
+does a plain floor tile immediately beside one; two tiles away, nothing.
+`worldgen.test.ts`: every generated cave (5 seeds) has real stone tiles,
+each one walkable/non-opaque and within 2 tiles of a wall or another
+stone tile (the outcrop it's part of); the existing "every walkable tile
+is one connected region" test's own local `isWalkable` helper was stale
+(hardcoded to `floor`/`water` only) and needed updating to include
+`stone` — a real, walkable-in-the-actual-engine terrain kind that its
+own BFS didn't know about, briefly reading as "the cave fragmented into
+4 pieces" when nothing had actually changed about real connectivity.
+Full engine suite: 1563/1563. Data: 400/400. `tsc --noEmit` clean on
+engine/web/runner; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser, not just read from tests**: a real
+generated cave (seed 20260903) had 12 real stone tiles; walked the
+player onto one and gathered — "You gather flint," a real flint landed
+in the pack. Screenshotted the actual rendered sprite in-game (zoomed in
+next to the player): the rounded cobblestone texture is clearly visible
+and reads as distinctly different rock from the surrounding cave floor
+and from the dark wall blocks nearby, not a fallback color rect.
+
+**Not done here, logged as its own idea**: mid-review the user separately
+described wanting *"contiguous layers of higher rock, like different
+plane separated by edged rock... copy that artistic vibe"* — real
+elevation "shelves" with rock-edge border art, building on the existing
+`Tile.elevation` shading system (currently just per-tile brightness, no
+distinct edge/border art). A real, separate rendering feature, not yet
+scoped — needs its own design pass before implementation.

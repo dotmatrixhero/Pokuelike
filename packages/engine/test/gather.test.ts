@@ -74,6 +74,18 @@ describe("harvestableAt", () => {
     setTile(world, "surface", 5, 5, "water");
     expect(harvestableAt(world, "surface", { x: 6, y: 5 })).toEqual([]);
   });
+
+  it('direct ask: "grab that [flint] in some stone tiles" — a real stone tile always yields flint, and a plain floor tile right beside one does too', () => {
+    const world = cave();
+    setTile(world, "underground", 5, 20, "stone");
+    expect(harvestableAt(world, "underground", { x: 5, y: 20 })).toEqual(["flint"]);
+    // Adjacent bare floor (no groundType, no nearby wall) — the outcrop
+    // itself is enough, same "near the rock" reasoning the wall-adjacency
+    // fallback already uses for walls.
+    expect(harvestableAt(world, "underground", { x: 6, y: 20 })).toEqual(["flint"]);
+    // Two tiles away — out of reach of the outcrop.
+    expect(harvestableAt(world, "underground", { x: 7, y: 20 })).toEqual([]);
+  });
 });
 
 describe("gather (ROADMAP M5)", () => {

@@ -3,6 +3,7 @@ import { mulberry32, makeNoise2D, makeDensityField, generateWorld, generateMacro
 import { generateMacroGrid, biasForZone } from "../src/macroGrid.js";
 import { tileAt, setTile, createWorld } from "../src/world.js";
 import { CANOPY_APPLE_RIPEN_TICKS } from "../src/crops.js";
+import type { Vec2 } from "../src/types.js";
 
 describe("mulberry32 (seeded PRNG)", () => {
   it("is deterministic: the same seed produces the same sequence", () => {
@@ -132,22 +133,27 @@ describe("generateWorld", () => {
     expect(sawCanopyWall).toBe(true);
     expect(sawCanopyApple).toBe(true);
     // Underground: every tile is "floor", "wall" (the CA cave carver's own
-    // vocabulary), or "water" (a real, guaranteed pocket biased toward
-    // wherever Surface is wettest — see pickUndergroundWaterPocket) — no
-    // elevation texture beyond that, unlike Surface.
+    // vocabulary), "water" (a real, guaranteed pocket biased toward
+    // wherever Surface is wettest — see pickUndergroundWaterPocket), or
+    // "stone" (a handful of real rocky outcrops — pickUndergroundStoneOutcrops,
+    // direct ask: "grab that [flint] in some stone tiles") — no elevation
+    // texture beyond that, unlike Surface.
     let sawUndergroundWall = false;
     let sawUndergroundFloor = false;
     let sawUndergroundWater = false;
+    let sawUndergroundStone = false;
     for (const tile of world.tiles.underground) {
-      expect(["floor", "wall", "water"]).toContain(tile.terrain);
+      expect(["floor", "wall", "water", "stone"]).toContain(tile.terrain);
       expect(tile.elevation).toBe(0);
       if (tile.terrain === "wall") sawUndergroundWall = true;
       if (tile.terrain === "floor") sawUndergroundFloor = true;
       if (tile.terrain === "water") sawUndergroundWater = true;
+      if (tile.terrain === "stone") sawUndergroundStone = true;
     }
     expect(sawUndergroundWall).toBe(true);
     expect(sawUndergroundFloor).toBe(true);
     expect(sawUndergroundWater).toBe(true);
+    expect(sawUndergroundStone).toBe(true);
   });
 
   it("canopy Apple tiles are a real mix of already-ripe (real stock) and unripe-and-staggered (stock 0, real growth < CANOPY_APPLE_RIPEN_TICKS) — growth-stage rendering (CROPS_DESIGN.md)", () => {
@@ -684,7 +690,13 @@ describe("generateWorld: Underground cellular-automata caves", () => {
    */
   function walkableComponentSizes(world: ReturnType<typeof generateWorld>): number[] {
     const width = world.width, height = world.height;
-    const isWalkable = (t: { terrain: string }) => t.terrain === "floor" || t.terrain === "water";
+    // "stone" (a real rocky outcrop — pickUndergroundStoneOutcrops) is
+    // genuinely walkable in the real engine (isWalkableTerrain, world.ts —
+    // only "wall"/"tree" block movement), so it counts here too; without
+    // it, a stone outcrop reads to this local BFS as an impassable wall
+    // it never actually is in the real game, fragmenting one real
+    // connected cave into several apparent ones for no real reason.
+    const isWalkable = (t: { terrain: string }) => t.terrain === "floor" || t.terrain === "water" || t.terrain === "stone";
     const visited = new Uint8Array(width * height);
     const sizes: number[] = [];
     for (let start = 0; start < width * height; start++) {
@@ -746,6 +758,38 @@ describe("generateWorld: Underground cellular-automata caves", () => {
     const b = generateWorld(90, 60, 42);
     for (let i = 0; i < a.tiles.underground.length; i++) {
       expect(a.tiles.underground[i]!.terrain).toBe(b.tiles.underground[i]!.terrain);
+    }
+  });
+
+  it('direct ask: "grab that [flint] in some stone tiles" — real, findable rocky outcrops appear underground, each one next to a real wall, never on top of the guaranteed water pocket', () => {
+    for (const seed of [9, 42, 7, 100, 20260906]) {
+      const world = generateWorld(90, 60, seed);
+      const stoneTiles: Vec2[] = [];
+      for (let y = 0; y < world.height; y++) {
+        for (let x = 0; x < world.width; x++) {
+          const t = tileAt(world, "underground", x, y)!;
+          if (t.terrain === "stone") stoneTiles.push({ x, y });
+        }
+      }
+      expect(stoneTiles.length).toBeGreaterThan(0);
+      for (const pos of stoneTiles) {
+        const t = tileAt(world, "underground", pos.x, pos.y)!;
+        expect(t.walkable).toBe(true);
+        expect(t.opaque).toBeFalsy();
+        // Every real outcrop tile is either itself next to a wall, or part
+        // of the same small patch as one that is (pickUndergroundStoneOutcrops
+        // grows a found wall-adjacent seed outward by a couple of tiles) —
+        // reads as rock breaking through from the cave wall it's beside,
+        // not scattered mid-floor at random.
+        let nearWallOrStone = false;
+        for (let dy = -2; dy <= 2 && !nearWallOrStone; dy++) {
+          for (let dx = -2; dx <= 2 && !nearWallOrStone; dx++) {
+            const n = tileAt(world, "underground", pos.x + dx, pos.y + dy);
+            if (n && (n.terrain === "wall" || n.terrain === "stone")) nearWallOrStone = true;
+          }
+        }
+        expect(nearWallOrStone).toBe(true);
+      }
     }
   });
 });

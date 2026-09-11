@@ -112,14 +112,26 @@ export function harvestableAt(world: World, layer: Layer, pos: Vec2): MaterialId
   // it. The chamber's flora spreads over the floor near water, and a bot
   // that walked to a "floor" tile found "flora" there by the time it
   // arrived (validateTorch.ts, seed 202) — lichen grows among moss.
-  const ground = tile.terrain === "floor" || tile.terrain === "sunbeam" || tile.terrain === "mud" || tile.terrain === "flora" || tile.terrain === "seedling";
+  // "stone" (direct ask: "grab that [flint] in some stone tiles") is a
+  // real, visible rocky outcrop — the primary flint source now — but
+  // still counts as `ground` so it doesn't lose the ordinary
+  // lichen/deadwood checks a plain floor tile in the same spot would have.
+  const ground = tile.terrain === "floor" || tile.terrain === "sunbeam" || tile.terrain === "mud" || tile.terrain === "flora" || tile.terrain === "seedling" || tile.terrain === "stone";
   if (ground) {
     if (layer === "underground" && anyWithin(world, layer, pos, LICHEN_WATER_RANGE, (t) => t.terrain === "water")) out.push("lichen");
     if (anyWithin(world, layer, pos, DEADWOOD_SUNBEAM_RANGE, (t) => t.terrain === "sunbeam")) out.push("deadwood");
     // Ruling: "I want gathering on layer 1." Cave walls are rock, so floor
     // beside a wall underground gives loose flint too — the reachability
-    // test found no rocky ground or boulders on any cave seed.
-    const rockNearby = tile.groundType === "rocky" || anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || (layer === "underground" && t.terrain === "wall"));
+    // test found no rocky ground or boulders on any cave seed. `"stone"`
+    // is the real, visible fix that ruling asked for (worldgen.ts places
+    // a handful of real outcrops near cave walls); the wall-adjacency
+    // rule stays as a fallback so flint is never fully blocked by sparse
+    // placement, and a stone tile itself is always flint-bearing —
+    // standing right on the outcrop, not just near a wall.
+    const rockNearby =
+      tile.terrain === "stone" ||
+      tile.groundType === "rocky" ||
+      anyWithin(world, layer, pos, 1, (t) => t.terrain === "boulder" || t.terrain === "stone" || (layer === "underground" && t.terrain === "wall"));
     if (rockNearby) out.push("flint");
   }
   return out;
