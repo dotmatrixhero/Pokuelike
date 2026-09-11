@@ -7,6 +7,7 @@ import {
   getGroundPatch,
   getScatterDecal,
   getFeatureDecal,
+  type ScatterDecal,
   GROUND_CELL,
   GROUND_PATCH_CELLS,
   getFloraSprite,
@@ -436,16 +437,16 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
     }
   }
   drawElevationShade(ctx, world);
-  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA, false);
+  drawScatterPass(ctx, world, getScatterDecal, SCATTER_ONE_IN, SCATTER_ALPHA);
   // Landmarks go down after the fine detail so a boulder sits ON the tufts,
   // not under them.
-  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1, true);
+  drawScatterPass(ctx, world, getFeatureDecal, FEATURE_ONE_IN, 1);
 }
 
-type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => { image: HTMLImageElement; jitterX: number; jitterY: number } | null;
+type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => ScatterDecal | null;
 
 /** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
-function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number, standing: boolean): void {
+function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
   for (let y = 0; y < world.height; y++) {
     for (let x = 0; x < world.width; x++) {
       const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
@@ -458,9 +459,10 @@ function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: Deca
       // two tiles above it.
       const dx = (x + decal.jitterX) * TILE_SIZE + (TILE_SIZE - w) / 2;
       const dy = (y + decal.jitterY + 1) * TILE_SIZE - h;
-      // Only the landmark layer is an OBJECT standing on the ground, so only
-      // it casts a contact shadow. One under every grass tuft would be noise.
-      if (standing) drawContactShadow(ctx, dx + w / 2, dy + h - TILE_SIZE * 0.1, Math.min(w, TILE_SIZE * 1.6));
+      // Per DECAL, not per layer — see `STANDING_DECALS` (sprites.ts). A fern
+      // and a moss patch are both 32x32 and both in the fine pool, but only
+      // one of them stands up.
+      if (decal.standing) drawContactShadow(ctx, dx + w / 2, dy + h - TILE_SIZE * 0.1, Math.min(w, TILE_SIZE * 1.6));
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.drawImage(decal.image, dx, dy, w, h);

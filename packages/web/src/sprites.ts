@@ -309,6 +309,19 @@ const SCATTER_DEFAULT: readonly string[] = ["moss_1", "tuft_green_1"];
 /** Cave/underground features. */
 const FEATURE_DEFAULT: readonly string[] = ["boulder_1"];
 
+/**
+ * Which decals STAND UP off the ground, and so cast a contact shadow.
+ *
+ * Not a size test and not a per-layer rule, because neither works: `moss_1`
+ * and `fern_1` are both 32x32 and both live in the fine scatter pool, but one
+ * is flat ground cover and the other is a waist-high plant. The first pass
+ * gave the whole fine layer no shadow at all, which left ferns sitting flat
+ * beside shadowed trees — direct report: "Ferns don't have much shadow."
+ * Lily pads float, blossoms lie in the grass, moss and tufts ARE the ground;
+ * ferns, reeds, cattails, cacti, boulders and logs are objects on it.
+ */
+const STANDING_DECALS = new Set(["fern_1", "reed_1", "cattail_1", "cactus_1", "cactus_2", "boulder_1", "log_1", "succulent_1"]);
+
 /** Which ground patch a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (grassland vs. forest) apart from a real texture change without duplicating this lookup. */
 export function getFloorBaseName(biome?: string): string {
   return (biome && BIOME_GROUND[biome]) ?? GROUND_DEFAULT;
@@ -335,12 +348,14 @@ export function getGroundPatch(biome?: string, layer?: string): HTMLImageElement
  * drawn at, both derived from the same tile hash so a given tile's decal is
  * stable across frames and across zoom changes.
  */
-export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
+export type ScatterDecal = { image: HTMLImageElement; jitterX: number; jitterY: number; standing: boolean };
+
+export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
   return pickDecal(BIOME_SCATTER, SCATTER_DEFAULT, x, y, biome, oneIn, 31337, 7919);
 }
 
 /** The sparse landmark layer — see `BIOME_FEATURES`. Same placement rules as the fine scatter, different pool, different hash, much lower density. */
-export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
+export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
   return pickDecal(BIOME_FEATURES, FEATURE_DEFAULT, x, y, biome, oneIn, 15485863, 32452843);
 }
 
@@ -353,7 +368,7 @@ function pickDecal(
   oneIn: number,
   saltX: number,
   saltY: number
-): { image: HTMLImageElement; jitterX: number; jitterY: number } | null {
+): ScatterDecal | null {
   const pool = (biome ? pools[biome] : undefined) ?? fallback;
   if (pool.length === 0) return null;
   // Offset so "which tiles get a decal" doesn't correlate with anything else
@@ -366,7 +381,12 @@ function pickDecal(
   // A second, independent hash for placement, so two tiles that rolled the
   // same decal don't also land at the same offset within their tile.
   const j = hashTile(x + saltX + 104729, y + saltY + 1299709);
-  return { image, jitterX: ((j % 16) / 16) - 0.5, jitterY: ((Math.floor(j / 16) % 16) / 16) - 0.5 };
+  return {
+    image,
+    jitterX: ((j % 16) / 16) - 0.5,
+    jitterY: ((Math.floor(j / 16) % 16) / 16) - 0.5,
+    standing: STANDING_DECALS.has(name),
+  };
 }
 
 /**

@@ -11007,6 +11007,15 @@ the bushes"*.
       (Real `bush` TERRAIN was always fine — it goes through the sprite path.)
 - [x] Frame rate 9.2 paused, against 10.0 before this work and 8.2 on the
       original pre-lighting baseline. Noise.
+- [x] **Shadow casting is per DECAL, not per layer.** Direct report: "Ferns
+      don't have much shadow." The first pass gave the whole fine scatter layer
+      none, but `moss_1` and `fern_1` are both 32x32 and both in that pool —
+      one is flat ground cover, the other is a waist-high plant. Neither a size
+      test nor a layer rule separates them, so `STANDING_DECALS` names them
+      outright: ferns, reeds, cattails, cacti, boulders, logs and succulents
+      stand; lily pads float, blossoms lie in the grass, moss and tufts ARE the
+      ground. Shadow coverage went 30,310 -> 60,584 pixels (7x the original
+      8,555).
 - [ ] Ferns read slightly MORE lit than trees — their flat tops put more area
       in the gradient's strong zone. Looks like foliage catching light, so
       left alone.
