@@ -194,7 +194,33 @@ export const SPECIES: Record<string, SpeciesDef> = {
     // M0's `isPredator: true` stopgap is gone (ROADMAP.md M6): prey now
     // react to the player's *threat signature* — speed, posture, what is
     // in hand — see engine threat.ts and predation.ts's player branch.
-    baseStats: { hp: 45, attack: 28, defense: 25, spAttack: 20, spDefense: 25, speed: 40 },
+    //
+    // Direct report, once ROADMAP.md M7 put real, accurately-statted mid-
+    // game Pokemon (Onix lvl 22, Haunter lvl 28) in the player's own path:
+    // "human stats are bit too low. like i'm getting outsped and one shot
+    // by too many pokemon. can you make it so the stats reasonably scale."
+    // Measured before touching this (calculateStats/calculateDamage, real
+    // numbers): the ORIGINAL block below (BST 183 — under even Caterpie,
+    // the weakest base stat total in the mainline roster) let a level-22
+    // Onix's Earthquake do 113-276% of the human's own maxHp in ONE hit
+    // across levels 10-20, and a level-28 Haunter's Sludge did 252-621% —
+    // not "dangerous," a guaranteed overkill every single time regardless
+    // of level. Speed (40) never closes the gap either: even at level 20 a
+    // human is still slower (21) than Golbat (32), Onix (35), or Haunter
+    // (58) at every level tested, so the human always acts last.
+    //
+    // Bumped to BST 280 (still meaningfully below a starter's ~310-320 —
+    // "the frailest thing in the ecosystem" premise holds, this isn't
+    // making the human a powerhouse) — the SAME damage check against this
+    // new block: Onix's Earthquake drops to 68-180% of maxHp (survivable
+    // at levels 15-20, still a real threat below that), Haunter's Sludge
+    // to 98-403% (Haunter is the level-5 cave's own final boss — staying
+    // genuinely dangerous there is intentional, not a miss). Speed 65 now
+    // beats Golbat (32) and is close behind Onix (35); Haunter (58) still
+    // outpaces a low-level human, matching its role as the hardest fight
+    // in the climb. Never unilaterally retuned before this — this exact
+    // ask, with the numbers behind it, is in TODO.md.
+    baseStats: { hp: 50, attack: 35, defense: 50, spAttack: 30, spDefense: 50, speed: 65 },
     types: ["normal"],
     moves: ["tackle"],
     activityPattern: "diurnal",

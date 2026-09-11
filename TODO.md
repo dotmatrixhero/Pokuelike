@@ -9397,3 +9397,60 @@ through it a slice at a time:
    items and use them as expected, comman pokemon, select attacks
    easily, etc." — keyboard-first UX across inventory/command/attack
    menus.
+
+## Fixed: human base stats bumped — real numbers behind it
+
+Direct ask, mid-way through building the wishlist above: *"also, human
+stats are bit too low. like i'm getting outsped and one shot by too many
+pokemon. can you make it so the stats reasonably scale?"*
+
+Measured before touching anything (`calculateStats`/`calculateDamage`,
+the engine's own real formulas, not a guess): the original
+`baseStats: { hp: 45, attack: 28, defense: 25, spAttack: 20, spDefense:
+25, speed: 40 }` (BST 183 — under even Caterpie, the single weakest base
+stat total in the mainline roster) was not "appropriately fragile," it
+was a guaranteed overkill against anything ROADMAP M7's cave climb
+actually put in the player's path:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 276% of maxHp | 176% | 113% |
+| Haunter (28) | Sludge | 621% | 397% | 252% |
+| Haunter (28) | Psybeam | 414% | 263% | 167% |
+
+(percentages are of the human's own maxHp in ONE hit — anything over
+100% is an overkill one-shot). Speed told the same story: a level-20
+human's speed (21) still trailed Golbat (32), Onix (35), and Haunter (58)
+at every level tested — the human never got to act first regardless of
+how much it leveled.
+
+Bumped to `{ hp: 50, attack: 35, defense: 50, spAttack: 30, spDefense:
+50, speed: 65 }` (BST 280 — still meaningfully under a starter's
+~310-320, so "the frailest thing in the ecosystem" premise isn't
+abandoned, just no longer a guaranteed instant kill). Same real-formula
+check against the new numbers:
+
+| attacker (real level) | move | vs human lvl 10 | vs lvl 15 | vs lvl 20 |
+|---|---|---|---|---|
+| Onix (22) | Earthquake | 180% | 103% | 68% |
+| Haunter (28) | Sludge | 403% | 228% | 148% |
+| Haunter (28) | Psybeam | 267% | 153% | 98% |
+
+Onix (a mid-depth predator, not the final boss) is now genuinely
+survivable from level 15 on. Haunter — the level-5 cave's own final boss
+— stays a real, dangerous fight even at the new numbers, which reads as
+intentional rather than a miss: it's supposed to be the hardest thing in
+the run. Speed 65 now beats Golbat (32) outright and is close behind
+Onix (35); Haunter (58) still typically acts first, matching its role.
+
+`HUMAN_LEVELING_PROFILE` (leveling.ts) references `SPECIES.human.
+baseStats` directly, so this one edit propagates everywhere without a
+second change site. Live-verified (Playwright, real dev server): a fresh
+spawn's real stats matched the new formula (small deltas from a random
+nature roll, exactly as expected for any spawned agent — not a bug).
+
+This is a numbers change to a stated design pillar (DESIGN.md/
+CAMPAIGN_DESIGN.md's "frailest thing in the ecosystem"), done on a
+direct, explicit ask rather than my own initiative — flagging that
+plainly rather than quietly treating it as a routine tweak. Full suite:
+engine 1518/1518, data 400/400, web/runner typecheck clean.
