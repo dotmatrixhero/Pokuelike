@@ -9723,3 +9723,60 @@ Make list next to a deployed fire ("Roasted Meat · meat · 6 turns · tap
 to make") — not just present in the recipe table, actually reachable
 from a real inventory state, the same live-reachability bar this
 project's cooking-recipe fix above insists on.
+
+## Built: wishlist item 7 — a docked, pinnable herd/party status panel
+
+Direct ask: *"have herd hp and status bars like easy to pin so you can
+see all; at once"* — every bonded follower's HP and status together, not
+just the one currently-selected agent's, and not buried behind opening
+the Inspector and clicking through them one at a time.
+
+**Shape.** A new floating overlay (`#herd-status-panel`, `index.html`),
+docked bottom-left over the map — the one corner nothing else already
+claims (auto-cam badge top-left, minimap/player HUD top-right, region
+banner/playback HUD bottom-center). Floats over the map rather than
+displacing it, same as `#player-hud` already does; deliberately NOT a
+new side-panel tab — DESIGN.md already has one documented lesson from
+this exact codebase about a second docked panel competing with the map
+for space (`#battle-screen-panel` originally stood alone, then got
+folded into the Inspector's own tabs after a direct complaint that it
+"obscures the map"). One row per follower: name, a short status line
+(`describeBehavior`, reused unmodified — a bonded partner's status text
+is exactly the same sentence the Inspector already shows for any
+selected agent), and an HP bar (red under 25%, grey while fainted).
+Rebuilds its rows once a frame (`EventLogPanel`'s own shape) rather than
+`BattleScreenPanel`'s persistent-per-chip DOM (which exists specifically
+to animate HP transitions smoothly) — a handful of rows is cheap to
+just rebuild, and that transition polish isn't what this ask is about.
+
+**"Easy to pin."** Shows itself automatically the moment the player has
+any bonded follower — no menu, no keypress. A ✕ on the panel dismisses
+it; a new 🐾 button in the player HUD (beside the existing pack button)
+brings it back. Both just flip one in-memory boolean
+(`herdPanelPinned`) — same "no persistence across reload" convention
+this codebase's only other show/hide UI state (the side panel's
+collapse/expand toggles) already uses.
+
+**Live-verified in the browser** — and hit the same class of test-setup
+artifact this session already found twice: the first pass set a
+synthetic ally's `followingId` directly with no real rapport, and by
+the time the panel's next frame rendered, `trust.ts`'s own
+`tickFollowers` (real engine logic, called once per player turn) had
+already un-followed it — a stranger at `wary` trust never gets to keep
+`followingId` past its first turn. The panel's `hidden` flag correctly
+tracked that (flipped back to hidden once the follower really left),
+it just left one frame of stale row content behind, which is what the
+first run's output showed. Redone with genuine bonded rapport
+(`score: 0.9`) instead of a bare `followingId`: the follower stayed
+bonded, and the panel correctly showed itself, rendered the right name/
+status/HP (a deliberately-set low HP correctly triggered the red "low"
+class), and both the ✕ and 🐾 toggles worked as designed.
+
+Also added the `loot`/`butcher` keys (`o`/`p`) to the HUD's own
+`#hud-keys` legend row while in this area — a small gap left over from
+last round's item 8 (every other verb is listed there; these two
+weren't).
+
+Full engine suite: 1546/1546 (unchanged — this round touched only
+`index.html`/`main.ts`). Real `pnpm --filter @pokuelike/web build`
+clean.

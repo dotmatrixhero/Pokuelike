@@ -393,7 +393,7 @@
       #player-hud .hud-fill.energy { background: #d9c94a; }
       #player-hud .hud-fill.low { background: #ff6b6b; }
       #player-hud .hud-num { width: 34px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-      #hud-pack-btn { display: block; margin: 0 0 6px auto; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
+      #hud-pack-btn { display: block; margin: 0 0 6px 0; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
       #hud-pack-btn:active { background: var(--accent); }
       #hud-message { margin-top: 6px; min-height: 15px; color: var(--text); }
       #hud-keys { margin-top: 4px; font-size: 10.5px; opacity: 0.7; }
@@ -402,6 +402,43 @@
       #hud-depth:empty { display: none; }
       #hud-pad { flex-wrap: wrap; }
       #hud-pad button { flex: 1 1 28%; }
+
+      /* Direct ask: "have herd hp and status bars like easy to pin so you
+         can see all; at once" — every bonded follower's HP at a glance,
+         without opening the Inspector and clicking through them one at a
+         time. Docked bottom-left: every other floating overlay already
+         claims a top corner or bottom-center (see this file's own layout
+         comments above), and DESIGN.md already has one documented lesson
+         about a second docked panel competing with the map for space —
+         this one floats over the map like #player-hud, it doesn't push
+         anything else aside. */
+      #herd-status-panel {
+        position: absolute;
+        left: 14px;
+        bottom: 14px;
+        z-index: 20;
+        width: 210px;
+        max-height: 40%;
+        overflow-y: auto;
+        background: rgba(23, 28, 36, 0.92);
+        border: 1px solid var(--panel-border);
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 11.5px;
+        color: var(--text-dim);
+      }
+      #herd-status-panel[hidden] { display: none; }
+      .herd-status-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; color: var(--text); font-weight: 600; }
+      #herd-status-hide { width: 20px; height: 20px; padding: 0; border: 1px solid var(--panel-border); border-radius: 5px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 11px; line-height: 1; cursor: pointer; }
+      .herd-status-row { margin: 6px 0; }
+      .herd-status-name { display: flex; justify-content: space-between; color: var(--text); }
+      .herd-status-name .herd-status-status { color: var(--text-dim); font-weight: 400; font-size: 10.5px; }
+      .herd-status-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.08); overflow: hidden; margin-top: 2px; }
+      .herd-status-fill { display: block; height: 100%; border-radius: 3px; transition: width 120ms linear; background: #5ad27a; }
+      .herd-status-fill.low { background: #ff6b6b; }
+      .herd-status-fill.fainted { background: #6b6f76; }
+      #hud-party-btn { display: block; margin: 0 6px 6px 0; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-border); border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 13px; line-height: 1; cursor: pointer; }
+      #hud-party-btn:active, #hud-party-btn.pinned { background: var(--accent); }
 
       /* ROADMAP.md M5 — the pack menu. */
       #pack-menu, #command-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
@@ -987,6 +1024,17 @@
             <span id="auto-cam-status"></span>
           </div>
 
+          <!-- Direct ask: "have herd hp and status bars like easy to pin
+               so you can see all; at once" — every bonded follower's HP
+               and status, together, without opening the Inspector and
+               clicking through them one at a time. Shows itself once you
+               have a follower; the ✕ dismisses it, the 🐾 HUD button
+               (player-hud, above) brings it back. -->
+          <div id="herd-status-panel" hidden>
+            <div class="herd-status-title"><span>Party</span><button id="herd-status-hide" title="Hide">✕</button></div>
+            <div id="herd-status-body"></div>
+          </div>
+
           <!-- ROADMAP.md M3: the player's needs, always on screen. The
                inspector shows the same numbers for any selected agent, but
                the player's have to be there without clicking — you should
@@ -996,7 +1044,14 @@
                  for pack on the top right." Pulled out of the button row
                  entirely and anchored to the HUD panel's own corner —
                  one less thing crowding the row below. -->
-            <button id="hud-pack-btn" data-act="pack" title="What you carry, and what you can make">🎒</button>
+            <div style="display: flex; justify-content: flex-end;">
+              <!-- Direct ask: "have herd hp and status bars like easy to
+                   pin so you can see all; at once." The panel shows itself
+                   automatically once you have a bonded follower; this is
+                   how to bring it back after dismissing it. -->
+              <button id="hud-party-btn" data-act="party" title="Show your party's HP and status">🐾</button>
+              <button id="hud-pack-btn" data-act="pack" title="What you carry, and what you can make">🎒</button>
+            </div>
             <!-- ROADMAP.md M7: which cave level you're on, always visible — direct ask precedent, "mechanics visible on the map, not hidden in a meter." -->
             <div id="hud-depth"></div>
             <div class="hud-rows">
@@ -1007,7 +1062,7 @@
             </div>
             <div id="hud-message"></div>
             <div id="hud-pack"></div>
-            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x &nbsp; gather: g &nbsp; pack: i &nbsp; crouch: z &nbsp; attack: f &nbsp; light fire: v &nbsp; stairs: &gt;</div>
+            <div id="hud-keys">move: arrows / hjkl yubn &nbsp; wait: . &nbsp; eat: e &nbsp; drink: q &nbsp; look: x &nbsp; gather: g &nbsp; pack: i &nbsp; crouch: z &nbsp; attack: f &nbsp; light fire: v &nbsp; loot: o &nbsp; butcher: p &nbsp; stairs: &gt;</div>
             <!-- Tap controls — direct ask: "I can't play at all on mobile.
                  Can you allow a click based control scheme?" Tapping the map
                  walks there; these are the verbs that have no tile. Eat and

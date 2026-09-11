@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -146,6 +146,12 @@ const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButto
 const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
 const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
+// Direct ask: "have herd hp and status bars like easy to pin so you can
+// see all; at once."
+const herdStatusPanelEl = document.getElementById("herd-status-panel") as HTMLElement;
+const herdStatusBodyEl = document.getElementById("herd-status-body") as HTMLElement;
+const herdStatusHideBtn = document.getElementById("herd-status-hide") as HTMLButtonElement;
+const hudPartyBtn = document.getElementById("hud-party-btn") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -363,6 +369,8 @@ function resetUiForNewWorld(): void {
   lastAutoSwitchedBattleSeq = undefined;
   selectTab("inspector", false);
   updateStatusLabels();
+  herdPanelPinned = true;
+  herdStatusPanelEl.hidden = true;
 }
 
 /**
@@ -756,6 +764,64 @@ packMenuCloseBtn.addEventListener("click", closePackMenu);
 function bondedPartnersInZone(me: Agent): Agent[] {
   return world.agents.filter((a) => a.followingId === me.id && a.alive !== false && a.layer === me.layer);
 }
+
+/**
+ * Direct ask: "have herd hp and status bars like easy to pin so you can
+ * see all; at once." Shows itself automatically once the player has a
+ * bonded follower — the ✕ button (herdStatusHideBtn) dismisses it,
+ * hud-party-btn brings it back; both just flip `herdPanelPinned`, no
+ * persistence across a reload (this codebase's only other show/hide UI
+ * state — the side panel's collapse/expand toggles — works the same way).
+ * Rebuilds every frame (`EventLogPanel`'s own shape), not
+ * `BattleScreenPanel`'s persistent-per-agent-chip pattern — a handful of
+ * rows read once a frame is cheap, and the smooth HP-transition polish
+ * that pattern buys isn't what this ask is actually about.
+ */
+let herdPanelPinned = true;
+
+function renderHerdStatusPanel(): void {
+  const me = findPlayer(world);
+  const followers = me ? bondedPartnersInZone(me) : [];
+  if (!herdPanelPinned || followers.length === 0) {
+    herdStatusPanelEl.hidden = true;
+    return;
+  }
+  herdStatusPanelEl.hidden = false;
+  herdStatusBodyEl.replaceChildren();
+  for (const a of followers) {
+    const name = SPECIES[a.species]?.name ?? a.species;
+    const maxHp = a.maxHp ?? 1;
+    const hp = a.hp ?? maxHp;
+    const fraction = Math.max(0, Math.min(1, maxHp > 0 ? hp / maxHp : 0));
+    const row = document.createElement("div");
+    row.className = "herd-status-row";
+    const nameRow = document.createElement("div");
+    nameRow.className = "herd-status-name";
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    const statusSpan = document.createElement("span");
+    statusSpan.className = "herd-status-status";
+    statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    nameRow.append(nameSpan, statusSpan);
+    const bar = document.createElement("span");
+    bar.className = "herd-status-bar";
+    const fill = document.createElement("span");
+    fill.className = `herd-status-fill${a.fainted ? " fainted" : fraction < 0.25 ? " low" : ""}`;
+    fill.style.width = `${Math.round(fraction * 100)}%`;
+    bar.appendChild(fill);
+    row.append(nameRow, bar);
+    herdStatusBodyEl.appendChild(row);
+  }
+}
+
+herdStatusHideBtn.addEventListener("click", () => {
+  herdPanelPinned = false;
+  renderHerdStatusPanel();
+});
+hudPartyBtn.addEventListener("click", () => {
+  herdPanelPinned = true;
+  renderHerdStatusPanel();
+});
 
 /**
  * Direct asks: "under the attack option a sub menu show up to select your
@@ -2138,6 +2204,7 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
+  if (playerMode) renderHerdStatusPanel();
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
   // is hidden, so this is cheap on every other frame.
