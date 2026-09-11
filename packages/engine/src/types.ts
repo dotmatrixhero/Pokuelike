@@ -869,6 +869,31 @@ export interface Agent {
    */
   commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
   /**
+   * Direct ask: "my allies should do what i do, so if i drink they should
+   * look for water in the area too. if i gather or eat they should do
+   * that too." Set on every following agent (`Agent.followingId` pointing
+   * at the player) whenever the player performs the matching action —
+   * `player.ts`'s "drink"/"gather"/"eat" cases. Read and cleared by
+   * `needs.ts`'s `applyMirroredAction`, which paths the follower toward
+   * the same kind of resource and performs the same verb once there — an
+   * imitation cue, not a need-driven behavior (a follower whose own need
+   * is already urgent just lets the ordinary, more capable needs tree
+   * handle it instead, rather than run two competing movement plans).
+   */
+  mirrorAction?: "drink" | "gather" | "eat";
+  /**
+   * How many of this agent's own action ticks `mirrorAction` has been
+   * pending without resolving — live-verified escape valve, not a
+   * hypothetical: an early version of the mirror feature left a follower
+   * pinned in place for 80+ ticks chasing real water across cave terrain,
+   * its cached path stale but never expiring (a `pathfinding.ts` corner-
+   * case, not something this feature should try to fully solve). Past
+   * `MIRROR_ACTION_TIMEOUT_TICKS` (needs.ts), the cue just expires — same
+   * "an escape valve on top of the one below" shape `ticksWithoutResource`/
+   * `MIGRATE_AFTER_TICKS` already use for the ordinary needs tree.
+   */
+  mirrorActionTicks?: number;
+  /**
    * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
    * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's
    * visit-based accrual reads: a treat landing soon after this (still the

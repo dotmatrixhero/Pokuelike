@@ -9473,3 +9473,112 @@ CAMPAIGN_DESIGN.md's "frailest thing in the ecosystem"), done on a
 direct, explicit ask rather than my own initiative — flagging that
 plainly rather than quietly treating it as a routine tweak. Full suite:
 engine 1518/1518, data 400/400, web/runner typecheck clean.
+
+## Built: wishlist items 1+2 — allies mirror the player's verb, self-feed from inventory
+
+Direct asks: *"my allies should do what i do, so if i drink they should
+look for water in the area too. if i gather or eat they should do that
+too"* and *"they should eat things in their inventory if they have
+eidble stuff when hungry."*
+
+**What was built.** `player.ts`'s drink/eat/gather cases each now call a
+new `signalMirrorToFollowers(world, leader, action)`, which stamps
+`Agent.mirrorAction: "drink" | "gather" | "eat"` onto every agent
+following the player. `needs.ts` gained `applyMirroredAction`, hooked
+into `tickAgentAction` right after `applyCommandedAction` (a standing
+player order still outranks the imitation cue, same tier reasoning): if
+the same need is already urgent for that agent, the cue yields to the
+ordinary needs tree instead of double-dipping; otherwise it paths to the
+nearest water/food tile (`findNearestTerrain` + `stepAlongPath`) and
+resolves the action, checking the agent's own inventory for real food
+before ever looking at the ground. That inventory-eat logic
+(`eatFromOwnInventory`) is also wired directly into the ordinary seekFood
+branch of the needs tree — item 2's ask ("eat things in their inventory
+... when hungry") applies whether or not a mirror cue is even in play.
+
+**Bug #1, found live, real: naive greedy pathing oscillates.** First pass
+used `stepToward` (matching `applyCommandedAction`'s own combat-pathing
+convention) for the mirror's drink/eat walk. Live Playwright test (a real
+bonded follower, player drinks, hundreds of ticks advanced): the follower
+visibly oscillated between 2-3 tiles for 300+ ticks, never reaching
+water, until its own thirst dropped low enough that my "yield to urgent
+need" guard silently gave up on the cue — it never actually succeeded, it
+just quit. This is the exact stuck-near-obstacles failure mode this
+codebase already has a comment about elsewhere (an Onix stuck oscillating
+near a boulder cluster). Fixed by switching both drink and eat to
+`stepAlongPath` — the same real BFS pathfinder `seekWater`/`seekFood`
+already use for this reason.
+
+**Bug #2, chased hard, turned out to be a test artifact — but surfaced a
+real, separate, pre-existing bug.** Re-verifying after the `stepAlongPath`
+fix, the follower got permanently stuck standing still, `mirrorAction`
+never clearing even once its thirst had dropped to 0.066 (well past my
+own "already urgent, give up" threshold of 0.3). I initially treated this
+as a second pathing bug and added a defensive `mirrorActionTicks` /
+`MIRROR_ACTION_TIMEOUT_TICKS = 30` escape valve (same shape as the
+existing `ticksWithoutResource`/`MIGRATE_AFTER_TICKS` pattern) rather than
+fully root-causing it under time pressure.
+
+Root-causing it properly (before writing this up) found the real cause:
+my test setup gave the follower `followingId` directly without ever
+giving it real rapport toward the player. `hasUrgentNeed`/my own clear
+check were never being reached at all — `predation.ts`'s own
+`applyFightOrFlight`/threat-detection runs earlier in `tickAgentAction`'s
+priority chain and had the follower **fleeing from the player it was
+following** (`agent.behavior === "flee"`, `fleeingFromId: "player"`),
+which wins every tick and starves out `applyMirroredAction` entirely. In
+the real game a follower only ever starts following at `curious`+ trust
+(`trust.ts`'s `tickFollowers`), so I re-ran the exact same scenario with
+real bonded rapport (`score: 0.9`) instead of a bare `followingId` — drink,
+gather, and eat all resolved cleanly (drink in 1 tick, gather instantly,
+eat in 19 ticks of real multi-tile pathing toward food placed 8 tiles
+away), no stuck state at all. The first "stuck forever" run was my own
+test fixture being wrong, not the feature.
+
+**But that dig turned up a real, separate, pre-existing issue**: I then
+tested a follower sitting at `tolerant` trust (rapport `0.1` — real
+followers can genuinely be here; `tickFollowers` only ever drops
+`followingId` once trust decays all the way to `wary`, not at `tolerant`)
+and it **did** flee the player every tick, `fleeingFromId: "player"`,
+exactly like the flawed test. `trust.ts`'s own `trustFleeFactor` is `0`
+only at `bonded` — `tolerant` is `0.5`, not 0 — so a follower that has
+decayed from `curious` to `tolerant` but not yet to `wary` can genuinely
+treat its own leader as a live threat and flee it, mid-following. Whether
+that is a bug (a follower should never flee the one it's following,
+period, until it actually stops following) or working as designed (partial
+trust means partial safety, even from itself) is a real design question,
+not mine to rule on — **logged as a backlog item below, not fixed in this
+round.** Given this is real, if rare, kept the `mirrorActionTicks` timeout
+as the legitimate defensive backstop it turned out to be for exactly this
+case, rather than removing it as unneeded.
+
+**Verification.** `packages/engine/test/mirrorAction.test.ts` (new, 14
+tests: signaling followers, drink/eat/gather resolution + pathing +
+inventory-first-eat + no-cross-map-hunt-on-gather + yield-to-urgent-need,
+plus the plain seekFood-tree self-feed case) — all passing. Full engine
+suite: 1532/1532. `tsc --noEmit` clean. Live-verified in a real browser
+against a real dev server (Playwright): drink/gather/eat mirror cues all
+independently confirmed resolving correctly with a genuinely bonded
+follower, including real multi-tile pathing toward food placed 8 tiles
+away — not just "logic reads right."
+
+## Backlog: a follower at `tolerant` trust can flee the very player it's following
+
+Found live while verifying items 1+2 above, not something I went looking
+for. `trust.ts`'s `trustFleeFactor("tolerant")` is `0.5`, not `0` — only
+`bonded` zeroes it out — and `tickFollowers` only drops `followingId` once
+trust has decayed all the way down to `wary`, not at `tolerant`. So a
+follower that has slipped from `curious`/`bonded` down to `tolerant`
+(rapport decay, no recent interaction) but hasn't yet hit `wary` is, per
+the existing code, still actively following *and* capable of reading its
+own leader as a live threat and fleeing it every tick. Confirmed live:
+rapport `0.1` (`tolerant` band) on an otherwise-normal follower produced
+`behavior: "flee"`, `fleeingFromId: "player"`, repeatedly. Two ways to
+rule on it, not decided here:
+1. A follower should never flee the one it's actively following, full
+   stop — `playerFleeRadius`/the threat check should skip agents whose
+   `followingId === player.id` entirely, regardless of trust stage.
+2. Working as intended — partial trust is partial safety, and a spooked
+   half-trusting follower fleeing mid-follow (then presumably resuming,
+   or dropping to `wary` and un-following) is a real, legible consequence
+   of not having fully earned its loyalty yet.

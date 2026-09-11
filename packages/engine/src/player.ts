@@ -120,6 +120,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
         recordGrazing(tile);
         grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
         log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+        signalMirrorToFollowers(world, agent, "eat");
         return true;
       }
       // Direct ask: "make offer and eat only available from inventory after
@@ -141,6 +142,7 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       healFromCookedFood(world, agent, carried);
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+      signalMirrorToFollowers(world, agent, "eat");
       return true;
     }
     case "drink": {
@@ -148,12 +150,14 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       consume(agent.needs, "seekWater");
       grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
       log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "thirst" });
+      signalMirrorToFollowers(world, agent, "drink");
       return true;
     }
     case "gather": {
       if (harvestLeft(world, agent.layer, agent.pos) <= 0 || harvestableAt(world, agent.layer, agent.pos).length === 0) return false;
       if (carriedWeight(agent) >= carryCapacityOf(world, agent)) return false;
       agent.activity = { kind: "gather", turnsLeft: GATHER_TURNS, turnsTotal: GATHER_TURNS };
+      signalMirrorToFollowers(world, agent, "gather");
       return true;
     }
     case "craft": {
@@ -428,6 +432,13 @@ export function syncPlayerMoves(world: World, agent: Agent): void {
 }
 
 /** Water on the player's own tile or any of the eight around it — you kneel at the edge; you do not have to wade in. */
+/** Direct ask: "my allies should do what i do, so if i drink they should look for water in the area too. if i gather or eat they should do that too." Set on every agent currently following this one; `needs.ts`'s `applyMirroredAction` carries it out over each follower's own action ticks. */
+function signalMirrorToFollowers(world: World, leader: Agent, action: "drink" | "gather" | "eat"): void {
+  for (const a of world.agents) {
+    if (a.followingId === leader.id && a.alive !== false) a.mirrorAction = action;
+  }
+}
+
 export function waterWithinReach(world: World, agent: Agent): boolean {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {

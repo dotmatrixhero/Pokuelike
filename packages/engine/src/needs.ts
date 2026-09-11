@@ -24,6 +24,8 @@ import {
 } from "./rapport.js";
 import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
+import { FOOD_MATERIAL_IDS, MATERIALS, foodNutritionMultiplierOf, harvestableAt, takeHarvest, thirstReliefOf } from "./harvest.js";
+import { addItem, carriedWeight, removeItem } from "./inventory.js";
 import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
@@ -52,7 +54,7 @@ import {
   type LevelingContext,
 } from "./leveling.js";
 import type { PokemonType } from "./typing.js";
-import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
+import { applyCarrying, applyHealOverTime, applyHerdSupport, applyLooting, applyScavenging, applySupportMove, carryCapacityOf, healFromCookedFood, maybeRecoverFromFaint, maybeStartCarrying } from "./support.js";
 import { findNearestIndexed, type IndexedTerrain } from "./resourceIndex.js";
 import { canEnterTile } from "./occupancy.js";
 import { canEnterWater, canEnterLand } from "./waterBody.js";
@@ -1558,6 +1560,151 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   return true;
 }
 
+/**
+ * Direct ask: "they should eat things in their inventory if they have
+ * edible stuff when hungry." Confirmed via investigation before writing
+ * this: carrying items was never player-only (`Agent.inventory` is a
+ * plain field, and `applyLooting`/`applyHerdSupport` already give wild
+ * agents real inventories), but nothing in this file ever READ an agent's
+ * own carried food before pathing off toward a tile — a follower sitting
+ * on a full berry could still walk itself hungry. Mirrors `player.ts`'s
+ * own "eat from inventory" branch exactly (same nutrition/thirst-relief/
+ * cooked-food-heal math), just generalized to any agent.
+ */
+function eatFromOwnInventory(world: World, agent: Agent, ctx: LevelingContext | undefined, log: EventLog | undefined, rng: () => number): boolean {
+  const carried = (agent.inventory ?? []).find((i) => (FOOD_MATERIAL_IDS as readonly string[]).includes(i.itemKey) || world.items?.[i.itemKey]?.cooked !== undefined);
+  if (!carried) return false;
+  removeItem(agent, carried.itemKey, 1);
+  consume(agent.needs, "seekFood", foodNutritionMultiplierOf(carried.itemKey));
+  const thirstRelief = thirstReliefOf(carried.itemKey);
+  if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+  healFromCookedFood(world, agent, carried.itemKey);
+  grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+  log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+  return true;
+}
+
+/** Direct-report reuse of `player.ts`'s own `waterWithinReach` — kept as a small local duplicate rather than an import, since `player.ts` itself imports from this file (importing back would be a cycle). */
+function adjacentToWater(world: World, agent: Agent): boolean {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "water") return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Direct ask: "my allies should do what i do, so if i drink they should
+ * look for water in the area too. if i gather or eat they should do that
+ * too." `Agent.mirrorAction` is set by `player.ts`'s "drink"/"gather"/
+ * "eat" cases on every following agent; this is what actually carries the
+ * imitation out over the follower's own action ticks — same "the player
+ * only pays for issuing it, the follower spends its own ticks" shape
+ * `applyCommandedAction` already uses.
+ *
+ * Yields entirely to the ordinary needs tree when the SAME resource is
+ * already an urgent need for this agent (e.g. mirroring "drink" while
+ * already dangerously thirsty) — that machinery is more capable
+ * (capacity-aware, obstacle-routed) than this simple imitation path, so
+ * there is no reason to run two competing plans; the mirror cue is
+ * silently dropped and the urgent-need path takes it from here instead.
+ */
+/** Live-verified via Playwright, not hypothetical: a follower can path-cache toward real water and then simply stop advancing (a `pathfinding.ts` corner-case outside this feature's scope to chase down) — bounds how many of the agent's own ticks a mirror cue is allowed to stand before it just expires. */
+const MIRROR_ACTION_TIMEOUT_TICKS = 30;
+
+export function applyMirroredAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const mirror = agent.mirrorAction;
+  if (!mirror) {
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+
+  if (mirror === "drink" && agent.needs.thirst < 0.3) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+  if (mirror === "eat" && agent.needs.hunger < 0.3) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+  agent.mirrorActionTicks = (agent.mirrorActionTicks ?? 0) + 1;
+  if (agent.mirrorActionTicks > MIRROR_ACTION_TIMEOUT_TICKS) {
+    agent.mirrorAction = undefined;
+    agent.mirrorActionTicks = undefined;
+    return false;
+  }
+
+  if (mirror === "drink") {
+    if (adjacentToWater(world, agent)) {
+      consume(agent.needs, "seekWater");
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const target = findNearestTerrain(world, agent.layer, agent.pos, "water");
+    if (!target) {
+      agent.mirrorAction = undefined;
+      return false;
+    }
+    // Real BFS-backed pathing (pathfinding.ts), not greedy stepToward — see
+    // that primitive's own doc comment: an obstacle cluster between here
+    // and the target sends a greedy walker into an oscillating loop
+    // (confirmed live: an early version of this exact function walked a
+    // follower back and forth for 100+ ticks a stone's throw from real
+    // water, never arriving). seekWater/seekFood already learned this
+    // lesson; this mirrors it rather than repeating the mistake.
+    agent.pos = stepAlongPath(world, agent, target);
+    return true;
+  }
+
+  if (mirror === "eat") {
+    if (eatFromOwnInventory(world, agent, ctx, log, rng)) {
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const tile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+    if (tile?.terrain === "food" && (tile.stock ?? 0) > 0) {
+      consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+      const thirstRelief = thirstReliefFactor(tile);
+      if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+      healFromCookedFood(world, agent, tile.flavor);
+      tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+      recordGrazing(tile);
+      grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+      log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+      agent.mirrorAction = undefined;
+      return true;
+    }
+    const target = findNearestTerrain(world, agent.layer, agent.pos, "food");
+    if (!target) {
+      agent.mirrorAction = undefined;
+      return false;
+    }
+    agent.pos = stepAlongPath(world, agent, target); // see the "drink" branch's own comment on why not stepToward
+    return true;
+  }
+
+  // mirror === "gather" — scoped to "right here/adjacent," same reach the
+  // player's own gather already requires (player.ts's "gather" case only
+  // ever checks the tile underfoot). A follower usually stays within
+  // `FOLLOW_KEEP_DISTANCE` of whoever it's imitating, so it's normally
+  // gathering the very patch the player just did; it does not run its own
+  // cross-map hunt for a second harvestable tile.
+  if (harvestableAt(world, agent.layer, agent.pos).length > 0) {
+    const capacity = carryCapacityOf(world, agent);
+    for (const m of takeHarvest(world, agent.layer, agent.pos)) {
+      if (carriedWeight(agent) + MATERIALS[m].weight > capacity) continue;
+      addItem(agent, m, 1, MATERIALS[m].weight);
+    }
+    agent.mirrorAction = undefined;
+    return true;
+  }
+  agent.mirrorAction = undefined; // nothing harvestable within reach — the imitation cue expires rather than wandering off looking
+  return false;
+}
+
 export function tickAgentAction(
   world: World,
   agent: Agent,
@@ -1603,6 +1750,10 @@ export function tickAgentAction(
   // player deliberately spent a turn issuing it) but never self-
   // preservation above — see `applyCommandedAction`'s own doc comment.
   if (applyCommandedAction(world, agent, log, ctx, rng)) return;
+  // Direct ask: "my allies should do what i do" — an imitation cue, lower
+  // priority than a standing fight order but ahead of passive following,
+  // same tier reasoning as `applyCommandedAction` right above.
+  if (applyMirroredAction(world, agent, log, ctx, rng)) return;
   // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
   // and fighting have had their say, before the needs tree, and only while
   // no need is urgent (a follower that starves is a bug).
@@ -1908,6 +2059,13 @@ export function tickAgentAction(
     return;
   }
 
+  // Direct ask: "they should eat things in their inventory if they have
+  // edible stuff when hungry" — checked before any of the tile-search
+  // machinery below: an agent that's already carrying real food has no
+  // reason to go looking for more first.
+  if (agent.behavior === "seekFood" && eatFromOwnInventory(world, agent, ctx, log, rng)) {
+    return;
+  }
   if (agent.behavior === "seekFood" && tryForageFromWater(world, agent, log, rng)) {
     // Opportunistic incidental graze (algae/krill stand-in) — tried before
     // the shelter cache/real-food-tile search below since it costs nothing
