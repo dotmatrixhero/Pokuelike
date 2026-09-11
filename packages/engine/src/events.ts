@@ -712,6 +712,23 @@ export type SimEvent =
       toRegionId: string;
       /** The herd this crosser ended up filed under at the destination — see overworld.ts's `foldAgentIntoAggregate`. */
       herdId: string;
+    }
+  /**
+   * The player walked off the edge of the focused zone into a neighbor —
+   * direct ask: "spawn in overworld after graduating from the end of the
+   * cave," scoped to full seamless macro-grid walking. Unlike
+   * `regionCrossed` (a wild disperser folded into an abstract aggregate,
+   * no real position at the destination), this crosser is a real, still-
+   * positioned individual — see overworld.ts's `crossZoneEdge`.
+   */
+  | {
+      kind: "crossedZone";
+      tick: number;
+      agentId: string;
+      species: string;
+      fromZone: string;
+      toZone: string;
+      pos: Vec2;
     };
 
 /**

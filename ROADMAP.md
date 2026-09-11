@@ -592,6 +592,19 @@ use plain `generateWorld`, no ground-type/water-kind/fertility pass); the
 disperser door's "one armful" cache (still M6/M7's own open item,
 untouched).
 
+**Follow-up, built: "you emerge" is now a real place, not just a screen.**
+Direct ask: "spawn in overworld after graduating from the end of the
+cave," scoped to full seamless macro-grid walking (over a cheaper
+spectator-only drop-in). The win screen now offers a real continuation —
+the same graduated human (level, moves, inventory intact) lands in a
+freshly generated macro-grid `World`, and walking off a zone's edge
+crosses seamlessly into its neighbor, reusing the existing overworld
+system's own promote/demote machinery (`overworld.ts`'s new
+`crossZoneEdge`) rather than the wild-agent dispersal path, which turned
+out to fold crossers into abstract statistics with no real position at
+all — wrong for a player. Full write-up, live-verification, and the 7 new
+`overworld.test.ts` cases are in TODO.md.
+
 ---
 
 ## What this does NOT include, on purpose

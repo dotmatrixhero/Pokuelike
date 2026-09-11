@@ -467,6 +467,7 @@
       #game-over-cause { color: var(--text); margin-bottom: 8px; }
       #game-over-stats, #run-won-stats { color: var(--text-dim); font-size: 12px; margin-bottom: 12px; }
       .game-over-hint { color: var(--text-dim); font-size: 12px; }
+      #run-won-continue { display: block; width: 100%; margin-bottom: 10px; padding: 8px 14px; border: 1px solid var(--panel-border); border-radius: 8px; background: var(--accent); color: var(--text); font-size: 14px; }
 
       /* Both floating overlays sit relative to the whole #map-area, but the
          macro-map view has its own toolbar row (zoom + hint) above the
@@ -1062,12 +1063,17 @@
             </div>
           </div>
 
-          <!-- ROADMAP.md M7 — "Done when: you emerge." -->
+          <!-- ROADMAP.md M7 — "Done when: you emerge." Direct follow-up ask:
+               "spawn in overworld after graduating from the end of the
+               cave" — Enter carries the same graduated human (level,
+               inventory, moves) into a fresh, walkable macro-grid world;
+               R still just replays the cave itself on the same seed. -->
           <div id="run-won" hidden>
             <div class="game-over-card">
               <div class="game-over-title">You emerge.</div>
               <div id="run-won-stats"></div>
-              <div class="game-over-hint">Press R to play again on the same seed.</div>
+              <button id="run-won-continue">Continue into the wider world</button>
+              <div class="game-over-hint">Press Enter to continue &nbsp;·&nbsp; R to play the cave again.</div>
             </div>
           </div>
 

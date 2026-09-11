@@ -144,6 +144,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ~${event.population} ${speciesDisplayName(event.species)} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
+    case "crossedZone":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) crossed from zone ${event.fromZone} into zone ${event.toZone} at (${event.pos.x},${event.pos.y})`;
   }
 }
 

@@ -224,6 +224,8 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `~${event.population} ${speciesDisplayName(event.species)} of herd ${event.herdId} emigrated from region ${event.fromRegionId} to region ${event.toRegionId}`;
     case "regionCrossed":
       return `${idLabel(world, event.agentId, event.species)} crossed from region ${event.fromRegionId} into region ${event.toRegionId}, joining herd ${event.herdId}`;
+    case "crossedZone":
+      return `${idLabel(world, event.agentId, event.species)} crossed into a new stretch of land`;
   }
 }
 

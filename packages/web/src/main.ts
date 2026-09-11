@@ -1,4 +1,4 @@
-import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type Vec2, type World, advancePlayerTurn, findPlayer, examine, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent } from "./eventText.js";
@@ -135,6 +135,7 @@ const hudMessageEl = document.getElementById("hud-message") as HTMLElement;
 const gameOverEl = document.getElementById("game-over") as HTMLElement;
 const runWonEl = document.getElementById("run-won") as HTMLElement;
 const runWonStatsEl = document.getElementById("run-won-stats") as HTMLElement;
+const runWonContinueBtn = document.getElementById("run-won-continue") as HTMLButtonElement;
 const gameOverCauseEl = document.getElementById("game-over-cause") as HTMLElement;
 const gameOverStatsEl = document.getElementById("game-over-stats") as HTMLElement;
 const hudPackEl = document.getElementById("hud-pack") as HTMLElement;
@@ -859,6 +860,42 @@ function checkWinCondition(player: Agent): void {
 }
 
 /**
+ * Direct follow-up ask, right after the cave-climb win screen shipped:
+ * "spawn in overworld after graduating from the end of the cave" — scoped
+ * to full seamless macro-grid walking, not a one-off spectator drop-in.
+ * Carries the SAME human agent across (level, moves, inventory, hp all
+ * intact — this is the graduated player, not a fresh spawn) into a brand
+ * new macro-grid world. Sets `macroWorld` while `playerMode` stays true —
+ * the one deliberate relaxation of the "these two are mutually exclusive"
+ * invariant every other mode transition in this file still holds to;
+ * `playerAct` is the only other place that reads `macroWorld` while
+ * `playerMode` is on (to check for zone-edge crossings), everything else
+ * (the macro map view, its own toggle) stays untouched and hidden, same as
+ * ordinary player mode already keeps them.
+ */
+function enterOverworldFromCaveWin(): void {
+  const player = findPlayer(world);
+  if (!player) return;
+  playerWon = false;
+  runWonEl.hidden = true;
+  macroWorld = createDemoMacroWorld(playerSeed);
+  const startWorld = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
+  world.agents = world.agents.filter((a) => a !== player);
+  player.layer = "surface";
+  player.homeLayer = "surface";
+  player.pos = findWalkableNear(startWorld, "surface", startWorld.width / 2, startWorld.height / 2);
+  startWorld.agents.push(player);
+  world = startWorld;
+  resetUiForNewWorld();
+  registerHerdsForFirstFrame();
+  hudMessageEl.textContent = "You emerge into the wider world.";
+  renderPlayerHud();
+  focusCameraOn(player.pos);
+}
+
+runWonContinueBtn.addEventListener("click", () => enterOverworldFromCaveWin());
+
+/**
  * ROADMAP.md M7 — direct ask: "i think i just want to be able to move to
  * the next level of the cave." Not a `PlayerAction`/turn at all — crossing
  * levels swaps which `World` the whole app is looking at (same "re-point
@@ -898,6 +935,27 @@ function playerAct(action: PlayerAction): void {
   const player = findPlayer(world);
   if (!player) return;
   if (action.kind === "move") lastFacing = { dx: action.dx, dy: action.dy };
+  // Direct ask: "spawn in overworld after graduating from the end of the
+  // cave," scoped to full seamless walking — a move that would step off
+  // the focused zone's own tile-grid bounds crosses into the neighbor
+  // instead of just failing, the same "instant, no extra tick" shape the
+  // cave's own stairs already use (tryUseStairs, below). Checked here,
+  // ahead of the ordinary turn-advance, so a real wall still blocks
+  // normally — only an actual out-of-bounds step reaches crossZoneEdge at
+  // all (see its own doc comment for why it returns undefined otherwise).
+  if (macroWorld && action.kind === "move") {
+    const crossed = crossZoneEdge(macroWorld, player, action.dx, action.dy, IMMIGRATION_CONTEXT, log);
+    if (crossed) {
+      world = crossed;
+      resetUiForNewWorld();
+      registerHerdsForFirstFrame();
+      afterTick();
+      focusCameraOn(player.pos);
+      renderPlayerHud();
+      hudMessageEl.textContent = "You cross into a new stretch of land.";
+      return;
+    }
+  }
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
   focusCameraOn(player.pos);
@@ -953,6 +1011,9 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
       loadPlayerWorld(playerSeed, playerScene);
+    } else if (playerWon && e.key === "Enter") {
+      e.preventDefault();
+      enterOverworldFromCaveWin();
     }
     return;
   }

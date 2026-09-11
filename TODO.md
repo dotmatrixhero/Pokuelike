@@ -9251,3 +9251,70 @@ yet); "the stone" (unclear referent, not scoped); underground as a
 generated ecology (ground-type/water-kind/fertility — levels 2-5 use plain
 `generateWorld`); the disperser door's "one armful" cache (still open from
 M6).
+
+## Graduating the cave into a fully walkable overworld
+
+Direct ask, once "no win screen — you spawn in the overworld" turned out
+not to be a bug report at all: *"no that was a resquest, not a bug report.
+i want you to spawn in overworld after graduating from the end of tge
+cave."* Scoped before building (three options: drop into spectator
+Overworld mode only; one playable zone with no cross-zone walking yet; or
+full seamless macro-grid walking, same as wild animals already migrate
+between zones). Answered: **full seamless macro-grid walking.**
+
+Investigated first (a background agent's report) since this touches real,
+previously-built architecture: `MacroWorld`/`Region` (only the *focused*
+zone ever has a real `World` with real `Agent`s; every other tracked zone
+is a cheap per-species statistical `RegionAggregate`, no positions at all),
+`setFocusedZone` (the existing promote/demote transition `main.ts`'s own
+`focusZone` already drives from a map click), and the existing wild-agent
+zone-crossing (`regionCrossed`/`dispersal.ts`) — which turned out to be
+the WRONG template to copy: a wild disperser that reaches a neighboring
+zone is folded straight into that zone's abstract aggregate, with **no
+real position at the destination at all**, because the destination might
+not even have a `World` yet. That's fine for a statistic; it's exactly
+wrong for a player, who needs a real, walkable tile to land on.
+
+**Engine** (`overworld.ts`): new `crossZoneEdge(mw, player, dx, dy, ctx,
+log)`. Checked by `main.ts`'s `playerAct`, ahead of the ordinary turn-
+advance, whenever a "move" would step outside the focused zone's own
+tile-grid bounds. Deliberately does NOT reuse the wild-agent crossing path
+— it pulls the player out of `world.agents` first, then delegates to the
+EXISTING `setFocusedZone` completely unmodified for the wild population's
+own demote/promote bookkeeping (so that machinery stays exactly as tested),
+then places the player at the mirrored entering-edge coordinate (exit east
+at y=15, enter west at y=15 — one wraparound-modulo formula handles all
+four edges plus diagonal corner crossings in one line), snapped to the
+nearest real walkable tile the same way every other computed-position
+placement in this codebase already does. Instant, no extra tick cost —
+the same "the transition itself is free" shape the cave's own stairs
+(`climb.ts`'s `useStairs`) already established. New `crossedZone` SimEvent
+(not `regionCrossed` — that one's shape is wild-disperser/herd-specific).
+7 new unit tests (`overworld.test.ts`): all four edges, a diagonal corner
+crossing, an ordinary in-bounds move is correctly a no-op, the outermost
+edge of the whole macro grid has nowhere to go, and the wild population
+left behind still demotes normally.
+
+**Web** (`main.ts`, `index.html`): the win screen ("You emerge") gained a
+"Continue into the wider world" button / Enter key, alongside the
+existing "R to play the cave again." `enterOverworldFromCaveWin` carries
+the SAME graduated human across — level, moves, inventory, hp all intact,
+not a fresh spawn — into a freshly generated `MacroWorld`
+(`createDemoMacroWorld`), landing them in its starting zone's already-real
+`World`. This is the one deliberate relaxation of "player mode and the
+macro grid are mutually exclusive," which every other transition in this
+file still holds to — the spectator macro-map view/toggle stay untouched
+and hidden, same as ordinary player mode already keeps them; `playerAct`
+is the only other place that now reads `macroWorld` while `playerMode` is
+on.
+
+**Live-verified** (Playwright, real dev server): won the cave, pressed
+Enter, confirmed the graduated human's level (12) and inventory (a torch)
+carried over unchanged and `layer` flipped to `"surface"`; then walked to
+the zone's actual east edge and stepped off it — landed in the
+neighboring zone at the mirrored y (snapped a couple tiles by
+`findWalkableNear` since the exact mirrored tile wasn't itself walkable),
+HUD message "You cross into a new stretch of land," no console errors.
+
+Full suite: engine 1511/1511 (7 new), data 400/400, web build clean,
+runner typecheck clean.
