@@ -9378,3 +9378,31 @@ typecheck clean.
 - [ ] Rice, groundnut and potato are the closest available shape on a
       berry-plant sheet rather than exact matches. Fine at tile size, worth
       revisiting if a real crop sheet ever turns up.
+
+## Built: canvas fidelity — smoothing off, oversized textures windowed
+
+- [x] Direct report: "Are the pixels getting super ugly compressed when
+      rendered? I think we are losing a lot of fidelity." Two faults:
+      `imageSmoothingEnabled` was never set false on the main canvas (only
+      on the macro map), and 128px/144px surface textures were being
+      squashed whole into 20px tiles every frame. Both fixed; before/after
+      shows visibly sharper water and shorelines.
+- [ ] **The "square and ugly" complaint itself is NOT fixed yet.** Two
+      concrete offenders, both visible at zoom:
+      1. **Hard staircase shorelines.** Land/water boundaries are 90-degree
+         tile steps. Water already has per-side edge compositing
+         (`getWaterEdge`), so the mechanism exists — it just isn't producing
+         an organic transition here. Worth checking why before adding
+         anything new.
+      2. **A visible ground lattice.** `featheredOverlayStamp` builds a
+         TILE_SIZE stamp drawn at the tile origin, so every decal lands
+         exactly on the grid — a regular checkerboard of lighter/darker
+         squares. Fix is decals larger than a tile at hash-jittered sub-tile
+         offsets so they straddle borders; needs the ground pass split into
+         base-then-decal so an oversized decal isn't overdrawn by the next
+         tile's base.
+- [ ] Sources between 1x and 2x the tile (water/sand at 32x32, floor_stone
+      at 32x26) still resample 32->20, now with smoothing off, so they
+      point-sample. Cleanest fix is an offline one-time area-resample to
+      exactly 20px, but the water EDGE strips are cropped by math that may
+      assume a 32px source — check that before touching them.

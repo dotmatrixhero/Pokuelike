@@ -12,6 +12,7 @@ import {
   getSprite,
   humanSpriteKey,
   getTileSprite,
+  tileWindow,
   getWaterEdge,
   getWaterInterior,
   type SpriteDirection,
@@ -859,7 +860,17 @@ function drawWorldTiles(
             // per map tile ever drawn.
             ctx.drawImage(tintedSprite(sprite, sprite.src, floraTint), x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           } else {
-            ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            // A surface texture far bigger than a tile (mud is 128x128, wall
+            // 144x144) gets a tile-sized window drawn 1:1 instead of the whole
+            // image squashed down — full fidelity, and a different crop per
+            // tile so the terrain stops repeating. See sprites.ts's
+            // `tileWindow`; null for object icons, which are drawn whole.
+            const win = tileWindow(sprite, x, y, TILE_SIZE);
+            if (win) {
+              ctx.drawImage(sprite, win.sx, win.sy, TILE_SIZE, TILE_SIZE, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            } else {
+              ctx.drawImage(sprite, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
           }
           drawTileVignette(ctx, x, y);
           continue;

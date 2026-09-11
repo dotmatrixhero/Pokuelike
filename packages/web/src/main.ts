@@ -340,6 +340,16 @@ function resetUiForNewWorld(): void {
 
   canvas.width = world.width * TILE_SIZE;
   canvas.height = world.height * TILE_SIZE;
+  // Setting canvas.width/height RESETS every context property, so this has to
+  // be re-applied here rather than once at startup. Without it the context
+  // keeps the browser default (smoothing ON) and every drawImage that resamples
+  // — which is nearly all of them, since almost no tile art is exactly
+  // TILE_SIZE — gets bilinear-filtered into the backing store. The CSS
+  // `image-rendering: pixelated` then faithfully upscales an already-blurred
+  // image, so the blur survives to the screen. macroMap.ts always did this;
+  // the main canvas never did. Direct report: "Are the pixels getting super
+  // ugly compressed when rendered? I think we are losing a lot of fidelity."
+  ctx.imageSmoothingEnabled = false;
   applyZoom();
 
   eventLogPanel.reset();

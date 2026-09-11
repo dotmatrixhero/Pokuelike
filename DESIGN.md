@@ -15972,3 +15972,51 @@ rendering, alongside the pre-existing berries — three of the new crops
 genuinely drawn on screen rather than glyph-substituted. Only 7 of 15
 appeared in that run because crop growth is biome- and season-gated, which
 is the system working, not a gap.
+
+## Fidelity: the main canvas was bilinear-filtering all its pixel art
+
+Direct report, mid-task: "Are the pixels getting super ugly compressed when
+rendered? I think we are losing a lot of fidelity." Correct on both counts,
+and it was two separate faults stacking.
+
+**1. Smoothing was never turned off on the game canvas.** `macroMap.ts` sets
+`imageSmoothingEnabled = false`; the main renderer never did, so the context
+kept the browser default of ON. Almost no tile art is exactly `TILE_SIZE`
+(20px) — sources measure 16x16, 32x32, 32x42, 128x128, 144x144 — so nearly
+every `drawImage` resampled, and every one of those got bilinear-filtered
+into the backing store. The CSS `image-rendering: pixelated` on the canvas
+(which *is* set, so the final upscale was never the problem) then faithfully
+enlarged an already-blurred bitmap. Fixed by setting the flag right after
+`canvas.width`/`height` are assigned — those assignments reset all context
+state, which is exactly why it has to live there rather than once at
+startup.
+
+Worth noting what this also fixes for free: the Pokemon and trainer sprites
+are 32x32 and draw at `TILE_SIZE * SPRITE_SCALE` = 32, i.e. exactly 1:1.
+They were being blurred by a filter that had no resampling to do.
+
+**2. Oversized surface textures were squashed whole into one tile.**
+`mud.png` is 128x128 and `wall_1.png` is 144x144, both drawn as
+`drawImage(img, dx, dy, 20, 20)` — the entire texture crushed into a 20px
+tile, keeping about 2% of its pixels, every frame. It also meant every mud
+tile and every wall tile was identical, since all of them showed the same
+squashed image. Now a tile-sized window is taken out of the source and drawn
+1:1 (`tileWindow`, sprites.ts): zero resampling, and the window is chosen
+per tile position, so the same change that restores the detail also breaks
+up the repetition. Measured: mud yields 36 distinct crops, wall 49, with
+zero out-of-bounds windows across a 200x200 sweep. Object icons (a tree at
+32x42, a bush at 16x35) fail the "at least twice the tile in both
+dimensions" test and are still drawn whole, as they must be.
+
+**Verified** with a before/after of the identical view and seed: the water's
+wave detail and the shoreline read visibly sharper, where before they were
+smeared. Web build clean. Stated plainly: mud and wall tiles were not in
+that particular view, so `tileWindow`'s effect on screen is unverified —
+what is verified is the arithmetic (in-bounds, deterministic, correct
+distinct-crop counts) and that object icons are untouched.
+
+**Not fixed, and still the actual "square and ugly" complaint:** the
+land/water boundary is a hard 90-degree staircase, and plain ground still
+shows a faint lattice of lighter/darker 20px squares, because floor decals
+are tile-sized stamps drawn at the tile origin. Those are a separate piece
+of work from fidelity — see TODO.md.

@@ -108,6 +108,33 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
   wall: 2,
 };
 
+/**
+ * A 1:1 source window for a surface texture that is much larger than a tile.
+ *
+ * `mud.png` is 128x128 and `wall_1.png` is 144x144, but both were being drawn
+ * with `drawImage(img, dx, dy, TILE_SIZE, TILE_SIZE)` — the WHOLE image
+ * squashed into 20x20. That resampled a 144px texture down to 20px, keeping
+ * roughly 2% of its pixels, and did it every frame; it also made every tile of
+ * that terrain identical, since they all showed the same squashed image.
+ *
+ * Taking a tile-sized window instead is strictly better on both counts: drawn
+ * 1:1 there is no resampling at all (full fidelity), and the window is chosen
+ * per tile position, so the terrain stops repeating. Direct report: "Are the
+ * pixels getting super ugly compressed when rendered? I think we are losing a
+ * lot of fidelity."
+ *
+ * Only applies when the source is at least twice the tile in BOTH dimensions,
+ * which is exactly the full-tile surface textures. Object icons (a tree at
+ * 32x42, a bush at 16x35) are meant to be seen whole and fail that test.
+ */
+export function tileWindow(img: HTMLImageElement, x: number, y: number, tileSize: number): { sx: number; sy: number } | null {
+  if (img.width < tileSize * 2 || img.height < tileSize * 2) return null;
+  const cols = Math.floor(img.width / tileSize);
+  const rows = Math.floor(img.height / tileSize);
+  const h = hashTile(x, y);
+  return { sx: (h % cols) * tileSize, sy: (Math.floor(h / cols) % rows) * tileSize };
+}
+
 export function getTileSprite(terrainKind: string, x: number, y: number): HTMLImageElement | null {
   const variants = TILE_VARIANT_COUNTS[terrainKind];
   if (!variants) return loadSprite(`tile_${terrainKind}`, `/tiles/${terrainKind}.png`);
