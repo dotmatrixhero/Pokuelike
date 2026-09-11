@@ -11191,3 +11191,63 @@ scope this round is Slices 0–2.
 - [ ] Autosave has no UI at all — no "saved" indicator, no manual save/load,
       no way to abandon a run except dying or pressing R. Fine for now; worth
       revisiting once the sidebar exists to put it in.
+
+## Built: play-mode UX, Slice 1 — one sidebar, and a mobile bottom sheet
+
+Direct ask: *"I want one sidebar with my player status, and my party members
+at a glance. Then expandable."* Answer chosen for the layout question: play
+mode gets its **own** layout, not a fifth tab.
+
+- [x] **Play mode leads with "You".** The side panel opens on a You tab
+      (identity, vitals, message, Party, Pack, Keys); the four spectator tabs
+      — Inspector / Battle / Chronicle / Events — fold behind a single
+      "World" disclosure. They are furniture for watching a simulation, not
+      for being inside one.
+- [x] **Two floating panels became none.** `#herd-status-panel` is deleted
+      outright, along with its pin state and the 🐾 button that restored it;
+      `#player-hud` is now controls only — the pack button and the seven-verb
+      pad. Everything you *read* is in the panel, everything you *press*
+      floats over the map. That is the literal answer to *"buttons either
+      easily dismissable or off to the side so it doesn't make the ui
+      obscured."*
+- [x] The bar markup was **moved with its ids intact**, so `renderPlayerHud`'s
+      `hud-${id}` lookups kept working with no change. A move, not a rewrite.
+- [x] **Mobile is a bottom sheet with three detents** — drag the grip, or tap
+      it to cycle. Measured live at 390px: peek **74px**, half **351px**, full
+      **663px**. It is `position: fixed`, so the map keeps the whole viewport
+      underneath instead of the old permanent 22vh in-flow panel.
+- [x] **Bug found by measuring, not reading (1):** at half and full the sheet
+      *covered the action pad* — every verb out of reach exactly when the
+      panel was open. `--sheet-h` moved to `:root` so the pad rides above the
+      sheet's current height, and hides at full. Verified with
+      `elementFromPoint` that the first button really is the topmost element
+      there, not merely present in the DOM.
+
+      | detent | pad shown | clear of sheet | button tappable |
+      |---|---|---|---|
+      | peek | yes | yes | yes |
+      | half | yes | yes | yes |
+      | full | no (by design) | — | — |
+- [x] **Bug found by measuring, not reading (2):** Watch mode was showing the
+      You/World tabs. `.panel-tab-btn` sets `display: flex` and is declared
+      *later* in the stylesheet than `.play-tab { display: none }` — equal
+      specificity, so source order won and the rule never applied. Scoped
+      through `#panel-tabs`. This is the `el.hidden` lesson again in a new
+      costume: the check caught it only because it read computed style
+      instead of trusting the rule I had just written.
+- [x] Orphaned `#panel-toolbar` row on the You page — one stranded expand
+      arrow under the tabs. Hidden in play mode.
+- [x] Added a real identity line ("Human · Lv 5"), and renamed the depth row
+      from "Level 1 of 5" to **"Depth 1 of 5"**: it sits directly under
+      "Lv 5", and two adjacent rows both reading "Level … 5" meant two
+      different fives.
+- [x] Verified: desktop 1280 and mobile 390 screenshots, detent cycling,
+      World-tab unfold, a watch-mode regression check, zero page errors, full
+      suite green (engine 1616, data 475), web build clean — and the 13/13
+      autosave checks from Slice 0 still pass after the restructure.
+- [ ] The verb pad is still 7 buttons on mobile, ~196px tall stacked in the
+      corner. That is scheduled to go away in Slice 3, where the long-press
+      radial replaces it **on mobile only** — verbatim: *"Replace but only on
+      mobile I think?"* Desktop keeps the pad.
+- [ ] Sheet detent isn't remembered across a reload. Minor, but it is the kind
+      of thing that gets noticed once autosave means reloads are survivable.

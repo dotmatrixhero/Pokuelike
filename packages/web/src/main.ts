@@ -122,6 +122,13 @@ const tabChronicleBtn = document.getElementById("tab-chronicle") as HTMLButtonEl
 const chronicleEl = document.getElementById("chronicle-page") as HTMLElement;
 const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLButtonElement;
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
+const tabYouBtn = document.getElementById("tab-you") as HTMLButtonElement;
+const tabWorldBtn = document.getElementById("tab-world") as HTMLButtonElement;
+const youPageEl = document.getElementById("you-page") as HTMLElement;
+const youTitleEl = document.getElementById("you-title") as HTMLElement;
+const partyBodyEl = document.getElementById("party-body") as HTMLElement;
+const partyCountEl = document.getElementById("party-count") as HTMLElement;
+const sheetHandleEl = document.getElementById("sheet-handle") as HTMLElement;
 const togglePanelBtn = document.getElementById("toggle-panel") as HTMLButtonElement;
 const sidePanelEl = document.getElementById("side-panel") as HTMLElement;
 const moreMenuWrap = document.getElementById("more-menu-wrap") as HTMLElement;
@@ -159,10 +166,6 @@ const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLEl
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
 // Direct ask: "have herd hp and status bars like easy to pin so you can
 // see all; at once."
-const herdStatusPanelEl = document.getElementById("herd-status-panel") as HTMLElement;
-const herdStatusBodyEl = document.getElementById("herd-status-body") as HTMLElement;
-const herdStatusHideBtn = document.getElementById("herd-status-hide") as HTMLButtonElement;
-const hudPartyBtn = document.getElementById("hud-party-btn") as HTMLButtonElement;
 
 // --- State -----------------------------------------------------------------
 
@@ -481,8 +484,6 @@ function resetUiForNewWorld(): void {
   lastAutoSwitchedBattleSeq = undefined;
   selectTab("inspector", false);
   updateStatusLabels();
-  herdPanelPinned = true;
-  herdStatusPanelEl.hidden = true;
 }
 
 /**
@@ -506,6 +507,94 @@ function resetUiForNewWorld(): void {
 function registerHerdsForFirstFrame(): void {
   tickHerds(world, log);
 }
+
+/**
+ * The mobile bottom sheet's three resting heights. Direct ask: "one sidebar
+ * with my player status, and my party members at a glance. Then expandable",
+ * and "Need it to be easier to navigate with buttons either easily
+ * dismissable or off to the side so it doesn't make the ui obscured."
+ *
+ * Peek is deliberately tiny — four vitals bars and nothing else — so the map
+ * owns the screen by default. `peek` matches `--sheet-peek` in index.html,
+ * which the on-map control pad also positions itself above; change one and
+ * change the other.
+ */
+const SHEET_DETENTS = { peek: 74, half: 0.45, full: 0.85 } as const;
+type SheetDetent = keyof typeof SHEET_DETENTS;
+let sheetDetent: SheetDetent = "peek";
+
+/** A detent's height in real pixels — the fractional ones are of the viewport. */
+function sheetHeightPx(detent: SheetDetent): number {
+  const value = SHEET_DETENTS[detent];
+  return value > 1 ? value : Math.round(window.innerHeight * value);
+}
+
+function setSheetDetent(detent: SheetDetent): void {
+  sheetDetent = detent;
+  document.body.classList.toggle("sheet-peek", detent === "peek");
+  document.body.classList.toggle("sheet-half", detent === "half");
+  document.body.classList.toggle("sheet-full", detent === "full");
+  document.documentElement.style.setProperty("--sheet-h", `${sheetHeightPx(detent)}px`);
+}
+
+/**
+ * Drag the grip to resize, or tap it to cycle. Both, because a tap is faster
+ * when you know where you are going and a drag is better when you don't —
+ * and on a phone the grip is the only part of the sheet always in reach.
+ */
+function initSheetDrag(): void {
+  let startY = 0;
+  let startH = 0;
+  let dragging = false;
+  let moved = false;
+
+  sheetHandleEl.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    moved = false;
+    startY = event.clientY;
+    startH = sidePanelEl.getBoundingClientRect().height;
+    sheetHandleEl.setPointerCapture(event.pointerId);
+    sidePanelEl.classList.add("sheet-dragging");
+  });
+
+  sheetHandleEl.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    const delta = startY - event.clientY; // up is taller
+    if (Math.abs(delta) > 4) moved = true;
+    const height = Math.max(SHEET_DETENTS.peek, Math.min(window.innerHeight * 0.92, startH + delta));
+    document.documentElement.style.setProperty("--sheet-h", `${Math.round(height)}px`);
+    // Peek hides the tabs and sections, so it has to come off the moment the
+    // sheet is dragged open — otherwise you drag up into blank space.
+    document.body.classList.toggle("sheet-peek", height < sheetHeightPx("peek") + 30);
+  });
+
+  const release = (event: PointerEvent) => {
+    if (!dragging) return;
+    dragging = false;
+    sidePanelEl.classList.remove("sheet-dragging");
+    if (sheetHandleEl.hasPointerCapture(event.pointerId)) sheetHandleEl.releasePointerCapture(event.pointerId);
+    if (!moved) {
+      // A tap: cycle onward, so repeated taps walk peek -> half -> full.
+      setSheetDetent(sheetDetent === "peek" ? "half" : sheetDetent === "half" ? "full" : "peek");
+      return;
+    }
+    // Snap to whichever detent the finger ended up nearest.
+    const height = sidePanelEl.getBoundingClientRect().height;
+    let best: SheetDetent = "peek";
+    for (const detent of ["peek", "half", "full"] as SheetDetent[]) {
+      if (Math.abs(sheetHeightPx(detent) - height) < Math.abs(sheetHeightPx(best) - height)) best = detent;
+    }
+    setSheetDetent(best);
+  };
+  sheetHandleEl.addEventListener("pointerup", release);
+  sheetHandleEl.addEventListener("pointercancel", release);
+
+  // A fractional detent is a fraction of a viewport that just changed.
+  window.addEventListener("resize", () => {
+    if (playerMode) setSheetDetent(sheetDetent);
+  });
+}
+initSheetDrag();
 
 /**
  * Autosave cadence. Long enough that holding a movement key doesn't compress
@@ -616,6 +705,13 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface", re
   playerHudEl.hidden = false;
   packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
+  // Your own state is what the panel is for in play mode, so it opens on You
+  // with the spectator tabs folded away. resetUiForNewWorld above selected
+  // Inspector, which is the right default for Watch mode and the wrong one
+  // here.
+  document.body.classList.remove("world-tabs-open");
+  selectTab("you", false);
+  setSheetDetent(sheetDetent);
   cancelTravel();
   hudMessageEl.textContent = restored
     ? "Your run continues."
@@ -646,6 +742,9 @@ function enterWatchMode(seed: number): void {
   gameOverEl.hidden = true;
   runWonEl.hidden = true;
   document.body.classList.remove("player-mode");
+  document.body.classList.remove("world-tabs-open");
+  // The You page has no meaning without a player; Watch mode's own default.
+  if (activeTab === "you") selectTab("inspector", false);
   enterOverworldMode(seed, "zone");
   syncModeButtons();
   const url = new URL(location.href);
@@ -689,12 +788,19 @@ function renderPlayerHud(): void {
   bar("hunger", player.needs.hunger, `${Math.round(player.needs.hunger * 100)}%`);
   bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
   bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
+  // Who you are, at the top of your own panel. The row under it is depth,
+  // which reads as "Level 1 of 5" and is emphatically not your level.
+  const speciesName = SPECIES[player.species]?.name ?? player.species;
+  youTitleEl.textContent = player.level ? `${speciesName} · Lv ${player.level}` : speciesName;
   const outcome = player.lastActionOutcome;
   if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
   renderPack(player);
   // ROADMAP.md M7: mechanics visible on the map, not hidden in a meter — the
   // player should always know how deep they are, same reasoning as the HP bar.
-  hudDepthEl.textContent = world.depth ? `Level ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
+  // "Depth", not "Level": it sits directly under the player's own "Lv N" line
+  // in the You panel, and two adjacent rows both reading "Level … 5" meant
+  // two different fives.
+  hudDepthEl.textContent = world.depth ? `Depth ${world.depth} of ${CAVE_RUN_DEPTH}` : "";
 }
 
 /** The pack line under the bars: "Pack 4/28 · Lichen ×2 · Deadwood ×1 · Torch (held)". */
@@ -990,28 +1096,33 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
- * Direct ask: "have herd hp and status bars like easy to pin so you can
- * see all; at once." Shows itself automatically once the player has a
- * bonded follower — the ✕ button (herdStatusHideBtn) dismisses it,
- * hud-party-btn brings it back; both just flip `herdPanelPinned`, no
- * persistence across a reload (this codebase's only other show/hide UI
- * state — the side panel's collapse/expand toggles — works the same way).
- * Rebuilds every frame (`EventLogPanel`'s own shape), not
- * `BattleScreenPanel`'s persistent-per-agent-chip pattern — a handful of
- * rows read once a frame is cheap, and the smooth HP-transition polish
- * that pattern buys isn't what this ask is actually about.
+ * Every bonded follower's HP, order and current behaviour, rendered into the
+ * You panel. Direct ask: "I want one sidebar with my player status, and my
+ * party members at a glance."
+ *
+ * This used to be a floating panel over the map with its own pin/dismiss
+ * state and a HUD button to bring it back. All of that is gone: it lives in
+ * the sidebar now, so there is nothing to dismiss it from and nothing to
+ * restore. Two overlapping floating panels was the thing being complained
+ * about.
+ *
+ * Rebuilds every frame (`EventLogPanel`'s own shape) rather than keeping
+ * persistent per-agent rows — a handful of rows read once a frame is cheap,
+ * and the smooth HP-transition polish the other pattern buys is not what
+ * this ask is about.
  */
-let herdPanelPinned = true;
-
-function renderHerdStatusPanel(): void {
+function renderPartySection(): void {
   const me = findPlayer(world);
   const followers = me ? bondedPartnersInZone(me) : [];
-  if (!herdPanelPinned || followers.length === 0) {
-    herdStatusPanelEl.hidden = true;
+  partyCountEl.textContent = followers.length ? `(${followers.length})` : "";
+  partyBodyEl.replaceChildren();
+  if (followers.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "you-empty";
+    empty.textContent = "No one follows you yet.";
+    partyBodyEl.appendChild(empty);
     return;
   }
-  herdStatusPanelEl.hidden = false;
-  herdStatusBodyEl.replaceChildren();
   for (const a of followers) {
     const name = SPECIES[a.species]?.name ?? a.species;
     const maxHp = a.maxHp ?? 1;
@@ -1038,18 +1149,9 @@ function renderHerdStatusPanel(): void {
     fill.style.width = `${Math.round(fraction * 100)}%`;
     bar.appendChild(fill);
     row.append(nameRow, bar);
-    herdStatusBodyEl.appendChild(row);
+    partyBodyEl.appendChild(row);
   }
 }
-
-herdStatusHideBtn.addEventListener("click", () => {
-  herdPanelPinned = false;
-  renderHerdStatusPanel();
-});
-hudPartyBtn.addEventListener("click", () => {
-  herdPanelPinned = true;
-  renderHerdStatusPanel();
-});
 
 /**
  * Direct asks: "under the attack option a sub menu show up to select your
@@ -1854,7 +1956,7 @@ function examineNext(): void {
 // gone; Events moved from third to last in both the tab bar (index.html)
 // and this file's own tab order.
 
-type PanelTab = "inspector" | "battle-screen" | "chronicle" | "events";
+type PanelTab = "you" | "inspector" | "battle-screen" | "chronicle" | "events";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -1869,12 +1971,14 @@ let tabManualOverrideForBattleSeq: number | undefined;
 let lastAutoSwitchedBattleSeq: number | undefined;
 
 const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
+  you: tabYouBtn,
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
   chronicle: tabChronicleBtn,
   events: tabEventsBtn,
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
+  you: youPageEl,
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
   chronicle: chronicleEl,
@@ -1903,6 +2007,19 @@ function selectTab(tab: PanelTab, manual: boolean): void {
   }
 }
 
+tabYouBtn.addEventListener("click", () => {
+  document.body.classList.remove("world-tabs-open");
+  selectTab("you", true);
+});
+// "World" is a disclosure, not a page of its own: it unfolds the four
+// spectator tabs and lands on whichever was last open (Inspector by
+// default), so play mode spends one tab slot on them instead of four.
+tabWorldBtn.addEventListener("click", () => {
+  const opening = !document.body.classList.contains("world-tabs-open");
+  document.body.classList.toggle("world-tabs-open", opening);
+  if (opening) selectTab(activeTab === "you" ? "inspector" : activeTab, true);
+  else selectTab("you", true);
+});
 tabInspectorBtn.addEventListener("click", () => selectTab("inspector", true));
 tabChronicleBtn.addEventListener("click", () => selectTab("chronicle", true));
 tabBattleScreenBtn.addEventListener("click", () => selectTab("battle-screen", true));
@@ -1919,6 +2036,11 @@ tabEventsBtn.addEventListener("click", () => selectTab("events", true));
  * rule Auto Camera's own camera-follow already applies to a manual pan.
  */
 function maybeAutoSwitchTab(): void {
+  // Never in play mode: this is Auto Camera's spectator affordance, and
+  // yanking the panel off You mid-turn to show a fight elsewhere in the
+  // world is exactly the "my own stuff keeps getting buried" problem the
+  // You panel exists to fix.
+  if (playerMode) return;
   const engagement = autoCamera.currentEngagement();
   // Clashes count too. They render the same rich Battle Screen a real battle
   // does (same move/crit/damage lines, same HP bars) and outnumber real
@@ -2603,7 +2725,7 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
-  if (playerMode) renderHerdStatusPanel();
+  if (playerMode) renderPartySection();
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
   // is hidden, so this is cheap on every other frame.
