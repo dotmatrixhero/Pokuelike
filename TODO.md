@@ -9387,20 +9387,9 @@ typecheck clean.
       on the macro map), and 128px/144px surface textures were being
       squashed whole into 20px tiles every frame. Both fixed; before/after
       shows visibly sharper water and shorelines.
-- [ ] **The "square and ugly" complaint itself is NOT fixed yet.** Two
-      concrete offenders, both visible at zoom:
-      1. **Hard staircase shorelines.** Land/water boundaries are 90-degree
-         tile steps. Water already has per-side edge compositing
-         (`getWaterEdge`), so the mechanism exists — it just isn't producing
-         an organic transition here. Worth checking why before adding
-         anything new.
-      2. **A visible ground lattice.** `featheredOverlayStamp` builds a
-         TILE_SIZE stamp drawn at the tile origin, so every decal lands
-         exactly on the grid — a regular checkerboard of lighter/darker
-         squares. Fix is decals larger than a tile at hash-jittered sub-tile
-         offsets so they straddle borders; needs the ground pass split into
-         base-then-decal so an oversized decal isn't overdrawn by the next
-         tile's base.
+- [x] **The "square and ugly" complaint is fixed** — see the biome section
+      below. Both offenders listed here turned out to be real, and two more
+      were found while measuring.
 - [ ] Sources between 1x and 2x the tile (water/sand at 32x32, floor_stone
       at 32x26) still resample 32->20, now with smoothing off, so they
       point-sample. Cleanest fix is an offline one-time area-resample to
@@ -9445,3 +9434,88 @@ typecheck clean.
       than losing pixels. Perfect crispness at all times would mean never
       scaling below 1:1 — default zoom 100%, or snapping zoom to whole ratios
       (1x/2x) — at the cost of fitting less world on screen. Your call.
+
+## Built: biome art dissected and layered — see DESIGN.md
+
+Direct ask: *"Then like biomes need work too. All our tile maps are so square
+and ugly. The biome png art is so beautiful. It uses advanced techniques to
+avoid the ugly tiling repetition. Can we separate out layers and kinda use
+decals and shit"* then *"Yeah, let's do biomes. I want you to use the art from
+the biomes. Dissect it and make it good quality"*.
+
+- [x] `packages/web/scripts/rip_biome_ground.py` — the sheet is 14 pre-composed
+      128x320 scene panels on an internal 16px grid, not a tileset. Produces
+      `public/tiles/ground/*.png` (9 multi-tile ground patches) and
+      `public/tiles/decal/*.png` (15 transparent scatter decals).
+- [x] **Measured finding that reframed the job:** the source art does NOT
+      avoid tiling repetition with base variety. Its grass, water and cave
+      ground are each ONE 16x16 tile repeated, byte-identical (1 distinct cell
+      out of 15/14/53 clean ones). Only dirt (14), stone (16), field (31) and
+      snow (6) have real multi-tile variety. What makes the panels read as
+      non-repeating is the SCATTER layer and irregular non-grid boundaries.
+- [x] Grassland and forest were resolving to `floor_cave_2` — a cave floor. The
+      whole overworld rendered gray-brown. Real grass art now exists for them.
+- [x] Four separate causes of the rectangular look, all found by measuring a
+      live frame rather than by reading code:
+      1. One 16x16 crop stamped per tile -> world-space windowing into a 6x6
+         patch, so neighbouring tiles draw neighbouring source pixels.
+      2. `featheredOverlayStamp` decals masked to exactly one tile at the tile
+         origin -> replaced by an off-grid scatter pass at hash-jittered
+         sub-tile offsets, run after every base is down.
+      3. Per-tile elevation shading, quantising a smooth field into flat
+         plateaus (two adjacent regions measured 231,224,182 and 195,182,141 —
+         a uniform 0.84 multiply with a hard rectangular edge) -> one
+         map-sized bilinear wash.
+      4. A mosaic of tonally different source cells is itself a checkerboard.
+         Cells within a panel differ in mean colour by up to 15 (sand), 30
+         (dirt), 43 (field) — the rip now keeps only same-tone cells.
+- [x] **Shorelines.** Two per-tile attempts failed and are written up in the
+      code: full squares give a literal staircase; rounded/inset per-tile
+      shapes fix lakes but turn a diagonal river into circles — with gaps
+      ("the rivers have holes in em") or, once bridged, beads ("Looks like
+      train tracks. Not contiguous.."). No per-tile rule can work, because two
+      diagonal tiles share a point, not an edge. Now the whole water mask is
+      rasterised one pixel per tile, bilinearly upscaled and thresholded, so
+      any two touching tiles connect and the outline is smooth.
+- [x] Measured the world to answer *"Is that supposed to be water?"* — yes.
+      90x60 surface, **43.8% water**, 2364 tiles; 1426 have all four
+      orthogonal neighbours water (big bodies), and 44 have none, 43 of which
+      are diagonal-only. The diagonal chains are real terrain, not a render
+      artifact.
+- [x] **Regression I shipped, now fixed:** `tileWindow` decided "is this a
+      tiling surface?" from image size alone, and `tree_6` (48x55) and
+      `tree_7` (48x57) clear the 2x-tile threshold — so two of seven tree
+      variants rendered as a random 20x20 crop out of the middle of a tree.
+      Direct report: "The trees are kina incorrectly cropped there." Now gated
+      on terrain kind (`mud`, `wall`), not size.
+- [x] **Decal cutouts, two reported faults, both fixed and re-verified at 8x
+      zoom on a checkerboard:** "Some are transparent in the wrong spots" —
+      the alpha key punched holes wherever a decal's own colour matched the
+      ground, fixed by a border-connected flood fill (with a size cap, since
+      reeds and moss ring most of their own crop). And small opaque fragments
+      of neighbouring scenery clipped at the crop border are now dropped.
+- [x] Dropped the mushroom decals — "the mushroom decals are a little messy".
+      Panel 3's mushrooms are drawn in PERSPECTIVE, caps seen from the side on
+      long stems. The cutout was fine; the art is side-on and the map is
+      top-down. Replaced with flowers and tufts from panel 10.
+- [x] Water animation is now one global frame tiled as a pattern instead of a
+      per-tile phase. The per-tile phase was its own grid artifact — open
+      water shimmered in squares.
+- [ ] **Render perf is ~8-10 fps in headless software Chromium**, before and
+      after this work (baseline paused 8.2 / after 10.0; max sim speed 6.8 ->
+      5.8). Not a regression, but the 1800x1200 canvas is not cheap; worth a
+      look on real hardware.
+- [ ] `field` (the farm panel's gold crop ground) is ripped but unused —
+      savanna keeps `sand` plus its gold tint, because `field` reads as an
+      agricultural field, furrow dashes and all.
+- [ ] Ground-type (soil) tints still paint hard per-tile rectangles. Measured
+      at ~4% brightness difference, so it is mild, and it is the deliberate
+      "mechanics visible on the map" feature — softening it is a design call,
+      your shout.
+- [ ] Lily-pad decals are in the mangrove pool but land on GROUND, not on
+      water — the water layer draws over the ground pass. Lily pads on open
+      water would need their own pass after `drawWaterLayer`.
+- [ ] `bush_3` (the palm) has an opaque background block behind it from an
+      older rip — not touched here.
+- [ ] Fog-of-war in play mode still has hard tile-square edges; the same
+      smoothed-mask trick `drawWaterLayer` uses would fix it.
