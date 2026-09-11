@@ -249,7 +249,15 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       if (!partner) return false;
       const move = partner.moves?.find((m) => m.id === action.moveId);
       if (!move) return false;
-      partner.commandedAction = { moveId: action.moveId, target: action.target };
+      // Direct follow-up report: "ally doesn't seem to engage much in
+      // combat... it should go do that and continue to fight and engage
+      // until i like walk away." Captured once, here, at issue time: a
+      // living agent standing on the targeted tile becomes a tracked
+      // target `needs.ts`'s `applyCommandedAction` chases and keeps
+      // fighting until it dies, rather than one swing at a tile that goes
+      // stale the instant the target takes a step.
+      const targetAgent = world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
+      partner.commandedAction = { moveId: action.moveId, target: action.target, targetAgentId: targetAgent?.id };
       return true;
     }
     case "crouch": {

@@ -1490,34 +1490,71 @@ export function applyFollowing(world: World, agent: Agent, log?: EventLog): bool
  * longer in `Agent.moves` (e.g. evolved out of it since the order was
  * queued) clears the order without acting rather than throwing.
  */
+/** Direct follow-up report: "ally doesn't seem to engage much in combat... until i like walk away they should follow or something." How far the commanding player can wander before a standing fight order stands down back to ordinary following. */
+export const COMMAND_DISENGAGE_DISTANCE = 10;
+
 export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   const cmd = agent.commandedAction;
   if (!cmd) return false;
   if (hasUrgentNeed(agent.needs)) return false;
+
+  const commander = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
+  if (commander) {
+    const leash = Math.max(Math.abs(commander.pos.x - agent.pos.x), Math.abs(commander.pos.y - agent.pos.y));
+    if (leash > COMMAND_DISENGAGE_DISTANCE) {
+      agent.commandedAction = undefined;
+      return false; // falls through to applyFollowing this same tick — "walk away" ends the fight, doesn't strand the follower
+    }
+  }
+
   const move = agent.moves?.find((m) => m.id === cmd.moveId);
   if (!move) {
     agent.commandedAction = undefined;
     return false;
   }
-  const distance = manhattan(agent.pos, cmd.target);
+
+  // A tracked living target (set at issue time — see player.ts's "command"
+  // case) is chased at its CURRENT position, not the tile it stood on when
+  // ordered — a real standing fight, not one swing at stale ground.
+  let defender: Agent | undefined;
+  if (cmd.targetAgentId) {
+    defender = world.agents.find((a) => a.id === cmd.targetAgentId && a.alive !== false);
+    if (!defender) {
+      agent.commandedAction = undefined; // the target died (or is otherwise gone) — order complete, not a bug
+      return false;
+    }
+  }
+  const targetPos = defender?.pos ?? cmd.target;
+
+  const distance = manhattan(agent.pos, targetPos);
   if (!withinMoveRange(move, distance)) {
     if (agent.behavior !== "fight") {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
     }
-    agent.pos = stepToward(world, agent.layer, agent.pos, cmd.target, agent, agent);
+    agent.pos = stepToward(world, agent.layer, agent.pos, targetPos, agent, agent);
     return true;
   }
   if (agent.moveCooldowns?.[move.id]) return true; // in range, waiting out the move's own cooldown — the order stands
-  const defender = world.agents.find(
-    (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
-  );
+  // No tracked id (an order issued before `targetAgentId` existed, or a
+  // caller that never set one) — original one-shot behavior: whoever
+  // happens to be standing on the target tile right now.
+  if (!cmd.targetAgentId) {
+    defender = world.agents.find(
+      (a) => a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer && a.pos.x === cmd.target.x && a.pos.y === cmd.target.y
+    );
+  }
   if (defender) {
     resolveHit(world, agent, defender, log, "defeated", ctx, distance, rng, 1, move);
+    // Direct ask: keep fighting rather than clearing on the first landed
+    // hit — a tracked order only ends (checked at the top, next tick) once
+    // the defender is actually dead or the player has walked away. An
+    // untracked one-shot order still clears immediately, unchanged.
+    if (!cmd.targetAgentId) agent.commandedAction = undefined;
   } else {
     applyTerrainEffectAt(world, agent, agent.layer, cmd.target, move);
+    agent.commandedAction = undefined; // no living target at all (a terrain order, e.g. felling a tree) — unchanged, one-shot
   }
-  agent.commandedAction = undefined;
   return true;
 }
 

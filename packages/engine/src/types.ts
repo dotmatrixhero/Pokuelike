@@ -844,17 +844,30 @@ export interface Agent {
    * space with it - it then uses its own pathfinding to get to the right
    * position and use it." Set by `player.ts`'s `command` case on the
    * player's bonded follower; read every action tick by `needs.ts`'s
-   * `applyCommandedAction`, which steps the agent toward `target` until it
-   * is within `moveId`'s own range, then resolves the move there — against
-   * a living defender via `predation.ts`'s `resolveHit` (its own
+   * `applyCommandedAction`, which steps the agent toward the target until
+   * it is within `moveId`'s own range, then resolves the move there —
+   * against a living defender via `predation.ts`'s `resolveHit` (its own
    * `explicitMove` param), or against terrain via `predation.ts`'s
-   * `applyTerrainEffectAt` — and clears this. An urgent need
-   * (hunger/thirst) still wins — the order simply waits, same as
-   * `applyFollowing` already yields to needs. Cleared without acting if
-   * the named move is no longer in `Agent.moves` (e.g. the order was
-   * queued, then something changed what this agent knows).
+   * `applyTerrainEffectAt`. An urgent need (hunger/thirst) still wins — the
+   * order simply waits, same as `applyFollowing` already yields to needs.
+   * Cleared without acting if the named move is no longer in `Agent.moves`
+   * (e.g. the order was queued, then something changed what this agent
+   * knows).
+   *
+   * `targetAgentId` (set only when a living agent occupied `target` at the
+   * moment the order was issued) is what makes this a real standing fight
+   * order rather than a single swing at a tile — direct follow-up report:
+   * "ally doesn't seem to engage much in combat... it should go do that
+   * and continue to fight and engage until i like walk away." With it set,
+   * `applyCommandedAction` re-plans toward wherever that agent currently
+   * IS each tick (not the frozen tile it started at) and keeps resolving
+   * the move against it — clearing only once the target actually dies, or
+   * the commanding player has moved far enough away that the order stands
+   * down back to ordinary following. Without it (the target tile had no
+   * living agent — a terrain-effect order like felling a tree), behavior
+   * is unchanged: one resolution and done.
    */
-  commandedAction?: { moveId: string; target: Vec2 };
+  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
   /**
    * ROADMAP.md M6: `World.tick` this agent last took a set-down berry
    * (needs.ts `applyTreatSeeking`'s cooldown). Also the clock lever 6's
