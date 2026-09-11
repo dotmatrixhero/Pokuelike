@@ -3,6 +3,7 @@ import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, c
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
+import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
@@ -287,9 +288,15 @@ let autoCamLastScroll: { left: number; top: number } | undefined;
  * measure (e.g. `focusPos`'s own `fallbackPos` case, no living agent left
  * to bound).
  */
-function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>): void {
+function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>, keepZoom = false): void {
   const bounds = ids ? highlightBounds(world, ids) : undefined;
-  if (bounds) {
+  if (keepZoom) {
+    // Recentre without re-framing. Play mode passes this when the world
+    // changed under the player (a new cave level, a zone crossing) so the
+    // old scroll offsets are meaningless — but the zoom the player chose
+    // is still theirs, and resetting it is the bug `keepPlayerInView`
+    // below exists to avoid.
+  } else if (bounds) {
     const spanX = bounds.right - bounds.left;
     const spanY = bounds.bottom - bounds.top;
     const fit = Math.min(canvasWrap.clientWidth / Math.max(1, spanX), canvasWrap.clientHeight / Math.max(1, spanY)) * 0.8;
@@ -302,6 +309,69 @@ function focusCameraOn(pos: Vec2, ids?: ReadonlySet<string>): void {
   autoCamLastScroll = { left: targetLeft, top: targetTop };
   canvasWrap.scrollLeft = targetLeft;
   canvasWrap.scrollTop = targetTop;
+}
+
+/**
+ * How close to the viewport edge the player may get before the camera follows,
+ * as a fraction of the viewport — roughly two tiles at default zoom, leaving
+ * the middle ~76% of the screen as a dead zone the camera ignores entirely.
+ *
+ * Deliberately small. A generous dead zone (0.3 was tried and measured) parks
+ * the player exactly ON the boundary whenever the camera does correct, so the
+ * very next pan in that direction is immediately undone and panning feels
+ * stuck — the same complaint, from the opposite cause. Small margin = the
+ * camera only steps in when you are about to genuinely lose sight of yourself.
+ */
+const CAMERA_DEADZONE = 0.12;
+
+/**
+ * Play mode's camera follow, and deliberately NOT `focusCameraOn`.
+ *
+ * Direct ask: "On Mobile I don't like how hard it is to scroll around the
+ * screen." The cause, measured live on a 390px viewport: `focusCameraOn` ran
+ * after *every* `playerAct`, and it both re-centres and calls
+ * `setZoom(AUTO_CAM_ZOOM)` unconditionally. So one step threw away whatever
+ * the player had just done — zooming out to 0.96 snapped back to 1.5, and a
+ * 300px pan snapped back to centre. Pinch-zoom was effectively inoperable:
+ * you could zoom, but not zoom *and then play*.
+ *
+ * This leaves the view exactly where the player put it as long as they can
+ * still see themselves, and only scrolls the minimum needed to pull them back
+ * inside the dead zone. It never touches zoom at all.
+ */
+function keepPlayerInView(pos: Vec2): void {
+  const w = canvasWrap.clientWidth;
+  const h = canvasWrap.clientHeight;
+  const px = (pos.x + 0.5) * TILE_SIZE * zoom;
+  const py = (pos.y + 0.5) * TILE_SIZE * zoom;
+  const marginX = w * CAMERA_DEADZONE;
+  const marginY = h * CAMERA_DEADZONE;
+
+  const clamp = (value: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.min(Math.max(value, lo), hi));
+  const maxScrollLeft = Math.max(0, canvasWrap.scrollWidth - w);
+  const maxScrollTop = Math.max(0, canvasWrap.scrollHeight - h);
+
+  // Two different corrections, because one size does not fit both cases.
+  // Lost the player entirely (a zoom change, or a big deliberate pan)? Centre
+  // them properly — a minimal nudge would park them hard against the screen
+  // edge, which then makes the very next pan feel stuck. Merely drifted out
+  // of the dead zone by walking? Nudge the minimum, so following reads as the
+  // camera easing along with you rather than snapping.
+  const onScreenX = px - canvasWrap.scrollLeft;
+  const onScreenY = py - canvasWrap.scrollTop;
+  const lost = onScreenX < 0 || onScreenX > w || onScreenY < 0 || onScreenY > h;
+  const desiredLeft = lost ? px - w / 2 : clamp(canvasWrap.scrollLeft, px - w + marginX, px - marginX);
+  const desiredTop = lost ? py - h / 2 : clamp(canvasWrap.scrollTop, py - h + marginY, py - marginY);
+  const left = clamp(desiredLeft, 0, maxScrollLeft);
+  const top = clamp(desiredTop, 0, maxScrollTop);
+
+  // Don't touch the scroll (or `autoCamLastScroll`) when nothing needs to
+  // move — a redundant write would register as our own scroll and pointlessly
+  // suppress the next genuine manual-pan notification.
+  if (Math.abs(left - canvasWrap.scrollLeft) < 1 && Math.abs(top - canvasWrap.scrollTop) < 1) return;
+  autoCamLastScroll = { left, top };
+  canvasWrap.scrollLeft = left;
+  canvasWrap.scrollTop = top;
 }
 
 const autoCamHost: AutoCameraHost = {
@@ -429,6 +499,51 @@ function registerHerdsForFirstFrame(): void {
   tickHerds(world, log);
 }
 
+/**
+ * Autosave cadence. Long enough that holding a movement key doesn't compress
+ * and write the whole world on every step, short enough that what you lose to
+ * a crash is a second of play rather than an hour of it. A pending save is
+ * never queued twice — the timer already covers everything that happened
+ * before it fires.
+ */
+const SAVE_DEBOUNCE_MS = 1200;
+let saveTimer: number | undefined;
+
+function saveNow(): void {
+  if (!playerMode || playerDead || playerWon) return;
+  // KNOWN GAP, deliberately not silent: once the player graduates out of the
+  // cave, `world` is one zone of a macro grid held in `macroWorld`, and the
+  // grid is not part of the payload. Saving the zone alone would restore a
+  // world with no grid behind it — zone crossings would break — so the
+  // overworld simply isn't autosaved yet rather than being saved wrongly.
+  if (macroWorld) return;
+  const player = findPlayer(world);
+  if (!player) return;
+  void saveRun(world, log, { seed: playerSeed, scenario: playerScene === "cave" ? "cave" : "surface", playerId: player.id });
+}
+
+function scheduleSave(): void {
+  if (!playerMode || playerDead || playerWon) return;
+  if (saveTimer !== undefined) return;
+  saveTimer = window.setTimeout(() => {
+    saveTimer = undefined;
+    saveNow();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * A backgrounded tab can be evicted without ever getting another timer tick,
+ * which on iOS is a routine way to lose a run rather than an edge case — so
+ * flush any pending save the moment the page stops being visible. `pagehide`
+ * covers the same ground for a real navigation away; `beforeunload` is
+ * deliberately not used, since it is unreliable on mobile precisely where
+ * this matters most.
+ */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveNow();
+});
+window.addEventListener("pagehide", () => saveNow());
+
 function loadWorld(seed: number): void {
   macroWorld = undefined;
   world = createDemoWorld(seed);
@@ -449,7 +564,7 @@ function loadWorld(seed: number): void {
  * macro grid is deliberately off here: M0 proves the turn gate against a
  * world already known to be alive, and one new thing at a time is the point.
  */
-function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): void {
+function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface", restored?: RestoredRun): void {
   macroWorld = undefined;
   playerMode = true;
   setPlaying(false);
@@ -469,12 +584,15 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   canvasWrap.classList.remove("force-hide");
   // ROADMAP.md M1: the cave is the game; the surface world is M0's proving
   // ground for the turn gate and stays reachable for comparison.
-  world = scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
+  // A restored run brings its own world and its own history; generating a
+  // fresh one here and then discarding it would burn a full cave-run worth
+  // of worldgen on every reload.
+  world = restored ? restored.world : scene === "cave" ? createCaveRun(seed) : createPlayerDemoWorld(seed);
   playerScene = scene;
   playerSeed = seed;
   playerDead = false;
   playerWon = false;
-  log = new EventLog();
+  log = restored ? restored.log : new EventLog();
   registerHerdsForFirstFrame();
   resetUiForNewWorld();
   seedInput.value = String(seed);
@@ -491,7 +609,11 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface"): v
   packMenuEl.hidden = true;
   document.body.classList.add("player-mode");
   cancelTravel();
-  hudMessageEl.textContent = scene === "cave" ? "It is dark. There is light somewhere. Tap a tile to walk." : "";
+  hudMessageEl.textContent = restored
+    ? "Your run continues."
+    : scene === "cave"
+      ? "It is dark. There is light somewhere. Tap a tile to walk."
+      : "";
   renderPlayerHud();
   syncModeButtons();
   const url = new URL(location.href);
@@ -1059,6 +1181,10 @@ function updateTargetPreview(hovered: Vec2): void {
  */
 function showGameOver(playerId: string): void {
   playerDead = true;
+  // The run is over, so the autosave has nothing left to protect — and
+  // leaving it would restore straight back into this death screen on the
+  // next load, which reads as the game being stuck rather than finished.
+  clearSavedRun();
   let cause = "";
   for (let i = log.events.length - 1; i >= 0; i--) {
     const e = log.events[i]!;
@@ -1103,6 +1229,10 @@ function enterOverworldFromCaveWin(): void {
   if (!player) return;
   playerWon = false;
   runWonEl.hidden = true;
+  // The cave run is finished. Drop its save rather than leave one that a
+  // later reload would happily restore, dropping the player back underground
+  // at the state they were in just before they won.
+  clearSavedRun();
   macroWorld = createDemoMacroWorld(playerSeed);
   const startWorld = findRegion(macroWorld, macroWorld.focusedKey)!.world!;
   world.agents = world.agents.filter((a) => a !== player);
@@ -1115,7 +1245,7 @@ function enterOverworldFromCaveWin(): void {
   registerHerdsForFirstFrame();
   hudMessageEl.textContent = "You emerge into the wider world.";
   renderPlayerHud();
-  focusCameraOn(player.pos);
+  focusCameraOn(player.pos, undefined, true);
 }
 
 runWonContinueBtn.addEventListener("click", () => enterOverworldFromCaveWin());
@@ -1141,7 +1271,7 @@ function tryUseStairs(): void {
   resetUiForNewWorld();
   registerHerdsForFirstFrame();
   renderPlayerHud();
-  focusCameraOn(player.pos);
+  focusCameraOn(player.pos, undefined, true);
   hudMessageEl.textContent = `You climb ${down ? "down" : "up"} to level ${world.depth}.`;
 }
 
@@ -1175,7 +1305,7 @@ function playerAct(action: PlayerAction): void {
       resetUiForNewWorld();
       registerHerdsForFirstFrame();
       afterTick();
-      focusCameraOn(player.pos);
+      focusCameraOn(player.pos, undefined, true);
       renderPlayerHud();
       hudMessageEl.textContent = pendingCombatNotice ?? "You cross into a new stretch of land.";
       return;
@@ -1183,7 +1313,8 @@ function playerAct(action: PlayerAction): void {
   }
   advancePlayerTurn(world, action, log, HUNT_RULES, LEVELING_CONTEXT, world.rng, IMMIGRATION_CONTEXT);
   afterTick();
-  focusCameraOn(player.pos);
+  scheduleSave();
+  keepPlayerInView(player.pos);
   renderPlayerHud();
   // Real combat news — the player got hit, or a bonded follower landed or
   // missed one — outranks the routine "You move."/"You wait." outcome
@@ -1239,6 +1370,9 @@ window.addEventListener("keydown", (e) => {
   if (playerDead || playerWon) {
     if (e.key === "r" || e.key === "R") {
       e.preventDefault();
+      // Explicitly starting over must not leave the finished run's save
+      // behind for the next reload to resurrect.
+      clearSavedRun();
       loadPlayerWorld(playerSeed, playerScene);
     } else if (playerWon && e.key === "Enter") {
       e.preventDefault();
@@ -2370,7 +2504,20 @@ const initialSeed = seedParam !== null && seedParam !== "" ? Number(seedParam) :
 const playerParam = new URLSearchParams(location.search).get("player");
 if (playerParam === "1" || playerParam === "cave") {
   // ROADMAP.md M0 (?player=1, surface) and M1 (?player=cave). No macro grid.
-  loadPlayerWorld(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, playerParam === "cave" ? "cave" : "surface");
+  const bootSeed = Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED;
+  const bootScene = playerParam === "cave" ? "cave" : "surface";
+  // Load the generated world first so the game is playable immediately, then
+  // swap in a saved run if one turns out to match. Waiting on the (async)
+  // decompress before showing anything would put a blank screen in front of
+  // every player, including the majority who have no save at all.
+  loadPlayerWorld(bootSeed, bootScene);
+  void loadRun().then((restored) => {
+    // Only a save of the same scenario AND seed may take over: changing the
+    // seed in the URL is how you deliberately ask for a different world, and
+    // silently resurrecting the old one would ignore that.
+    if (!restored || restored.meta.scenario !== bootScene || restored.meta.seed !== bootSeed) return;
+    loadPlayerWorld(bootSeed, bootScene, restored);
+  });
 } else {
   enterOverworldMode(Number.isFinite(initialSeed) ? initialSeed : SCENARIO_SEED, "zone");
 }

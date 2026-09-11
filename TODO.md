@@ -11019,3 +11019,82 @@ the bushes"*.
 - [ ] Ferns read slightly MORE lit than trees — their flat tops put more area
       in the gradient's strong zone. Looks like foliage catching light, so
       left alone.
+
+## Built: play-mode UX, Slice 0 — stop losing runs, stop fighting the camera
+
+Design doc: `PLAY_UX_DESIGN.md`. Direct ask: *"I need a better ux for play
+mode... On Mobile I don't like how hard it is to scroll around the screen,
+sometimes accidentally refreshing and losing everything."* Answers chosen:
+play mode gets its own layout; radial replaces the button pad **on mobile
+only** (*"Replace but only on mobile I think?"*); autosave folded in now;
+scope this round is Slices 0–2.
+
+- [x] **"Accidentally refreshing and losing everything" was two bugs stacked.**
+      The refresh was *reachable* (no `overscroll-behavior` anywhere, and
+      `#canvas-wrap` pans by native scroll, so a drag at its edge chained to
+      the document and pulled to refresh) AND nothing *survived* one (no
+      localStorage, no IndexedDB — zero persistence of any kind). Fixing only
+      the first still loses runs to a deliberate reload or an iOS tab
+      eviction. Both are fixed.
+- [x] `overscroll-behavior: none` on html/body, `contain` on both native-scroll
+      pan containers. Verified by computed style in a real mobile viewport.
+      **Honest limit: headless Chromium does not implement pull-to-refresh, so
+      this confirms the property applies, not that a refresh was seen failing
+      to fire.** Wants a thumb on a real phone.
+- [x] **The camera threw away your zoom on every single step.**
+      `focusCameraOn` ran after *every* `playerAct` and unconditionally called
+      `setZoom(AUTO_CAM_ZOOM)`. Measured at 390px wide: zoom out to 0.96, take
+      one step, back to 1.5; pan 300px, one step, snapped back. Pinch-zoom was
+      effectively inoperable — you could zoom, but not zoom *and then play*.
+      Replaced with `keepPlayerInView`, which never touches zoom and only
+      scrolls when the player leaves a ~2-tile dead-zone margin.
+
+      | moment | before | after |
+      |---|---|---|
+      | zoom out to 0.96, take a step | 1.5 (reverted) | 0.96 (held) |
+      | pan away, take a step | snapped back | preserved |
+      | walk off screen | recentres | recentres |
+- [x] First dead-zone attempt used 0.3, which parked the player exactly ON the
+      boundary after any correction, so the next pan was instantly undone —
+      *the same "panning feels stuck" complaint from the opposite cause.*
+      Measured, then tightened to 0.12 with two correction modes: centre
+      properly when the player is fully off screen, nudge minimally when they
+      merely drifted out by walking.
+- [x] **Autosave.** Measured first rather than guessed: a real `createCaveRun`
+      is **6.34 MB** of raw JSON across five levels — over localStorage's ~5 MB
+      ceiling — but gzips to **0.23 MB (3.7%)**, so gzip + base64 fits with
+      room to spare. Stored at 325 KB in practice.
+- [x] Rejected a replay-log save (record actions, replay from seed) despite it
+      being far smaller: replay cost grows with run length, and any divergence
+      corrupts the restore *silently*, which is the worst failure mode for the
+      one feature whose whole job is not losing your game.
+- [x] **`world.rng` is a function, and `JSON.stringify` drops functions
+      silently.** A naive save restored a world with no generator.
+      `world.rngSeed` exists but restoring from it *rewinds* the stream to
+      worldgen time and hands the player the same "random" numbers again —
+      deterministic, but wrong. mulberry32's entire state is one 32-bit int
+      initialised as `a = seed >>> 0`, so `mulberry32(state)` IS the exact
+      continuation; added `SeededRng.state()` (optional, so fixed-output test
+      stubs stay assignable) and 5 tests in `engine/test/rng.test.ts`, one of
+      which asserts the rewind bug specifically.
+- [x] **Regression I introduced and caught only by running it:**
+      `Agent.vision.visible` is a `Set<number>` (and `vision.explored` a record
+      of Sets). JSON turns a Set into `{}` with no error, so the first frame
+      after a restore threw `vision.visible.has is not a function`. My
+      structural probe missed it — it sampled only the first few array
+      entries. Fixed with a general Set/Map replacer/reviver rather than
+      special-casing vision, so a Set added anywhere later cannot reopen the
+      same hole.
+- [x] Live-verified across a real page reload, **13/13 checks pass, zero page
+      errors**: tick, player position, HP, hunger, thirst, agent roster and
+      depth all preserved; the rng **resumed rather than restarted**;
+      `vision.visible` still a real Set of 69 tiles; 129 explored tiles intact.
+- [ ] **Known gap, deliberately not silent:** overworld play mode (after
+      graduating out of the cave) is NOT autosaved. There `world` is one zone
+      of a `macroWorld` grid that isn't in the payload, and saving the zone
+      alone would restore a world whose zone crossings break. `saveNow()`
+      returns early when `macroWorld` is set, and the cave save is cleared on
+      graduation so a reload can't drop you back underground pre-win.
+- [ ] Autosave has no UI at all — no "saved" indicator, no manual save/load,
+      no way to abandon a run except dying or pressing R. Fine for now; worth
+      revisiting once the sidebar exists to put it in.

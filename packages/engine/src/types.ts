@@ -3,6 +3,7 @@ import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { MaterialId } from "./harvest.js";
+import type { SeededRng } from "./rng.js";
 
 export interface Vec2 {
   x: number;
@@ -2515,8 +2516,14 @@ export interface World {
    * out from under a shared fixture. Two worlds ticked in the same process
    * (tests do this constantly) each carry their own independent generator —
    * never a hidden module-level global.
+   *
+   * Typed as `SeededRng` (rng.ts) rather than a bare `() => number` so a save
+   * can ask the live generator where in its sequence it had reached and
+   * resume exactly there. That property is optional on the interface, so a
+   * plain function — a fixed-output test stub, say — is still assignable
+   * here, and anything reading it must handle its absence.
    */
-  rng: () => number;
+  rng: SeededRng;
   /**
    * Counter behind each newborn's id suffix (reproduction.ts's
    * `spawnOffspring`, `${species}-${tick}-${offspringSequence}`) — used to be

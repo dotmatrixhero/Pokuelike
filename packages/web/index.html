@@ -20,6 +20,15 @@
         background: var(--bg);
         color: var(--text);
         font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        /* Direct ask: "sometimes accidentally refreshing and losing
+           everything." #canvas-wrap pans by native scroll, so dragging the
+           map while it sits at a scroll edge used to chain the leftover
+           scroll up to the document and trigger pull-to-refresh — which,
+           with a run held only in memory, threw the whole game away. `none`
+           refuses both the chaining and the browser's own overscroll
+           gesture. The wrap itself gets `contain` (below) so it still
+           absorbs its own edges without ever handing them upward. */
+        overscroll-behavior: none;
       }
       * { box-sizing: border-box; }
       button, input, select {
@@ -186,6 +195,10 @@
         padding: 8px;
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
+        /* Stops a pan that runs off the edge of the map from becoming a
+           document-level overscroll (and so a pull-to-refresh). Paired with
+           `overscroll-behavior: none` on html/body above. */
+        overscroll-behavior: contain;
       }
       /* Author-origin declarations always outrank the browser's own default
          `[hidden] { display: none }` regardless of selector specificity, so
@@ -214,6 +227,10 @@
         padding: 8px;
         -webkit-overflow-scrolling: touch;
         touch-action: pan-x pan-y;
+        /* Stops a pan that runs off the edge of the map from becoming a
+           document-level overscroll (and so a pull-to-refresh). Paired with
+           `overscroll-behavior: none` on html/body above. */
+        overscroll-behavior: contain;
       }
       #macro-map-canvas { display: block; }
       canvas { image-rendering: pixelated; cursor: pointer; border-radius: 3px; }
