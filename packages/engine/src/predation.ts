@@ -625,8 +625,6 @@ function isCriticallyHurt(agent: Agent): boolean {
 
 /** How far (Manhattan) an agent will travel to defend an egg it's territorial about. */
 const EGG_DEFENSE_RADIUS = 8;
-/** How close a non-egg-group-compatible agent has to get to an egg before it counts as an active threat worth fighting over (as opposed to merely somewhere in the area). */
-const EGG_THREAT_RADIUS = 4;
 /**
  * Hunger floor for *opportunistically* eating an egg — direct wording is
  * "super desired... given the chance," not "only when literally starving."
@@ -650,6 +648,24 @@ const EGG_EAT_HUNGER_THRESHOLD = 0.9;
  * afterthought.
  */
 const EGG_EAT_DETECT_RADIUS = 5;
+
+/**
+ * How close a non-egg-group-compatible agent has to get to an egg before a
+ * defender treats it as an active threat worth fighting over.
+ *
+ * **Derived from `EGG_EAT_DETECT_RADIUS`, not chosen independently, and that
+ * is the whole fix.** It used to be a flat 4 against an eat-detect radius of
+ * 5, which meant a raider committed to the nest and took its first step
+ * BEFORE any parent registered it. Traced on a real run: an ivysaur slept
+ * six tiles from its egg while a venomoth closed from 5 to 2 unnoticed, woke
+ * with one tick left, and lost the egg. Direct report: "parents are not
+ * defending them well. Enemy units just walk up and eat em lol."
+ *
+ * A defender has to notice a raider no later than the raider notices the egg,
+ * so this is that radius plus a tile of margin. Tying the two together also
+ * stops them drifting apart again the next time either is tuned.
+ */
+const EGG_THREAT_RADIUS = EGG_EAT_DETECT_RADIUS + 1;
 
 /**
  * Every living, unhatched egg this agent is territorial about — its own
@@ -753,6 +769,20 @@ function applyEggDefense(world: World, agent: Agent, ctx: LevelingContext | unde
     const distance = manhattan(agent.pos, threat.pos);
     if (canAttackFromHere(world, agent, threat, distance)) {
       resolveHit(world, agent, threat, log, faintKind, ctx, distance, rng);
+    } else if (manhattan(agent.pos, egg.pos) > manhattan(threat.pos, egg.pos)) {
+      // GUARD THE NEST, don't chase. This branch used to step toward the
+      // threat unconditionally, which loses the race by construction: the
+      // raider is walking to the EGG, not to the defender, so a defender
+      // further out than the raider chases a target that is moving away from
+      // it and arrives after the meal. Traced on a real run — six defenders
+      // in `fight` state, one of them a single tile from the egg, and the
+      // raider still walked 3 -> 2 -> 1 and ate.
+      //
+      // When the raider is closer to the egg than we are, close on the egg
+      // instead and meet whatever arrives. Once we are the nearer one the
+      // branch above takes over and we engage. stopAdjacent=true, so a
+      // defender stands beside its egg rather than on it.
+      agent.pos = stepToward(world, agent.layer, agent.pos, egg.pos, agent, undefined, true);
     } else {
       // stopAdjacent=true — combat approach never lands on the target's own
       // tile (see stepToward's doc comment).

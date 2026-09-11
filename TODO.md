@@ -11851,3 +11851,68 @@ and only the boundary ramps. `fieldCanvasAt` carries that reasoning.
   are the real evidence.)
 - Verified live on both layers: soft falloff underground (lit chamber ->
   remembered corridor -> unseen) and on the surface.
+
+## Egg defence: parents now notice in time and guard the nest
+
+Direct report: *"Eggs are being eaten and that's good. But parents are not
+defending them well. Enemy units just walk up and eat em lol."*
+
+### Three defects, found by tracing real raids
+
+1. **The defender noticed too late.** A raider spots an egg at
+   `EGG_EAT_DETECT_RADIUS` 5 and walks in; the defender did not register it
+   until `EGG_THREAT_RADIUS` 4 — so the raider committed BEFORE any parent
+   reacted. Traced:
+
+   ```
+   t1801  def{ivysaur@6[sleep]}          raid{venomoth@5[explore]}
+   t1802  def{ivysaur@6[sleep]}          raid{venomoth@4[seekFood]}  <- commits
+   t1804  def{ivysaur@6[fight>venomoth]} raid{venomoth@2}            <- finally wakes
+   t1805  EGG EATEN
+   ```
+
+2. **The defender chased the raider instead of guarding the nest.** It stepped
+   toward the THREAT, which loses the race by construction: the raider is
+   walking to the egg, not to the defender.
+
+3. **Eating is a free action even when surrounded.** Six defenders in `fight`
+   state, one a single tile from the egg, and the raider still walked
+   3 -> 2 -> 1 and ate. NOT FIXED — see below.
+
+### Fixed (1 and 2, on direct pick)
+
+- `EGG_THREAT_RADIUS` is now **derived** from `EGG_EAT_DETECT_RADIUS + 1`
+  rather than chosen independently. A defender has to notice a raider no later
+  than the raider notices the egg, and tying them together stops them drifting
+  apart again.
+- `applyEggDefense` steps toward the EGG when the raider is closer to it than
+  the defender is, and engages only once the defender is the nearer one.
+
+### Measured on a controlled board, because whole-run numbers could not
+
+Changing defender behaviour changes the rng stream, so before/after runs of
+the same seeds diverge into different worlds — eggs laid went 46 -> 30 between
+two such runs, which makes any rate comparison meaningless. Recorded because it
+nearly became a claim.
+
+`validateEggRaid.ts` is the controlled version: one egg, one parent, one hungry
+raider on flat ground, sweeping how far each starts from the egg, 5 seeds a
+cell. Same board every time.
+
+Egg survival, before -> after:
+
+| raider starts at | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|
+| before | 0/40 | 0/40 | 15/40 | 15/40 | 15/40 |
+| after | 0/40 | 0/40 | **34/40** | 15/40 | 15/40 |
+
+Overall 45/200 (23%) -> **64/200 (32%)**.
+
+### What this did NOT fix, plainly
+
+The whole r=4 and r=5 band is **0/80 before and after, at every parent
+distance including 1**. A raider that starts within 5 tiles wins every time
+even with a parent standing next to the egg — which is exactly the reported
+"walks up and eats em". Defect 3 is what closes that: nothing contests the
+meal, and a couple of hits do not stop a healthy raider. Left undone on
+purpose (the pick was 1+2); it is the obvious next slice.
