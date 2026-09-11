@@ -1484,13 +1484,16 @@ const FOG_REMEMBERED = 0.66;
 /** Underground only: visible but unlit, so a chamber reads as *lit* and a corridor as merely *seen*. */
 const FOG_UNLIT = 0.32;
 /**
- * Roughly how many pixels the fog edge fades over. A SLIGHT FEATHER, not a
- * blur — the first version rasterised the field one pixel per tile and let the
- * 20x upscale spread every edge over a whole tile, which came back as too
- * much: "lower the blur significantly, just make it a slight feather, not a
- * deep blur."
+ * How many pixels the fog edge fades over, or 0 for hard tile edges.
+ *
+ * Softening this was tried at a full tile and then at 4px, and neither was
+ * wanted: "lower the blur significantly, just make it a slight feather, not a
+ * deep blur" -> "remove that blur in fog of war. It don't look that good."
+ * So fog is back to hard edges, and the knob stays because the field
+ * machinery is the same either way — set it to 2 or 4 to get the feather
+ * back.
  */
-const FOG_FEATHER_PX = 4;
+const FOG_FEATHER_PX = 0;
 
 const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElement }>();
 
@@ -1502,12 +1505,11 @@ const fogCache = new WeakMap<World, { signature: number; layer: HTMLCanvasElemen
  * never drawn at all, see those passes). Underground, tiles the player can see
  * but that no sunbeam lights get a lighter wash too.
  *
- * Drawn as one interpolated field, not a fill per tile. Per tile it is a
- * hard-edged circle of squares around the player and a stepped rectangle
- * around everything remembered — the same quantisation the elevation shading,
- * the ground textures, the biome tints and the mountain mass all had. Depth is
- * rasterised at `FOG_FEATHER_PX`-sized blocks and bilinearly upscaled, so the
- * edge feathers over a few pixels instead of switching at a tile border.
+ * Drawn as one field rather than a fill per tile, which is what makes the
+ * whole thing cacheable and the softness a one-constant decision
+ * (`FOG_FEATHER_PX`). The edge is hard by direct instruction — softening it
+ * was tried at a full tile and at 4px and neither was wanted — so the field
+ * is rasterised one pixel per tile and drawn up with smoothing OFF.
  *
  * Cached and keyed on the vision sets plus `world.tick`: this runs every
  * frame, but in player mode the clock only advances when the player acts, so
@@ -1534,8 +1536,10 @@ function drawFog(ctx: CanvasRenderingContext2D, world: World, vision: Vision | u
     lctx.fillStyle = rgbToCss(FOG_COLOUR);
     lctx.fillRect(0, 0, width, height);
     lctx.globalCompositeOperation = "destination-in";
-    lctx.imageSmoothingEnabled = true;
-    lctx.drawImage(fieldCanvasAt(world, Math.max(1, Math.round(TILE_SIZE / FOG_FEATHER_PX)), (i) => {
+    // Nearest-neighbour at zero, which is what makes the edge hard: the field
+    // is one pixel per tile and every pixel of a tile gets that exact value.
+    lctx.imageSmoothingEnabled = FOG_FEATHER_PX > 0;
+    lctx.drawImage(fieldCanvasAt(world, FOG_FEATHER_PX > 0 ? Math.max(1, Math.round(TILE_SIZE / FOG_FEATHER_PX)) : 1, (i) => {
       if (vision.visible.has(i)) {
         if (!underground) return 0;
         const x = i % world.width;
