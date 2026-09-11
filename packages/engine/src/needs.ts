@@ -1,15 +1,17 @@
 import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
 import { otherLayers, setTile, tileAt } from "./world.js";
-import { stepToward } from "./movement.js";
+import { canStepTo, stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
 import {
   agentsWithin,
   applyEggEating,
   applyPredationInstincts,
   applyTerrainEffectAt,
+  FALLBACK_MAX_HP,
   hasAwakeHerdmateNearby,
   hasNearbyThreat,
   manhattan,
+  nearest,
   resolveChargedAttack,
   resolveHit,
 } from "./predation.js";
@@ -26,7 +28,7 @@ import { applyMateSeeking } from "./reproduction.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, groundTypeParams, recordGrazing, tendSoil, thirstReliefFactor } from "./flora.js";
 import { FOOD_MATERIAL_IDS, MATERIALS, foodNutritionMultiplierOf, harvestableAt, takeHarvest, thirstReliefOf } from "./harvest.js";
 import { addItem, carriedWeight, removeItem } from "./inventory.js";
-import { tickCooldowns, useMove, withinMoveRange } from "./combat.js";
+import { pickBestMove, tickCooldowns, useMove, withinMoveRange } from "./combat.js";
 import { DIG_TICKS_DEFAULT, FOOD_CROPS, type CropId } from "./crops.js";
 import { applyHerdCohesion, herdRank } from "./herding.js";
 import { migrate } from "./migration.js";
@@ -1705,6 +1707,165 @@ export function applyMirroredAction(world: World, agent: Agent, log: EventLog | 
   return false;
 }
 
+/**
+ * Direct ask: "perhaps instead of campfire building, there's a command
+ * button that allows you to set behaviors for each of your allies;
+ * patrol, hunt, defend, etc." Scoped, on the user's own choice between
+ * options, to "Simple standing states": no placed guard points or
+ * patrol routes — a persistent mode (`Agent.standingOrder`) a bonded
+ * follower keeps until the player picks a different one, or "Follow"
+ * (which just clears it back to ordinary `applyFollowing`).
+ *
+ * Deliberately its own targeting logic, not a parametrized
+ * `predation.ts` `isPreyOf`/`HuntRules` call: those are gated on
+ * `rules[predator.species]` (only species flagged as hunters in the
+ * data table) and a hunger-tuned power ratio meant for a wild animal's
+ * OWN instinctive feeding decision. A player ordering an arbitrary
+ * bonded ally into a fight is a different thing — any bonded ally
+ * should be orderable, not just the ones the data table happens to
+ * flag `isPredator`. `isStandingOrderTarget` below is the resulting
+ * separate predicate: no herd-mate friendly fire, and capped at
+ * `STANDING_ORDER_POWER_RATIO` of the ally's own power so an order
+ * doesn't read as a death sentence — same judgment call predation.ts's
+ * own `PREY_POWER_RATIO` already makes, reused as a ratio, not as a
+ * shared function (`isPreyOf` doesn't fit; see above).
+ */
+export const PATROL_RADIUS = 6;
+export const HUNT_ORDER_RADIUS = 8;
+export const DEFEND_RADIUS = 4;
+const STANDING_ORDER_POWER_RATIO = 0.75;
+/** Per tick while patrolling/searching with nothing to engage: real odds of a visible step, not every tick — reads as patrolling, not jittering. */
+const WANDER_STEP_CHANCE = 0.15;
+
+/**
+ * "How big and capable is this thing" — a small local duplicate of
+ * predation.ts's own module-private `powerOf` (herdConflict.ts already
+ * keeps its own duplicate of this exact formula for the same reason:
+ * this codebase's established way of avoiding a needless export/import
+ * just for one small proxy calculation).
+ */
+function standingOrderPowerOf(agent: Agent): number {
+  return agent.maxHp ?? agent.stats?.maxHp ?? FALLBACK_MAX_HP;
+}
+
+function isStandingOrderTarget(agent: Agent, leaderId: string, candidate: Agent): boolean {
+  if (candidate.id === agent.id || candidate.id === leaderId) return false;
+  if (candidate.isEgg || candidate.alive === false) return false;
+  if (candidate.followingId === leaderId) return false; // a herd-mate, not a target
+  return standingOrderPowerOf(candidate) <= standingOrderPowerOf(agent) * STANDING_ORDER_POWER_RATIO;
+}
+
+/**
+ * A standing order's own combat resolution — same shape
+ * `applyCommandedAction` already uses for a player-issued fight
+ * (`"defeated"`, not predation's own `"killed"`: an ordered engagement,
+ * not wild predation), except the move is auto-picked (`pickBestMove`)
+ * since there's no player-chosen `moveId` behind a standing order the
+ * way there is behind a one-shot command.
+ */
+function engageStandingOrderTarget(world: World, agent: Agent, target: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  agent.huntTarget = target.id;
+  agent.fightTarget = target.id;
+  if (agent.behavior !== "fight") {
+    logBehaviorChange(log, world, agent, "fight");
+    agent.behavior = "fight";
+  }
+  const distance = manhattan(agent.pos, target.pos);
+  const move = pickBestMove(agent, target.types ?? [], distance, world.tick);
+  if (move && withinMoveRange(move, distance)) {
+    resolveHit(world, agent, target, log, "defeated", ctx, distance, rng, 1, move);
+  } else {
+    agent.pos = stepToward(world, agent.layer, agent.pos, target.pos, agent, agent, true);
+  }
+  return true;
+}
+
+/**
+ * Loosely stays within `radius` of `leader` — a real, visible difference
+ * from ordinary `follow`'s tight tail (`FOLLOW_KEEP_DISTANCE` = 2): a
+ * standing order should read as a different playstyle on the map, not
+ * just a different label (CLAUDE.md's own "mechanics visible on the
+ * map" principle). Steps back toward the leader once past `radius`;
+ * otherwise takes a real, occasional random step so Patrol/an idle Hunt
+ * reads as patrolling rather than standing frozen in place.
+ */
+function wanderNearLeader(world: World, agent: Agent, leader: Agent, radius: number, log: EventLog | undefined, rng: () => number): boolean {
+  const distance = manhattan(agent.pos, leader.pos);
+  if (distance > radius) {
+    if (agent.behavior !== "follow") {
+      logBehaviorChange(log, world, agent, "follow");
+      agent.behavior = "follow";
+    }
+    agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+    return true;
+  }
+  if (agent.behavior !== "explore") {
+    logBehaviorChange(log, world, agent, "explore");
+    agent.behavior = "explore";
+  }
+  if (rng() < WANDER_STEP_CHANCE) {
+    const dx = (Math.floor(rng() * 3) - 1) as -1 | 0 | 1;
+    const dy = (Math.floor(rng() * 3) - 1) as -1 | 0 | 1;
+    if (dx !== 0 || dy !== 0) {
+      const next = { x: agent.pos.x + dx, y: agent.pos.y + dy };
+      if (canStepTo(world, agent, agent.layer, next, agent)) agent.pos = next;
+    }
+  }
+  return true;
+}
+
+export function applyStandingOrder(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
+  const order = agent.standingOrder;
+  if (!order) return false;
+  const leader = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
+  if (!leader || leader.alive === false || leader.layer !== agent.layer) {
+    // A standing order is for a bonded ally specifically — once there's no
+    // one left to patrol/hunt/defend for, it has nothing left to mean.
+    // Same "no leader, no order" cleanup `applyFollowing` already does for
+    // `followingId` itself.
+    agent.standingOrder = undefined;
+    agent.huntTarget = undefined;
+    return false;
+  }
+  if (hasUrgentNeed(agent.needs)) return false;
+
+  if (order === "hunt") {
+    if (agent.huntTarget) {
+      const target = world.agents.find((a) => a.id === agent.huntTarget && a.alive !== false);
+      if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+      agent.huntTarget = undefined;
+    }
+    const candidates = agentsWithin(world, agent, HUNT_ORDER_RADIUS).filter((a) => isStandingOrderTarget(agent, leader.id, a));
+    const target = nearest(agent, candidates);
+    if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+    return wanderNearLeader(world, agent, leader, PATROL_RADIUS, log, rng);
+  }
+
+  if (order === "defend") {
+    if (agent.huntTarget) {
+      const target = world.agents.find((a) => a.id === agent.huntTarget && a.alive !== false);
+      if (target && manhattan(target.pos, leader.pos) <= DEFEND_RADIUS) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+      agent.huntTarget = undefined;
+    }
+    const candidates = agentsWithin(world, leader, DEFEND_RADIUS).filter((a) => isStandingOrderTarget(agent, leader.id, a));
+    const target = nearest(agent, candidates);
+    if (target) return engageStandingOrderTarget(world, agent, target, log, ctx, rng);
+    // Nothing to defend against right now — stay close, tighter than
+    // ordinary follow (a bodyguard doesn't wander off).
+    if (manhattan(agent.pos, leader.pos) > FOLLOW_KEEP_DISTANCE) {
+      if (agent.behavior !== "follow") {
+        logBehaviorChange(log, world, agent, "follow");
+        agent.behavior = "follow";
+      }
+      agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+    }
+    return true;
+  }
+
+  // order === "patrol"
+  return wanderNearLeader(world, agent, leader, PATROL_RADIUS, log, rng);
+}
+
 export function tickAgentAction(
   world: World,
   agent: Agent,
@@ -1754,6 +1915,12 @@ export function tickAgentAction(
   // priority than a standing fight order but ahead of passive following,
   // same tier reasoning as `applyCommandedAction` right above.
   if (applyMirroredAction(world, agent, log, ctx, rng)) return;
+  // Direct ask: "a command button that allows you to set behaviors for
+  // each of your allies; patrol, hunt, defend, etc." — same tier as the
+  // one-shot order above (a standing mode is still a real, deliberate
+  // player choice, just a persistent one instead of a single tap), ahead
+  // of passive following/treat-seeking.
+  if (applyStandingOrder(world, agent, log, ctx, rng)) return;
   // ROADMAP.md M6: a follower walks with the one it follows — after fleeing
   // and fighting have had their say, before the needs tree, and only while
   // no need is urgent (a follower that starves is a bug).

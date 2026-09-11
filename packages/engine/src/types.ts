@@ -654,6 +654,18 @@ export type PlayerAction =
    * doesn't know that move.
    */
   | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /**
+   * Direct ask: "perhaps instead of campfire building, there's a command
+   * button that allows you to set behaviors for each of your allies;
+   * patrol, hunt, defend, etc." Sets `agentId` (must currently be
+   * following the player) to the named standing order — see `Agent.
+   * standingOrder`/`needs.ts`'s `applyStandingOrder` for what each mode
+   * actually does. `"follow"` clears it back to ordinary passive
+   * following rather than being its own stored value. Costs the
+   * player's turn to issue, same as `command`; fails if there's no such
+   * follower.
+   */
+  | { kind: "setStandingOrder"; agentId: string; order: "patrol" | "hunt" | "defend" | "follow" }
   /** Direct report: "can't drop items." Discards one of a carried item, freeing its weight. Fails (still costs the turn) if you don't have it. */
   | { kind: "drop"; itemKey: string }
   /**
@@ -911,6 +923,21 @@ export interface Agent {
    * is unchanged: one resolution and done.
    */
   commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
+  /**
+   * Direct ask: "perhaps instead of campfire building, there's a command
+   * button that allows you to set behaviors for each of your allies;
+   * patrol, hunt, defend, etc." Scoped, on the user's own choice between
+   * options given, to "Simple standing states": a persistent mode a
+   * bonded follower keeps until the player picks a different one — no
+   * placed guard points or patrol routes. `undefined` means ordinary
+   * passive following (`applyFollowing`, unchanged); picking "Follow" in
+   * the command menu just clears this back to `undefined` rather than
+   * being its own value. See `needs.ts`'s `applyStandingOrder` for what
+   * each mode actually does — it sits at the same tier as
+   * `commandedAction` above (a real player order, not a passive default),
+   * ahead of ordinary following, behind self-preservation.
+   */
+  standingOrder?: "patrol" | "hunt" | "defend";
   /**
    * Direct ask: "my allies should do what i do, so if i drink they should
    * look for water in the area too. if i gather or eat they should do

@@ -280,6 +280,20 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       partner.commandedAction = { moveId: action.moveId, target: action.target, targetAgentId: targetAgent?.id };
       return true;
     }
+    case "setStandingOrder": {
+      // Direct ask: "a command button that allows you to set behaviors
+      // for each of your allies; patrol, hunt, defend, etc." Same
+      // "bonded = currently following" gate `command` above uses.
+      const partner = world.agents.find((a) => a.id === action.agentId && a.followingId === agent.id && a.alive !== false);
+      if (!partner) return false;
+      if (action.order === "follow") {
+        partner.standingOrder = undefined;
+        partner.huntTarget = undefined;
+      } else {
+        partner.standingOrder = action.order;
+      }
+      return true;
+    }
     case "crouch": {
       agent.posture = agent.posture === "crouch" ? undefined : "crouch";
       return agent.posture === "crouch";

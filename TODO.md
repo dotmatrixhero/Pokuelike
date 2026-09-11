@@ -9825,3 +9825,83 @@ activity in progress; redone without interfering), then opened the pack
 again and tapped the newly-made Campfire's "Place" button — it consumed
 the item, ignited a real `fire` tile, and the HUD read "You set down a
 campfire."
+
+## Built: wishlist item 6 — standing orders for bonded allies (Patrol/Hunt/Defend/Follow)
+
+Direct ask: *"perhaps instead of campfire building, there's a command
+button that allows you to set behaviors for each of your allies; patrol,
+hunt, defend, etc."* Scoped, on the user's own choice between two options
+offered, to *"Simple standing states"* — a persistent mode a bonded
+follower keeps until told otherwise, not a richer system with placed
+guard points or patrol routes.
+
+**What each mode actually does** — real, distinguishable behavior, not
+just a label (this project's own "mechanics visible on the map"
+principle):
+- **Follow** (the absence of an order, `undefined` — picking it in the
+  menu just clears the field): unchanged, ordinary `applyFollowing`.
+- **Patrol**: stays loosely within `PATROL_RADIUS` (6) of the leader
+  instead of `applyFollowing`'s tight `FOLLOW_KEEP_DISTANCE` (2) — steps
+  back in once past that, otherwise takes a real, occasional random step
+  so it visibly wanders rather than standing frozen.
+- **Hunt**: actively searches `HUNT_ORDER_RADIUS` (8) around the ally
+  itself for something to fight, and keeps fighting it every tick until
+  it faints or the ally disengages — wanders (Patrol's own logic) when
+  nothing's there. Chases the same tracked target tick over tick, same
+  "standing fight, not one swing" shape `applyCommandedAction` already
+  established for one-shot orders.
+- **Defend**: same searching/engaging logic, but anchored on the
+  *leader's* position within the tighter `DEFEND_RADIUS` (4) — a
+  bodyguard watching the space around the player, not around itself —
+  and stays close (not loose-patrol) when there's nothing to fight.
+
+All three still yield to self-preservation above them in
+`tickAgentAction`'s own priority chain (predation instincts: flee,
+guardian mobbing, egg defense) and to the ally's own urgent needs —
+a standing order is real but it isn't a death wish.
+
+**A genuinely new targeting predicate, not a reused one.** `predation.
+ts`'s own `isPreyOf`/`HuntRules` are gated on `rules[predator.species]`
+— only species flagged `isPredator` in the data table can ever "hunt"
+at all. That's the wrong shape here: a player should be able to order
+*any* bonded ally into a fight, not just the ones the table happens to
+flag as predators. Wrote a separate `isStandingOrderTarget` instead: no
+herd-mate friendly fire (never targets the leader or another follower
+of the same leader), and capped at `STANDING_ORDER_POWER_RATIO` (0.75 —
+the same judgment call `predation.ts`'s own `PREY_POWER_RATIO` already
+makes, reused as a ratio, not as a shared function) so an order doesn't
+read as a death sentence. Combat itself reuses `resolveHit` with the
+`"defeated"` cap `applyCommandedAction` already uses (an ordered
+engagement, not a permanent wild kill), with an auto-picked move
+(`pickBestMove`) since there's no player-chosen `moveId` behind a
+standing order the way there is behind a one-shot command.
+
+**Where it lives.** The existing per-partner section of the command
+menu (renamed "Command," since it's no longer only about moves) gained
+four instant rows — Follow/Patrol/Hunt/Defend, the current one marked
+`(current)` — right above that partner's own move list. No tile-tap
+needed, unlike a move order: the mode just takes effect. The herd status
+panel (item 7, above) also shows the active order next to each
+follower's name, so it's visible without reopening the menu.
+
+**Tests.** New `test/standingOrder.test.ts`, 16 cases: issuing/clearing
+the order (including refusing a non-follower), Patrol staying put vs.
+stepping back in from beyond its radius, yielding to an urgent need,
+clearing itself when the leader is gone, Hunt engaging regardless of
+the ally's own hunger, refusing something far stronger, never targeting
+a herd-mate, chasing a tracked target across ticks, wandering when
+nothing's in reach, and Defend's leader-anchored radius (engages near
+the leader even when the ally itself is elsewhere, ignores something
+just outside `DEFEND_RADIUS`, stays close when idle). Full engine
+suite: 1561/1561. Data package: 400/400. `tsc --noEmit` clean on
+engine; real `pnpm --filter @pokuelike/web build` clean.
+
+**Live-verified in the browser**: opened the Command menu on a real
+bonded partner, confirmed all four order rows render with the current
+one marked, tapped Hunt (HUD read "Shellder is now on hunt," herd panel
+showed "Shellder · Hunt"), then placed a real, weak, sleeping foe two
+tiles away and advanced a single real world tick with no further player
+input — the ally found it and engaged entirely on its own
+(`behavior: "fight"`, `huntTarget` set, the foe's HP dropped from 8 to
+1.72) — genuine autonomous behavior, not just a state flag that reads
+correctly in isolation.

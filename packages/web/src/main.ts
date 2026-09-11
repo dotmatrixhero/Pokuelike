@@ -602,6 +602,12 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
       return ok ? `You signal ${name}.` : `${name} won't take that order.`;
     }
+    case "setStandingOrder": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      if (!ok) return `${name} won't take that order.`;
+      return action.order === "follow" ? `${name} goes back to following you.` : `${name} is now on ${action.order}.`;
+    }
     case "drop":
       return ok ? `You drop the ${itemName(action.itemKey).toLowerCase()}.` : "You don't have that.";
     case "placeCampfire": {
@@ -804,7 +810,11 @@ function renderHerdStatusPanel(): void {
     const nameRow = document.createElement("div");
     nameRow.className = "herd-status-name";
     const nameSpan = document.createElement("span");
-    nameSpan.textContent = name;
+    // Direct ask: "a command button that allows you to set behaviors for
+    // each of your allies" — the order is worth seeing at a glance here
+    // too, not just in the command menu that set it.
+    const orderLabel = a.standingOrder ? ` · ${a.standingOrder[0]!.toUpperCase()}${a.standingOrder.slice(1)}` : "";
+    nameSpan.textContent = `${name}${orderLabel}`;
     const statusSpan = document.createElement("span");
     statusSpan.className = "herd-status-status";
     statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
@@ -888,6 +898,26 @@ function openCommandMenu(): void {
   for (const partner of bondedPartnersInZone(me)) {
     const name = SPECIES[partner.species]?.name ?? partner.species;
     commandMenuBodyEl.appendChild(heading(name));
+    // Direct ask: "a command button that allows you to set behaviors for
+    // each of your allies; patrol, hunt, defend, etc." Instant, unlike the
+    // move rows below — no tile to tap, the order just takes effect.
+    const currentOrder = partner.standingOrder ?? "follow";
+    const orders: { order: "follow" | "patrol" | "hunt" | "defend"; label: string; sub: string }[] = [
+      { order: "follow", label: "Follow", sub: "stays close, doesn't engage on its own" },
+      { order: "patrol", label: "Patrol", sub: "wanders loosely nearby" },
+      { order: "hunt", label: "Hunt", sub: "actively seeks out and fights nearby threats" },
+      { order: "defend", label: "Defend", sub: "stays close, fights off anything that gets near you" },
+    ];
+    for (const o of orders) {
+      const isCurrent = currentOrder === o.order;
+      commandMenuBodyEl.appendChild(
+        row(`${o.label}${isCurrent ? " (current)" : ""}`, o.sub, () => {
+          if (isCurrent) return;
+          closeCommandMenu();
+          playerAct({ kind: "setStandingOrder", agentId: partner.id, order: o.order });
+        })
+      );
+    }
     const moves = partner.moves ?? [];
     if (moves.length === 0) commandMenuBodyEl.appendChild(row("Knows no moves.", undefined, () => {}));
     for (const move of moves) {
