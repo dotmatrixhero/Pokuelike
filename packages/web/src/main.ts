@@ -2,6 +2,7 @@ import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocu
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
+import { herdDisplayName } from "./notableTitles.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
 import { examineTile, selfVerbsFor, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
@@ -169,6 +170,10 @@ const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButto
 const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
 const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
+const lookMenuEl = document.getElementById("look-menu") as HTMLElement;
+const lookMenuTitleEl = document.getElementById("look-menu-title") as HTMLElement;
+const lookMenuBodyEl = document.getElementById("look-menu-body") as HTMLElement;
+const lookMenuCloseBtn = document.getElementById("look-menu-close") as HTMLButtonElement;
 // Direct ask: "have herd hp and status bars like easy to pin so you can
 // see all; at once."
 
@@ -842,6 +847,179 @@ function describeTile(report: TileReport): string {
   return `${first} Nothing to take.`;
 }
 
+/**
+ * Look, as a real modal.
+ *
+ * Direct ask: "When I look at a unit I want the little bar at the bottom. To
+ * temporarily show me their stats and stuff. Or tbh, a modal is appropriate
+ * for look - just to see in bigger box what materials are there, what the
+ * unit is doing, stats etc."
+ *
+ * Still free — looking costs no turn, which is what makes checking before you
+ * commit a real option rather than a tax on not already knowing.
+ *
+ * The one-line `describeTile` sentence stays and leads the modal, because the
+ * sentence is the curated read and the fields under it are the detail. The
+ * ordering is deliberate: what the ground is, what it offers, then who is
+ * standing on it and everything about them. A creature is the reason you
+ * looked.
+ */
+function lookRow(label: string, value: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "look-line";
+  const key = document.createElement("span");
+  key.className = "look-dim";
+  key.textContent = `${label}: `;
+  row.append(key, document.createTextNode(value));
+  return row;
+}
+
+function lookHeading(text: string): HTMLElement {
+  const h = document.createElement("div");
+  h.className = "pack-heading";
+  h.textContent = text;
+  return h;
+}
+
+function lookBar(label: string, value: number, max: number, colour: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.append(lookRow(label, `${Math.max(0, Math.round(value))} / ${Math.round(max)}`));
+  const bar = document.createElement("div");
+  bar.className = "look-bar";
+  const fill = document.createElement("i");
+  fill.style.width = `${Math.max(0, Math.min(100, (value / (max || 1)) * 100))}%`;
+  fill.style.background = colour;
+  bar.append(fill);
+  wrap.append(bar);
+  return wrap;
+}
+
+function renderLookModal(tile: Vec2, report: TileReport): void {
+  const me = findPlayer(world);
+  lookMenuBodyEl.replaceChildren();
+
+  // The curated sentence first — same text the log gets, so the two never
+  // disagree about what is here.
+  const lead = document.createElement("div");
+  lead.className = "look-line";
+  lead.textContent = describeTile(report);
+  lookMenuBodyEl.append(lead);
+
+  lookMenuBodyEl.append(lookHeading("Ground"));
+  lookMenuBodyEl.append(lookRow("Terrain", TERRAIN_WORDS[report.terrain] ?? report.terrain));
+  lookMenuBodyEl.append(lookRow("Passable", report.walkable ? "yes" : "no"));
+  if (report.elevation) lookMenuBodyEl.append(lookRow("Elevation", String(report.elevation)));
+  const effects = [
+    report.conceals ? "hides you" : undefined,
+    report.poisons ? "poisons you" : undefined,
+    report.drinkable ? "drinkable" : undefined,
+    report.lit ? "lit" : undefined,
+    report.stairs ? `stairs ${report.stairs}` : undefined,
+  ].filter((e): e is string => e !== undefined);
+  lookMenuBodyEl.append(lookRow("Standing here", effects.length ? effects.join(", ") : "nothing happens"));
+
+  lookMenuBodyEl.append(lookHeading("Materials"));
+  if (report.harvestable.length > 0 && report.harvestsLeft > 0) {
+    const chips = document.createElement("div");
+    chips.className = "look-chips";
+    for (const material of report.harvestable) {
+      const chip = document.createElement("span");
+      chip.className = "look-chip";
+      chip.textContent = itemName(material);
+      chips.append(chip);
+    }
+    lookMenuBodyEl.append(chips);
+    lookMenuBodyEl.append(lookRow("Takes left", String(report.harvestsLeft)));
+  } else {
+    lookMenuBodyEl.append(lookRow("Here", report.harvestable.length > 0 ? "picked clean" : "nothing to take"));
+  }
+
+  const occupant = report.occupantId ? world.agents.find((a) => a.id === report.occupantId) : undefined;
+  const corpse = report.corpseId ? world.agents.find((a) => a.id === report.corpseId) : undefined;
+  const who = occupant ?? corpse;
+  if (who) {
+    const name = SPECIES[who.species]?.name ?? who.species;
+    lookMenuTitleEl.textContent = `${name}${who.level ? ` · Lv ${who.level}` : ""}${corpse && !occupant ? " · dead" : ""}`;
+    lookMenuBodyEl.append(lookHeading(occupant ? "Who is here" : "What is left here"));
+
+    if (occupant) {
+      // What it is doing, in the game's own voice — `examine` is the tells
+      // module, the same sentence the inspector uses, including whether it
+      // has noticed you and how it feels about you.
+      lookMenuBodyEl.append(lookRow("Doing", examine(world, occupant, { observer: me })));
+      if (who.sex) lookMenuBodyEl.append(lookRow("Sex", who.sex));
+      if (who.types?.length) lookMenuBodyEl.append(lookRow("Type", who.types.join(" / ")));
+      if (who.herdId) lookMenuBodyEl.append(lookRow("Herd", herdDisplayName(world, who.herdId)));
+      lookMenuBodyEl.append(lookBar("HP", who.hp ?? 0, who.maxHp ?? 1, "var(--good, #4ac97e)"));
+      if (who.needs) {
+        lookMenuBodyEl.append(lookBar("Hunger", who.needs.hunger * 100, 100, "#e0b341"));
+        lookMenuBodyEl.append(lookBar("Thirst", who.needs.thirst * 100, 100, "#49a7e0"));
+        lookMenuBodyEl.append(lookBar("Energy", who.needs.energy * 100, 100, "#c7a3e8"));
+      }
+      if (who.status) lookMenuBodyEl.append(lookRow("Status", who.status.kind));
+      if (who.stats) {
+        lookMenuBodyEl.append(lookHeading("Stats"));
+        const grid = document.createElement("div");
+        grid.className = "look-stats";
+        // "Spd" and "SpD" both render as SPD once the grid uppercases them,
+        // which is two different stats showing the same label. Spelled out
+        // instead.
+        const entries: [string, number][] = [
+          ["Atk", who.stats.attack],
+          ["Def", who.stats.defense],
+          ["Speed", who.stats.speed],
+          ["Sp.Atk", who.stats.spAttack],
+          ["Sp.Def", who.stats.spDefense],
+          ["Max HP", who.stats.maxHp],
+        ];
+        for (const [label, value] of entries) {
+          const cell = document.createElement("div");
+          cell.className = "look-stat";
+          const k = document.createElement("span");
+          k.textContent = label;
+          const v = document.createElement("span");
+          v.textContent = String(value);
+          cell.append(k, v);
+          grid.append(cell);
+        }
+        lookMenuBodyEl.append(grid);
+      }
+      if (who.moves?.length) {
+        lookMenuBodyEl.append(lookHeading("Moves"));
+        const chips = document.createElement("div");
+        chips.className = "look-chips";
+        for (const move of who.moves) {
+          const chip = document.createElement("span");
+          chip.className = "look-chip";
+          // Says what the move IS, not just that it exists — power is what a
+          // player deciding whether to stand next to this thing actually
+          // needs. `power <= 0` is a sentinel for "no fixed power" (Low Kick
+          // scales with weight), and printing it read as "Low Kick · -1".
+          chip.textContent = (move.power ?? 0) > 0 ? `${move.name} · ${move.power}` : move.name;
+          chips.append(chip);
+        }
+        lookMenuBodyEl.append(chips);
+      }
+    } else if (corpse) {
+      lookMenuBodyEl.append(lookRow("Body", `${SPECIES[corpse.species]?.name ?? corpse.species}, not yet butchered`));
+    }
+  } else {
+    lookMenuTitleEl.textContent = `${TERRAIN_WORDS[report.terrain] ?? report.terrain} · ${tile.x},${tile.y}`;
+  }
+
+  lookMenuEl.hidden = false;
+}
+
+function closeLookModal(): void {
+  lookMenuEl.hidden = true;
+}
+lookMenuCloseBtn.addEventListener("click", closeLookModal);
+lookMenuEl.addEventListener("click", (e) => {
+  // Tapping the dimmed backdrop closes it. Looking is free and constant, so
+  // getting out of it has to be as cheap as getting in.
+  if (e.target === lookMenuEl) closeLookModal();
+});
+
 /** Where a tile currently sits inside #map-area, accounting for zoom and the wrap's scroll. */
 function tileScreenPos(tile: Vec2): { x: number; y: number } {
   const wrapRect = canvasWrap.getBoundingClientRect();
@@ -865,7 +1043,11 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
       // Free: costs no turn, which is what makes looking before you commit a
       // real option rather than a tax on not already knowing.
       const report = examineTile(world, viewLayer(), tile);
-      if (report) say(describeTile(report));
+      if (!report) return;
+      // The sentence still goes to the log, so the record of what you looked
+      // at survives closing the modal.
+      say(describeTile(report));
+      renderLookModal(tile, report);
       return;
     }
     case "moveHere":
@@ -2139,6 +2321,10 @@ window.addEventListener("keydown", (e) => {
     }
     return;
   }
+  if (!lookMenuEl.hidden) {
+    if (e.key === "Escape" || e.key === "l") closeLookModal();
+    return;
+  }
   if (!commandMenuEl.hidden) {
     if (e.key === "Escape") closeCommandMenu();
     else if (activateNumberedMenuRow(commandMenuBodyEl, e.key)) e.preventDefault();
@@ -3377,6 +3563,10 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     /** Open the radial on a named tile, skipping the screen-space pointer math a check cannot reliably reproduce. */
     openTileMenu(x: number, y: number): void {
       openTileMenu({ x, y });
+    },
+    /** Run one radial verb against a named tile — the same entry point a wedge release uses. */
+    runTileVerb(verb: TileVerb, x: number, y: number): void {
+      runTileVerb(verb, { x, y });
     },
     /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
     biomeAt(x: number, y: number): string | undefined {

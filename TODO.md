@@ -12204,3 +12204,53 @@ Direct ask: *"I want to have a radial eat option to eat off the ground."*
       and `rapportProse.ts` tables. All updated. (The runner's `format.ts`
       has a `default`, so it did not error — worth knowing.)
 - [x] Full suite green: engine **1675**, data 476, web build clean.
+
+## Round: Look is a modal
+
+Direct ask: *"When I look at a unit I want the little bar at the bottom. To
+temporarily show me their stats and stuff. Or tbh, a modal is appropriate for
+look - just to see in bigger box what materials are there, what the unit is
+doing, stats etc."*
+
+- [x] Reuses the pack menu's own `.pack-card` chrome rather than a third
+      visual language for the same job — only the stat grid and the need bars
+      are new CSS.
+- [x] **Still free.** Looking costs no turn, and the curated one-line
+      `describeTile` sentence still goes to the action log, so the record of
+      what you looked at survives closing the modal. The sentence also leads
+      the modal, so the two can never disagree about what is there.
+- [x] Ordering is deliberate: what the ground is → what it offers → who is
+      standing on it and everything about them. A creature is the reason you
+      looked.
+- [x] Real output, read cold, on a Machop standing beside the player:
+
+      ```
+      Machop · Lv 5
+      Bare floor. Machop stands here.
+      GROUND     Terrain: Bare floor · Passable: yes · Standing here: nothing happens
+      MATERIALS  Here: nothing to take
+      WHO IS HERE
+        Doing: The Machop is standing still. He has seen you.
+        Sex: male · Type: fighting · Herd: the Machops of Bramblemire
+        HP 22/22 · Hunger 60/100 · Thirst 45/100 · Energy 80/100
+      STATS      ATK 13 · DEF 9 · SPEED 8 · SP.ATK 8 · SP.DEF 8 · MAX HP 22
+      MOVES      Tackle · 40 | Body Slam · 85 | Low Kick
+      ```
+
+      and on a berry patch: `MATERIALS  Oran Berry / Takes left: 3`.
+- [x] "Doing" is `tells.ts`'s `examine` with the player as observer, so it
+      carries whether it has noticed you and how it feels about you — the
+      same sentence the inspector uses, not a second parallel description.
+- [x] **Two defects caught by reading the real output rather than the code.**
+      `Spd` (speed) and `SpD` (sp. defense) both rendered as `SPD` once the
+      grid uppercased them — two different stats under one label. And
+      `Low Kick · -1` printed a sentinel: `power <= 0` means "no fixed power"
+      (Low Kick scales with weight), and `move.power ? …` treats -1 as
+      truthy. Both fixed; neither would have shown up in a typecheck.
+- [x] Closes on Escape, on `l`, on the ✕, and on a backdrop tap — getting out
+      has to be as cheap as getting in, since looking is constant.
+- [x] Open/closed measured by computed style and bounding rect, never by
+      reading back the `hidden` flag — index.html's own documented scar.
+      Control: `display: none` before looking, `flex` after, `none` again
+      after the backdrop tap.
+- [x] Full suite green: engine 1675, data 476, web build clean.

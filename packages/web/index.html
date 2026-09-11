@@ -641,8 +641,21 @@
       #tile-tip b { color: var(--text); font-weight: 600; }
 
       /* ROADMAP.md M5 — the pack menu. */
-      #pack-menu, #command-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
-      #pack-menu[hidden], #command-menu[hidden] { display: none; }
+      #pack-menu, #command-menu, #look-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
+      #pack-menu[hidden], #command-menu[hidden], #look-menu[hidden] { display: none; }
+      /* Direct ask: "a modal is appropriate for look - just to see in bigger
+         box what materials are there, what the unit is doing, stats etc."
+         Reuses .pack-card's chrome; only the stat grid and the bar rows are
+         new. */
+      .look-line { margin: 2px 0; }
+      .look-dim { color: var(--text-dim); }
+      .look-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 10px; margin-top: 4px; }
+      .look-stat { display: flex; justify-content: space-between; gap: 6px; font-variant-numeric: tabular-nums; }
+      .look-stat span:first-child { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .look-bar { position: relative; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; margin: 3px 0 7px; }
+      .look-bar > i { position: absolute; inset: 0 auto 0 0; display: block; border-radius: 3px; }
+      .look-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+      .look-chip { border: 1px solid var(--panel-border); border-radius: 999px; padding: 2px 8px; font-size: 11px; background: rgba(255, 255, 255, 0.05); }
       .pack-card { background: rgba(23, 28, 36, 0.98); border: 1px solid var(--panel-border); border-radius: 12px; padding: 12px 14px; width: min(420px, calc(100% - 28px)); max-height: 80%; overflow-y: auto; font-size: 12.5px; }
       .pack-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
       .pack-title button { background: none; border: 1px solid var(--panel-border); color: var(--text); border-radius: 6px; min-width: 32px; min-height: 32px; }
@@ -1416,6 +1429,17 @@
             <div class="pack-card">
               <div class="pack-title"><span>Command</span><button id="command-menu-close" title="Close">✕</button></div>
               <div id="command-menu-body"></div>
+            </div>
+          </div>
+
+          <!-- Direct ask: "When I look at a unit I want the little bar at the
+               bottom. To temporarily show me their stats and stuff. Or tbh, a
+               modal is appropriate for look - just to see in bigger box what
+               materials are there, what the unit is doing, stats etc." -->
+          <div id="look-menu" hidden>
+            <div class="pack-card">
+              <div class="pack-title"><span id="look-menu-title">Look</span><button id="look-menu-close" title="Close">✕</button></div>
+              <div id="look-menu-body"></div>
             </div>
           </div>
 
