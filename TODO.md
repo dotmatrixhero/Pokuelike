@@ -9318,3 +9318,27 @@ typecheck clean.
       unarmed wanderer in an actual running sim. The underlying formula
       was already live-validated for the player (`validateBond.ts`); that
       specific live check was not re-run for a wild human this round.
+
+## Built: waterskin (real mechanic), bedroll, coin pouch — see DESIGN.md
+
+- [x] Direct ask: "any other flavorful items that are not for combat to
+      add to them? ... waterskin, bedroll, coin pouch. can you also make
+      water skin when held, allow 'gather' from water sources and filling
+      it up." Waterskin has a real mechanic (fill via `gather` near water,
+      drink away from water using charges — 3 per fill, known-at-start
+      recipe). Bedroll and coin pouch are pure flavor/loot, no mechanic,
+      as scoped — coin pouch deliberately has no recipe (loot-only, no
+      economy to spend it in). Forager holds the waterskin, traveler
+      carries the bedroll, merchant carries the coin pouch (guaranteed).
+      Verified live: new `validateWaterskin.ts` drives the real
+      `applyPlayerAction` against a real generated scenario end to end
+      (fill, cap, drink-away-from-water, drain, regression checks) — all
+      pass. Full suites green (engine 1533/1533, data 468/468).
+- [x] **Real gotcha found and fixed while building the live test, not
+      swept under.** The first version of `validateWaterskin.ts` placed
+      water directly next to the player to test the fill fallback, but
+      that also satisfied `harvest.ts`'s separate "lichen grows near
+      water" rule (underground only) — `gather` silently picked up lichen
+      instead of filling the waterskin, and the test's own assertion
+      caught it (0 charges instead of 1). Fixed by moving the test to the
+      surface layer, where that rule doesn't apply.

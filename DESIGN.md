@@ -15797,3 +15797,67 @@ wild hunter than a wild wanderer in a live sim; that would reuse the same
 already-live-validated mechanism (`validateBond.ts` proved this formula
 against the player), so it wasn't rebuilt here, but it also wasn't
 watched directly this round. Said plainly rather than implied.
+
+## Non-combat flavor items: waterskin (real mechanic), bedroll, coin pouch
+
+Direct ask, follow-up to the threat/loot round: "any other flavorful items
+that are not for combat to add to them?" I proposed waterskin/bedroll/coin
+pouch (waterskin as the one with real mechanical payoff, since the
+user's own original archetype ask had already said "waterskin, etc." for
+forager and it was never built) — chosen: "waterskin, bedroll, coin pouch.
+can you also make water skin when held, allow 'gather' from water sources
+and filling git up."
+
+**Waterskin — real mechanic, not flavor.** New `ItemDef.holdsWater`/
+`waterCapacity` fields; `Agent.waterskinCharges` tracks fill state the
+same "lives on the agent, not the inventory stack" shape `torchFuel`
+already uses. `player.ts`:
+- `gather` now also succeeds when nothing is harvestable at the tile but
+  the held item holds water, water is in reach, and it isn't already
+  full — `canFillWaterskin`. Weight-blind on purpose (topping off gear
+  you already carry isn't new cargo).
+- `finishGather` prefers real harvested materials when both are possible
+  (matches real intuition: a water's edge with lichen on it still gives
+  you the lichen); only falls back to a water-fill when nothing else came
+  out of the tile.
+- `drink` now also succeeds away from water if the held item has charges
+  left — same `consume(needs, "seekWater")` relief a drink at the water's
+  edge gives, not weakened (this codebase's standing "a tool is not a tax
+  on what it enables" rule).
+- Capacity: 3 charges. Real reachability: known at start (water is core
+  survival, same tier as torch/club), cordage(1)+fiber(2), 6 turns.
+
+**Bedroll and coin pouch — pure flavor, no mechanic**, as scoped. Bedroll
+craftable (fiber×3 + cordage×1, 7 turns, not known at start). Coin pouch
+is deliberately loot-only — no recipe — since there's no economy to spend
+coin in yet; it's "valuable loot," not a new resource sink.
+
+**Archetype wiring**, matching the user's own original phrasing for each:
+forager now holds a waterskin (their exact words from the first ask:
+"collects crops, puts in inventory, waterskin, etc."), traveler carries a
+bedroll on top of its cloak, merchant carries a coin pouch on top of its
+base trade goods (guaranteed, not rolled — it's the one item that reads
+"merchant" on sight).
+
+**Verification — real, live-tick, not just function calls this time.**
+New `packages/runner/src/validateWaterskin.ts` drives the actual
+`applyPlayerAction` against a real generated scenario (`createCaveScenario`,
+forced onto a hand-cleared surface patch so the cave's own "lichen grows
+near water" rule doesn't mask the water-fill fallback — a real gotcha
+found empirically: the first version of this test failed because placing
+water right next to the player ALSO satisfied harvest.ts's separate
+lichen-near-water condition, so `gather` picked up lichen instead of
+filling the waterskin. Root-caused, fixed by moving the test to the
+surface layer, said here plainly rather than silently patched over):
+gather-fills to a real charge count, refuses past the 3-charge cap,
+drinks away from water using only skin charges (thirst 0.2 → 0.60,
+matching `consume`'s real formula), drains to empty and correctly refuses
+further drinks, and a no-waterskin-at-all agent still can't drink away
+from water (regression). All pass.
+
+Extended `validateHumanArchetypes.ts` further: forager holds a real
+waterskin, traveler carries a real bedroll, merchant carries a real coin
+pouch — all asserted across the same 400-roll run.
+
+Full suites after all three items: engine 1533/1533, data 468/468, all 4
+packages typecheck/build clean.

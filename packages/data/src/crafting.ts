@@ -115,6 +115,22 @@ export const ITEMS: Record<string, ItemDef> = {
   berryStew: { key: "berryStew", name: "Berry Stew", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2 } },
   potatoMash: { key: "potatoMash", name: "Potato Mash", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.2 } },
   vegetableStew: { key: "vegetableStew", name: "Vegetable Stew", weight: 1, cooked: { healFraction: 0.2, rapportMultiplier: 2.5 } },
+  // Non-combat flavor items — direct ask: "waterskin, bedroll, coin pouch."
+  // Waterskin is the one with a real mechanic on top: "make waterskin when
+  // held, allow gather from water sources and filling it up" —
+  // `holdsWater`/`waterCapacity` (player.ts's `canFillWaterskin`/
+  // `agent.waterskinCharges`), a real drink away from any water tile once
+  // filled. 3 charges: enough for a real stretch away from water without
+  // making a real water source pointless to ever revisit.
+  waterskin: { key: "waterskin", name: "Waterskin", weight: 1, slot: "held", holdsWater: true, waterCapacity: 3 },
+  // Bedroll: pure flavor, no mechanic — a traveler's real gear, not a
+  // combat item. No `slot`, same as poultice/coin pouch below: something
+  // you carry, not wear or wield.
+  bedroll: { key: "bedroll", name: "Bedroll", weight: 2 },
+  // Coin pouch: pure flavor/loot value — no economy exists yet to spend it
+  // in, so deliberately no recipe below (found on a merchant, not crafted;
+  // "valuable loot" is the point, not a new resource sink).
+  coinPouch: { key: "coinPouch", name: "Coin Pouch", weight: 1 },
 };
 
 function recipe(id: string, name: string, inputs: [string, number][], turns: number, knownAtStart: boolean, outputCount = 1, requiresNearFire = false): RecipeDef {
@@ -153,6 +169,11 @@ export const RECIPES: Record<string, RecipeDef> = {
   berryStew: recipe("berryStew", "Berry Stew", [["oran", 1], ["pecha", 1]], 5, false, 1, true),
   potatoMash: recipe("potatoMash", "Potato Mash", [["potato", 2]], 5, false, 1, true),
   vegetableStew: recipe("vegetableStew", "Vegetable Stew", [["tomato", 1], ["corn", 1]], 6, false, 1, true),
+  // Waterskin: known at start, same tier as torch/club — water is core
+  // survival, not a discovery-gated craft.
+  waterskin: recipe("waterskin", "Waterskin", [["cordage", 1], ["fiber", 2]], 6, true),
+  bedroll: recipe("bedroll", "Bedroll", [["fiber", 3], ["cordage", 1]], 7, false),
+  // No coinPouch recipe — deliberately loot-only, see its ITEMS comment.
 };
 
 export const KNOWN_AT_START: string[] = Object.values(RECIPES).filter((r) => r.knownAtStart).map((r) => r.id);

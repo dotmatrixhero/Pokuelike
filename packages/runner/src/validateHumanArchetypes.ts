@@ -66,6 +66,14 @@ for (let i = 0; i < ROLLS; i++) {
     if (!inv.some((i) => i.itemKey === "fiber") || !inv.some((i) => i.itemKey === "cordage")) {
       throw new Error(`merchant ${agent.id} missing base trade goods: ${inv.map((i) => i.itemKey)}`);
     }
+    if (!inv.some((i) => i.itemKey === "coinPouch")) throw new Error(`merchant ${agent.id} missing coin pouch: ${inv.map((i) => i.itemKey)}`);
+  }
+  if (archetype === "forager") {
+    if (agent.equipment?.held !== "waterskin") throw new Error(`forager ${agent.id} should hold a waterskin, got: ${agent.equipment?.held}`);
+    if (!(agent.inventory ?? []).some((i) => i.itemKey === "waterskin")) throw new Error(`forager ${agent.id} waterskin not in inventory`);
+  }
+  if (archetype === "traveler") {
+    if (!(agent.inventory ?? []).some((i) => i.itemKey === "bedroll")) throw new Error(`traveler ${agent.id} missing bedroll: ${agent.inventory?.map((i) => i.itemKey)}`);
   }
   if (archetype === "wanderer") {
     const sig = threatSignatureOf(fakeWorld, agent);

@@ -161,14 +161,23 @@ const ARCHETYPE_STARTING_GEAR: Record<(typeof HUMAN_ARCHETYPES)[number], (rng: (
       rng
     ),
   }),
-  // Forage pouch plus a couple of already-gathered berries — "collects crops, puts in inventory, waterskin, etc."
-  forager: () => ({ carry: [["foragePouch", 1], ["food", 2]] }),
-  // Camouflage cloak, not a weapon — moves light and unseen rather than armed.
-  traveler: () => ({ worn: "camouflageCloak" }),
-  // Raw goods every time, plus a real chance of one finished, more valuable
-  // piece of wares on top — a trader who's actually made a sale recently.
+  // Forage pouch, a couple of already-gathered berries, and a waterskin in
+  // hand — the user's own original phrase: "collects crops, puts in
+  // inventory, waterskin, etc." (held so it can actually be filled/drunk
+  // from — see crafting.ts's `waterskin` ItemDef and player.ts's
+  // `canFillWaterskin`).
+  forager: () => ({ held: "waterskin", carry: [["foragePouch", 1], ["food", 2]] }),
+  // Camouflage cloak, not a weapon — moves light and unseen rather than
+  // armed. Bedroll too: pure flavor, no mechanic — a traveler's the one
+  // who actually beds down away from home.
+  traveler: () => ({ worn: "camouflageCloak", carry: [["bedroll", 1]] }),
+  // Raw goods and real coin every time, plus a real chance of one
+  // finished, more valuable piece of wares on top — a trader who's
+  // actually made a sale recently. Coin pouch is flavor/loot value only
+  // (no economy to spend it in yet), but it's the one item that says
+  // "merchant" on sight, so it's guaranteed rather than rolled.
   merchant: (rng) => {
-    const wares: [string, number][] = [["fiber", 3], ["cordage", 2]];
+    const wares: [string, number][] = [["fiber", 3], ["cordage", 2], ["coinPouch", 1]];
     if (rng() < 0.3) {
       const bonus = MERCHANT_BONUS_WARES[Math.floor(rng() * MERCHANT_BONUS_WARES.length)]!;
       wares.push([bonus, 1]);

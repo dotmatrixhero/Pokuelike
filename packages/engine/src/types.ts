@@ -689,6 +689,8 @@ export interface PlayerActionOutcome {
   attackedId?: string;
   /** `attack` resolving as a terrain-directed swing (axe/machete) instead — MoveSpec.terrainEffect's own before/after. */
   felled?: { from: TerrainKind; to: TerrainKind; yields?: MaterialId };
+  /** `gather` completing as a waterskin fill instead of a material take — how many charges the waterskin now holds. */
+  filledWater?: number;
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -766,6 +768,17 @@ export interface ItemDef {
    * food item.
    */
   cooked?: { healFraction: number; rapportMultiplier: number };
+  /**
+   * Held: can be filled with water via `gather` at a water source and
+   * drunk from later without being near water — direct ask: "make
+   * waterskin when held, allow gather from water sources and filling it
+   * up." `waterCapacity` is how many drinks a full one holds
+   * (`agent.waterskinCharges`, mirroring `Agent.torchFuel`'s "state lives
+   * on the agent, not the inventory stack" shape). Absent = this item
+   * holds no water (everything except the waterskin).
+   */
+  holdsWater?: boolean;
+  waterCapacity?: number;
 }
 
 /**
@@ -842,6 +855,8 @@ export interface Agent {
   equipment?: { held?: string; worn?: string };
   /** Ticks of burn left in the torch currently held. Ruling: 1000 per torch; at 0 the torch is used up. See player.ts `TORCH_FUEL_TICKS`. */
   torchFuel?: number;
+  /** Drinks left in the currently held waterskin. Same "state lives on the agent, not the inventory stack" shape as `torchFuel`. See player.ts `WATERSKIN_CAPACITY`. */
+  waterskinCharges?: number;
   /** ROADMAP.md M6: crouched reads as half the threat. Player only. See threat.ts. */
   posture?: "crouch";
   /**
