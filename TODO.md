@@ -12093,3 +12093,103 @@ interrupt needs a hit to land. Honest limit on my own probe: patching just
 attack that should be happening is going through some other path and I have
 not isolated which. The causal claim rests on the trace plus
 `validateDiagonalReach`, not on a fix I have demonstrated.
+
+## Combat reach is Chebyshev (PROMPT_chebyshev.md)
+
+Movement is 8-way everywhere — `stepToward` tries the true diagonal FIRST,
+pathfinding expands all eight neighbours at unweighted cost 1 — but every
+combat range check measured manhattan, where a diagonal neighbour is 2 against
+a point move's range 1. A melee attacker could not hit something one diagonal
+step away, and because movement PREFERS the diagonal, that was the common case.
+
+| `validateDiagonalReach` | before | after |
+|---|---|---|
+| orthogonally adjacent | 39/40 | 39/40 |
+| diagonally adjacent | **0/40** | **39/40** |
+
+### Changed (only distances feeding a move-range check)
+
+| site | why |
+|---|---|
+| `predation.ts` egg defence | -> `canAttackFromHere`/`resolveHit` |
+| `predation.ts` fight behaviour | -> `canAttackFromHere`/`resolveHit` |
+| `predation.ts` guardian defence | -> `canAttackFromHere`/`resolveHit` |
+| `predation.ts` mob strike | -> `canAttackFromHere`/`resolveHit` |
+| `predation.ts` cornered-loner strike | -> `canAttackFromHere`/`resolveHit` |
+| `predation.ts` hunt | -> `canAttackFromHere`/`resolveHit` |
+| `herdConflict.ts` rivalry hit | -> `pickBestMove` |
+| `support.ts` ally-target filter | -> `withinMoveRange` |
+| `needs.ts` `applyCommandedAction` | -> `withinMoveRange`; the PLAYER's commanded attack |
+| `needs.ts` `engageStandingOrderTarget` | -> `pickBestMove`/`withinMoveRange`; standing order |
+
+`player.ts`'s own swing was **already** chebyshev, with a comment naming the
+ally-command paths as the remaining manhattan ones — so "fix targeting for the
+player unit too" meant those two `needs.ts` sites, now done.
+
+### One site had to be split, and it was load-bearing
+
+`countHerdAllies` gained an optional `metric`, defaulting to manhattan so the
+muster and mob-protection callers keep their tuned areas, with the mob TRIGGER
+passing chebyshev.
+
+Not cosmetic: with the headcount still on manhattan, three prey around a
+diagonally-placed predator mustered only 2 of the 3 needed, fell out of the mob
+branch entirely and **fled** — so the reach fix never ran and the validator
+still read 0/40. The metric mismatch was in the headcount as much as in the
+range check.
+
+### Left alone
+
+Every cohesion, migration, dispersal, shelter-clustering, mate-search,
+resource-proximity, follow-distance and flee-detection radius — ~50 sites.
+Those are tuned numbers whose meaning a blind swap would silently change.
+
+### Balance effect: real, and the owner's call
+
+6 seeds x 6000 ticks, same seeds both sides.
+
+| | before | after | |
+|---|---|---|---|
+| fights per 1000 ticks | 20.5 | **25.4** | +24% |
+| fought | 739 | 914 | +24% |
+| missed | 163 | 232 | +42% |
+| killed | 125 | 124 | flat |
+| defeated | 57 | 88 | +54% |
+| **herdClash** | 1051 | **1556** | **+48%** |
+| **packHunt** | 354 | **119** | **-66%** |
+| mean alive | 24.7 | **20.5** | **-17%** |
+| mean predators | 5.3 | 5.3 | flat |
+
+- **Combat frequency is up ~24%**, not doubled.
+- **Herd clashes up 48%** — the brief flagged this as the flood risk for the
+  event log and auto-camera, and it is real.
+- **Pack hunts down 66%**, which was not predicted. Most likely a hunt now
+  RESOLVES on the tick a diagonal hunter arrives instead of spending ticks
+  repositioning, so far fewer ticks are spent in the committed-packmates state
+  that counts as a pack hunt. Worth confirming before anyone treats it as a
+  loss of pack behaviour.
+- **Population down 17%** with kills flat — more fighting, not more killing.
+
+None of this was compensated for elsewhere. It is a balance decision.
+
+### A measurement trap, again
+
+The first before/after came back **byte-identical**, which was the tell. The
+"before" run was a git worktree at the previous commit, but
+`packages/runner/node_modules/@pokuelike/engine` symlinks to
+`/home/user/Pokuelike/packages/engine` — so the worktree's runner imported the
+NEW engine and both runs measured the same code. Redone in place by checking
+out the old `packages/engine/src`, with the revert verified two ways (zero
+`chebyshev` in the source, and `validateDiagonalReach` back to 0/40) before
+trusting a single number.
+
+### Still open: the egg grid is 0/400, and it is NOT reach
+
+`validateEggRaid` did not move. The trace shows the parent at chebyshev 1 in
+`fight` state for three turns without swinging — but the cause is the **action
+economy**, not range: `accumulateActionEnergy` grants actions by speed, and the
+harness pairs a bulbasaur (speed 45) against a scyther (speed 105), so the
+raider acts ~2.3x as often and simply out-paces the three-turn interrupt
+window. That is a plausible sim outcome, not necessarily a bug — but it means
+the current grid measures a worst-case pairing and cannot say whether egg
+defence works in general. Next step is a speed-matched raider as a control row.
