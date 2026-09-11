@@ -454,6 +454,18 @@
       .you-section > div { padding-bottom: 10px; }
       .you-empty { color: var(--text-dim); font-style: italic; }
 
+      /* The action log. Bounded so it never pushes Pack and Keys off the
+         bottom of the panel — it is the longest section by far and the only
+         one that grows without limit. */
+      #action-log { max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+      .action-row { display: flex; gap: 7px; align-items: baseline; padding: 2px 0; line-height: 1.45; }
+      .action-tick { flex: 0 0 auto; color: var(--text-dim); opacity: 0.6; font-variant-numeric: tabular-nums; font-size: 10px; }
+      .action-text { flex: 1; }
+      /* Your own doing, emphasised: it is what you came to the log to read.
+         Your party's events stay dim so the two are separable at a glance. */
+      .action-you .action-text { color: var(--text); }
+      .action-party .action-text { color: var(--text-dim); }
+
       /* Direct ask: "have herd hp and status bars like easy to pin so you
          can see all; at once" — every bonded follower's HP at a glance,
          without opening the Inspector and clicking through them one at a
@@ -1332,6 +1344,15 @@
               <details class="you-section" id="section-party" open>
                 <summary>Party <span id="party-count" class="you-count"></span></summary>
                 <div id="party-body"></div>
+              </details>
+
+              <!-- Direct ask: "I need logs and things that are just about me
+                   and my party visible. I want one place to see like results
+                   of look, gather, like actions. This can be in said action
+                   log." Open by default — "visible" was the ask. -->
+              <details class="you-section" id="section-log" open>
+                <summary>Log</summary>
+                <div id="action-log"></div>
               </details>
 
               <details class="you-section" id="section-pack" open>

@@ -1,4 +1,5 @@
 import { EventLog, mulberry32, type SimEvent, type World } from "@pokuelike/engine";
+import type { ActionLogEntry } from "./actionLog.js";
 
 /**
  * Autosave for play mode.
@@ -23,8 +24,8 @@ import { EventLog, mulberry32, type SimEvent, type World } from "@pokuelike/engi
  */
 
 const SAVE_KEY = "pokuelike:run";
-/** Bump when the payload shape changes. A mismatch discards the save rather than trying to migrate or, worse, half-reading it. */
-const SAVE_VERSION = 1;
+/** Bump when the payload shape changes. A mismatch discards the save rather than trying to migrate or, worse, half-reading it. v2 added the action log. */
+const SAVE_VERSION = 2;
 /**
  * Cap on retained history. The log is the cheapest part of the payload after
  * gzip, but it is also the only part that grows without bound over a long
@@ -46,6 +47,8 @@ export interface RestoredRun {
   /** The level the player was actually standing on, already relinked to the rest of the chain. */
   world: World;
   log: EventLog;
+  /** Your own history. Saved because a reload wiping it would contradict the ask it was built for: "don't make em expire. Always have em. Stored." */
+  actionLog: ActionLogEntry[];
   meta: RunMeta;
   savedAt: number;
 }
@@ -57,6 +60,7 @@ interface SavePayload {
   currentLevel: number;
   levels: Record<string, unknown>[];
   events: SimEvent[];
+  actionLog: ActionLogEntry[];
 }
 
 /** Every level of a cave run, top-first, regardless of which one the player is currently on. */
@@ -178,7 +182,7 @@ export function clearSavedRun(): void {
  * written (quota, private browsing, a serialization surprise) must never take
  * the running game down with it. The caller decides whether to surface it.
  */
-export async function saveRun(world: World, log: EventLog, meta: RunMeta): Promise<boolean> {
+export async function saveRun(world: World, log: EventLog, meta: RunMeta, actionLog: readonly ActionLogEntry[]): Promise<boolean> {
   try {
     const chain = levelChain(world);
     const currentLevel = chain.indexOf(world);
@@ -189,6 +193,7 @@ export async function saveRun(world: World, log: EventLog, meta: RunMeta): Promi
       currentLevel: currentLevel < 0 ? 0 : currentLevel,
       levels: chain.map(toPayload),
       events: log.events.slice(-MAX_SAVED_EVENTS),
+      actionLog: actionLog.slice(-MAX_SAVED_EVENTS),
     };
     localStorage.setItem(SAVE_KEY, await compress(JSON.stringify(payload, replacer)));
     return true;
@@ -233,7 +238,7 @@ export async function loadRun(): Promise<RestoredRun | undefined> {
     }
     const log = new EventLog();
     log.events.push(...(payload.events ?? []));
-    return { world, log, meta: payload.meta, savedAt: payload.savedAt };
+    return { world, log, actionLog: payload.actionLog ?? [], meta: payload.meta, savedAt: payload.savedAt };
   } catch {
     clearSavedRun();
     return undefined;

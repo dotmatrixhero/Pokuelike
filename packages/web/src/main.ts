@@ -4,6 +4,7 @@ import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, 
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
+import { ActionLogPanel } from "./actionLog.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
@@ -475,6 +476,7 @@ function resetUiForNewWorld(): void {
   applyZoom();
 
   eventLogPanel.reset();
+  actionLogPanel.reset();
   eventLogPanel.setFilter(undefined);
   battleScreenPanel.reset();
   eventPopups.reset();
@@ -596,6 +598,25 @@ function initSheetDrag(): void {
 }
 initSheetDrag();
 
+const actionLogPanel = new ActionLogPanel(document.getElementById("action-log") as HTMLElement);
+
+/**
+ * Tell the player something, and keep it.
+ *
+ * Every line the player reads used to go straight to `hudMessageEl`, which is
+ * one line that the next message overwrote — so the result of looking at a
+ * creature or gathering a tile existed for exactly one action. Direct ask: "I
+ * want one place to see like results of look, gather, like actions."
+ *
+ * Transient UI prompts ("Targeting … tap a tile") still write to
+ * `hudMessageEl` directly, because they are a mode indicator rather than
+ * something that happened.
+ */
+function say(text: string): void {
+  hudMessageEl.textContent = text;
+  actionLogPanel.say(world.tick, text);
+}
+
 /**
  * Autosave cadence. Long enough that holding a movement key doesn't compress
  * and write the whole world on every step, short enough that what you lose to
@@ -616,7 +637,7 @@ function saveNow(): void {
   if (macroWorld) return;
   const player = findPlayer(world);
   if (!player) return;
-  void saveRun(world, log, { seed: playerSeed, scenario: playerScene === "cave" ? "cave" : "surface", playerId: player.id });
+  void saveRun(world, log, { seed: playerSeed, scenario: playerScene === "cave" ? "cave" : "surface", playerId: player.id }, actionLogPanel.snapshot());
 }
 
 function scheduleSave(): void {
@@ -710,6 +731,7 @@ function loadPlayerWorld(seed: number, scene: "surface" | "cave" = "surface", re
   // Inspector, which is the right default for Watch mode and the wrong one
   // here.
   document.body.classList.remove("world-tabs-open");
+  if (restored) actionLogPanel.restore(restored.actionLog);
   selectTab("you", false);
   setSheetDetent(sheetDetent);
   cancelTravel();
@@ -793,7 +815,22 @@ function renderPlayerHud(): void {
   const speciesName = SPECIES[player.species]?.name ?? player.species;
   youTitleEl.textContent = player.level ? `${speciesName} · Lv ${player.level}` : speciesName;
   const outcome = player.lastActionOutcome;
-  if (outcome && outcome.tick === world.tick) hudMessageEl.textContent = outcomeText(player, outcome);
+  if (outcome && outcome.tick === world.tick) {
+    // A multi-turn gather or craft reports "you start…" then a progress tick
+    // per turn then the result. All of that belongs on the HUD line, which is
+    // live status — but logging it turned a single gather into four rows
+    // ("You start gathering berries." / "Gathering… 2 turns left." /
+    // "Gathering… 1 turn left." / "You gather berries."), which is a table
+    // with commas rather than a history. Only the outcome is kept.
+    // `outcome.ok` matters: a gather that FAILED ("Nothing to gather here.")
+    // is a real result and belongs in the log — only a gather that actually
+    // started an activity is progress. Dropping that check swallowed every
+    // failed gather, which a live check caught.
+    const midActivity =
+      outcome.ok && (outcome.action.kind === "gather" || outcome.action.kind === "craft" || (outcome.action.kind === "continue" && !outcome.completed));
+    if (midActivity) hudMessageEl.textContent = outcomeText(player, outcome);
+    else say(outcomeText(player, outcome));
+  }
   renderPack(player);
   // ROADMAP.md M7: mechanics visible on the map, not hidden in a meter — the
   // player should always know how deep they are, same reasoning as the HP bar.
@@ -813,7 +850,7 @@ function renderPack(player: Agent): void {
   });
   hudPackEl.textContent = `${player.posture === "crouch" ? "Crouched · " : ""}Pack ${carriedWeight(player)}/${carryCapacityOf(world, player)}${items.length ? " · " + items.join(" · ") : " · empty"}`;
   if (player.lastNotice) {
-    if (player.lastNotice.kind === "torchBurnedOut") hudMessageEl.textContent = "Your torch burns out.";
+    if (player.lastNotice.kind === "torchBurnedOut") say("Your torch burns out.");
     player.lastNotice = undefined;
   }
 }
@@ -925,7 +962,7 @@ function runActivity(): void {
       if (!seenBefore.has(id)) {
         const who = world.agents.find((a) => a.id === id);
         playerAct({ kind: "cancel" });
-        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        say(who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.");
         return;
       }
     }
@@ -1353,7 +1390,7 @@ function enterOverworldFromCaveWin(): void {
   world = startWorld;
   resetUiForNewWorld();
   registerHerdsForFirstFrame();
-  hudMessageEl.textContent = "You emerge into the wider world.";
+  say("You emerge into the wider world.");
   renderPlayerHud();
   focusCameraOn(player.pos, undefined, true);
 }
@@ -1373,7 +1410,7 @@ function tryUseStairs(): void {
   const fromDepth = world.depth;
   const next = useStairs(world, player, log);
   if (!next) {
-    hudMessageEl.textContent = "There are no stairs here.";
+    say("There are no stairs here.");
     return;
   }
   world = next;
@@ -1382,7 +1419,7 @@ function tryUseStairs(): void {
   registerHerdsForFirstFrame();
   renderPlayerHud();
   focusCameraOn(player.pos, undefined, true);
-  hudMessageEl.textContent = `You climb ${down ? "down" : "up"} to level ${world.depth}.`;
+  say(`You climb ${down ? "down" : "up"} to level ${world.depth}.`);
 }
 
 /**
@@ -1417,7 +1454,7 @@ function playerAct(action: PlayerAction): void {
       afterTick();
       focusCameraOn(player.pos, undefined, true);
       renderPlayerHud();
-      hudMessageEl.textContent = pendingCombatNotice ?? "You cross into a new stretch of land.";
+      say(pendingCombatNotice ?? "You cross into a new stretch of land.");
       return;
     }
   }
@@ -1429,7 +1466,7 @@ function playerAct(action: PlayerAction): void {
   // Real combat news — the player got hit, or a bonded follower landed or
   // missed one — outranks the routine "You move."/"You wait." outcome
   // message `renderPlayerHud` just set, so it applies last.
-  if (pendingCombatNotice) hudMessageEl.textContent = pendingCombatNotice;
+  if (pendingCombatNotice) say(pendingCombatNotice);
   if (!findPlayer(world)) showGameOver(player.id);
   else checkWinCondition(player);
 }
@@ -1674,6 +1711,13 @@ function afterTick(): void {
   const noticePlayer = findPlayer(world);
   pendingCombatNotice = noticePlayer ? combatNoticeFor(displayEvents, world, noticePlayer) : undefined;
   eventLogPanel.ingest(displayEvents, world);
+  // Your party's own news, in its own voice — see ActionLogPanel's doc
+  // comment for why the player is excluded here rather than included.
+  // Membership is read fresh each tick, so an event counts as your party's
+  // if they were following you at the time.
+  if (noticePlayer) {
+    actionLogPanel.ingest(displayEvents, world, new Set(bondedPartnersInZone(noticePlayer).map((a) => a.id)));
+  }
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);
   autoCamera.ingest(displayEvents, world);
@@ -1864,7 +1908,7 @@ function travelTo(target: Vec2): void {
   }
   const first = nextTravelStep(world, me, target);
   if (!first) {
-    hudMessageEl.textContent = "You do not know a way there.";
+    say("You do not know a way there.");
     return;
   }
   let steps = 0;
@@ -1875,7 +1919,7 @@ function travelTo(target: Vec2): void {
     if (!player) return;
     const step = nextTravelStep(world, player, target);
     if (!step) {
-      if (player.pos.x !== target.x || player.pos.y !== target.y) hudMessageEl.textContent = "You can go no further.";
+      if (player.pos.x !== target.x || player.pos.y !== target.y) say("You can go no further.");
       return;
     }
     playerAct(step);
@@ -1886,7 +1930,7 @@ function travelTo(target: Vec2): void {
     for (const id of seenNow) {
       if (!seenBefore.has(id)) {
         const who = world.agents.find((a) => a.id === id);
-        hudMessageEl.textContent = who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.";
+        say(who ? `You stop. ${examine(world, who, { observer: after, name: (k) => SPECIES[k]?.name ?? k })}` : "You stop.");
         return;
       }
     }
@@ -1932,13 +1976,13 @@ function examineNext(): void {
     .filter((a) => a.id !== me.id && a.layer === me.layer && a.alive !== false && me.vision!.visible.has(a.pos.y * world.width + a.pos.x))
     .sort((a, b) => Math.hypot(a.pos.x - me.pos.x, a.pos.y - me.pos.y) - Math.hypot(b.pos.x - me.pos.x, b.pos.y - me.pos.y));
   if (seen.length === 0) {
-    hudMessageEl.textContent = "You see no one.";
+    say("You see no one.");
     return;
   }
   const i = seen.findIndex((a) => a.id === selectedAgentId);
   const next = seen[(i + 1) % seen.length]!;
   selectAgent(next);
-  hudMessageEl.textContent = examine(world, next, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
+  say(examine(world, next, { observer: me, name: (id) => SPECIES[id]?.name ?? id }));
 }
 
 // --- Unified side panel: Inspector / Battle / Chronicle / Events tabs ------
@@ -2133,7 +2177,7 @@ canvas.addEventListener("click", (event) => {
     selectAgent(agent);
     // Tapping a creature in Play mode is the examine verb (free, no tick).
     const me = playerMode ? findPlayer(world) : undefined;
-    if (me && agent.id !== me.id) hudMessageEl.textContent = examine(world, agent, { observer: me, name: (id) => SPECIES[id]?.name ?? id });
+    if (me && agent.id !== me.id) say(examine(world, agent, { observer: me, name: (id) => SPECIES[id]?.name ?? id }));
     return;
   }
   // Play mode: tapping a tile walks there — direct ask: "I can't play at all
@@ -2725,7 +2769,10 @@ function frame(): void {
   maybeAutoSwitchTab();
   battleScreenPanel.render(world);
   eventLogPanel.render();
-  if (playerMode) renderPartySection();
+  if (playerMode) {
+    renderPartySection();
+    actionLogPanel.render();
+  }
   // Reads the full log rather than the incremental slice — a chronicle is a
   // whole-run summary. It throttles itself and no-ops entirely while its tab
   // is hidden, so this is cheap on every other frame.

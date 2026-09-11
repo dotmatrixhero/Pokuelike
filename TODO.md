@@ -11251,3 +11251,77 @@ mode gets its **own** layout, not a fifth tab.
       mobile I think?"* Desktop keeps the pad.
 - [ ] Sheet detent isn't remembered across a reload. Minor, but it is the kind
       of thing that gets noticed once autosave means reloads are survivable.
+
+## Built: play-mode UX, Slice 2 — the action log
+
+Direct ask: *"I need logs and things that are just about me and my party
+visible. I want one place to see like results of look, gather, like actions.
+This can be in said action log."*
+
+- [x] **The gap, precisely.** `hudMessageEl` was one line that every new
+      message overwrote. Looking at a creature or gathering a tile showed its
+      result for exactly one action and then it was gone, with no way back.
+      Nothing was ever kept. A single `say()` helper now both shows and keeps;
+      14 scattered `hudMessageEl.textContent = …` sites route through it. The
+      four left writing directly are the ones that *should* be transient — the
+      targeting prompt, the clear, and the session banner.
+- [x] **Two sources, two voices, on purpose.** Your own outcomes arrive second
+      person and already written for you ("You gather berries."). Your party's
+      events arrive third person, because a follower is not you.
+- [x] **Events naming the player are excluded from the party side.** Letting
+      both in printed every action twice, once in each voice.
+- [x] Not merged into the `SimEvent` union, deliberately: that union has
+      non-defaulted exhaustive switches in three packages, so a synthetic kind
+      would break builds the engine's own typecheck does not catch. Separate
+      typed buffer, merged at render.
+- [x] Persisted in the autosave (payload v2) — a reload wiping it would
+      contradict the ask it was built for: *"don't make em expire. Always have
+      em. Stored."*
+
+### Real output, read cold
+
+```
+#19  You wait. ×25
+#11  You gather berries.
+#0   The Venonat is standing still. He has seen you. He stays beside you.
+```
+
+- [x] **Two prose defects caught by reading real output, not by reading code.**
+      1. A single gather logged **four rows**: "You start gathering berries." /
+         "Gathering… 2 turns left." / "Gathering… 1 turn left." / "You gather
+         berries." Progress belongs on the HUD line, which is live status; the
+         log keeps the result only. That is a table with commas, which is the
+         exact failure the house style names.
+      2. Party events were being run through `formatEvent`, the **spectator**
+         formatter, which produced
+         `Zubat (1) used tackle on Venonat (0, the Venonats of Deepfen) for 6
+         (hp left: 15)` — ids in parentheses, herd names, a raw move key.
+         Wrong register entirely for a panel about the creature walking next
+         to you. Now: **"Zubat hit Venonat for 6."** Partial switch with a
+         `formatEvent` fallback, deliberately not exhaustive, so a new engine
+         event kind cannot turn this into a fourth place that fails to build.
+- [x] **A bug I introduced and caught the same way:** suppressing gather
+      progress also suppressed a *failed* gather ("Nothing to gather here."),
+      which is a real result. `outcome.ok` separates "started an activity"
+      from "could not".
+- [x] Consecutive identical lines collapse to one row with a count, so holding
+      a movement key does not bury the run in "You wait."
+- [x] Verified live: look result logged; gather logged; **the look result is
+      still readable 20 actions later** (the whole point); duplicate waits
+      collapsed; the log survives a page reload; zero console errors. Party
+      filtering verified with real event shapes — party event kept, noise
+      dropped, player-only dropped. Full suite green (engine 1616, data 475),
+      web build clean, Slice 0's 13/13 autosave checks still pass.
+- [ ] **Not observed live: a party event arising from ordinary play.** The
+      filter and formatter are verified against real event shapes fed in
+      directly, and the Party section populates with a genuinely bonded
+      follower — but 25 ticks of a real run produced no non-noise event naming
+      the follower, and a scripted attack to force one did not land. Stated
+      plainly rather than claimed.
+- [ ] `examine()` can still run to three sentences ("The Venonat is standing
+      still. He has seen you. He stays beside you."). House style says at most
+      two. It is engine prose, pre-existing and outside this slice, but it is
+      now much more visible because it is kept rather than overwritten.
+- [ ] Moves log nothing (a successful move's outcome text is empty). Probably
+      right — "You move." twenty times is noise — but it does mean walking
+      leaves no trace in the log at all.
