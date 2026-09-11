@@ -11376,3 +11376,94 @@ true one.
 
 Screenshots settled it both times. The metric is useful for finding candidates
 and useless as the arbiter.
+
+## Ground colours graded to the biome palette; the mountain is one mass
+
+Direct ask: *"I think ground colors do the most to make em feel unique. If we
+can tune them to reflect the color palette of the biome that would be plenty."*
+Then, on the first screenshot back: *"Oof the first shot in game is not good.
+Lots of hard squares."*
+
+### Reseeding could not have worked, and the data says so
+
+The ask started as "reseed `frost` and `cave`". That is not fixable by picking
+a different source cell:
+
+- Panel 11 (the only tundra panel) holds **no cold-steppe tone at all**. Every
+  clean cell on it is a pale near-neutral grey between rgb(182,183,186) and
+  rgb(231,239,239).
+- The quarry and cave panels are the **same mid warm brown** as each other.
+- A search over every clean tone on all fourteen panels for "far from highland,
+  far from snow" returned **the lava panel's RED** as the best tundra
+  candidate. That is the search saying the material is not in the source.
+
+**And it was worse than first reported.** `frost` and `stone` are 12.1 apart as
+ripped — but tundra also carries a blue `BIOME_TINT`, and that tint pulls it
+*toward* highland, not away. The two floors RENDERED **6.6 apart**. Measuring
+the file instead of the frame understated the bug by half.
+
+### What was done: grade the texture, keep the art
+
+New `GRADE` table in the rip script: per-channel scaling to a target mean, so
+the artist's texture keeps its proportional light/dark variation and only its
+colour moves. Luma held within ~10 of the rip's own on purpose — these are lit
+at runtime by elevation shading and the day grade, and a ground that changes
+brightness reads as a different time of day, not a different place.
+
+| rendered pair | before | after |
+|---|---|---|
+| highland <-> tundra | **6.6** | **34.5** |
+| badlands <-> underground | 14.5 | 48 |
+| jungle <-> mangrove | 22.4 | 36.4 |
+| closest pair on the whole map | 6.6 | **26.1** (forest <-> wetland) |
+
+`MIN_GROUND_SEPARATION = 22` now fails the rip if any two grounds would read as
+the same place. The old guard only caught byte-identical textures, which is why
+`frost`/`stone` passed it for months.
+
+The guard immediately caught `sand` <-> `grass_dry` at 20.4. `grass_dry` was
+savanna's old ground, is unused since savanna moved to `wheat`, and is gone
+along with the orphan `field.png` — closing the "field ground ripped but
+unused" note.
+
+### The hard squares were the mountain, and one terrain with no art
+
+- **Walls were drawn per tile.** Wall is grid terrain, so a massif's outline is
+  always a run of 90-degree steps, and on a highland-dominant zone (~77% wall)
+  that staircase is most of the frame. `drawWallMass` now draws the whole
+  mountain as ONE smoothed body — a threshold on a smoothed coverage field,
+  exactly as the water body already does it — filled from a world-space
+  window into a multi-tile quilted rock patch instead of the same 16x16
+  pattern stamped identically on every tile, which read as wallpaper. Graded
+  dark, per the standing ask that mountain look "almost blacked out... to show
+  impassable". `wall.png`, `wall_1.png` and `wall_2.png` are deleted.
+- **`sunbeam` had no art at all**, so it fell through to a flat `TERRAIN_BG`
+  fillRect: a fully-saturated dark-mustard square. Now a soft warm wash over
+  the real ground. Explicitly NOT a light source — an additive shimmering
+  sunbeam light was built once and removed on direct instruction ("let's remove
+  the sunbeam one, fire Pokémon one is awesome"), and this does not bring it
+  back.
+
+The ground layer cache key grew from `sandSignature` to `groundSignature`,
+covering walls too, since digging can remove one.
+
+### Perf
+
+| | before this round | after |
+|---|---|---|
+| paused median frame | 17.2 ms (58 fps) | 18.3 ms (55 fps) |
+| world load + first draw | 765 ms | 702 ms |
+
+### One change to something already approved
+
+The cave floor moved from rgb(152,130,113) warm brown to rgb(138,130,124)
+neutral grey-brown, to pull it off badlands clay. That floor had been approved
+directly ("Yes! Good cave floor"), so it is flagged rather than buried — say
+the word and `GRADE["cave"]` comes out and badlands moves instead.
+
+### Still open, not touched
+
+- A highland-dominant zone is ~77% wall: 783 walkable tiles of 5,400.
+- Pale rectangles still appear where `sand` terrain meets water: the sand
+  coverage field is 0/1 per tile and only the bilinear upscale softens it.
+- Fog of war still has hard tile edges.

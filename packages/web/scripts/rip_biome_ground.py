@@ -62,7 +62,12 @@ GROUND = [
     ("sand", 6, (56, 40)),            # desert sand
     ("shore", 12, (72, 40)),          # very pale cream, beach
     ("clay", 1, (8, 8)),              # light red-brown, badlands
-    ("grass_dry", 13, (72, 104)),     # dry gold grass, savanna
+    # No `grass_dry`. It was savanna's ground and it is the PALE DRY GRASS
+    # beside panel 13's wheat field rather than the crop -- 30.7 from `sand`
+    # and only 16.5 from `field`, so savanna read as a slightly greener beach.
+    # Savanna uses `wheat` now, nothing else wants a pale dry grass, and the
+    # separation guard below flags it at 20.4 against `sand`. If one is ever
+    # needed the seed was panel 13, (72, 104).
     ("stone", 11, (72, 104)),         # warm grey rock, highland
     ("frost", 11, (24, 152)),         # cool grey, tundra
     ("snow", 9, (40, 8)),             # white, snow
@@ -73,11 +78,77 @@ GROUND = [
     # this sheet that nothing was using.
     ("wheat", 13, (96, 108)),
     ("dirt", 3, (80, 120)),           # plain brown dirt
+    # Mountain rock. Not a floor: `wall` terrain is filled with this, masked
+    # by a smoothed coverage field so a massif reads as one mass instead of a
+    # staircase of squares. Graded dark on the standing ask that mountain
+    # should look "more solid rock... almost blacked out... to show
+    # impassable".
+    ("rock", 11, (72, 104)),
     ("water", 0, (70, 90)),
 ]
 
 
 PATCH_CELLS = 6  # 6x6 source cells = 96x96 px = ~5x5 game tiles per repeat
+
+
+# --- biome palette grading -------------------------------------------------
+# Target mean colour per ground, or absent to leave the rip untouched.
+#
+# Why this exists: several biomes came out of this sheet looking like each
+# other, and RESEEDING CANNOT FIX IT. Measured, the sheet's tundra panel holds
+# no cold-steppe tone -- every clean cell on it is a pale near-neutral grey
+# between rgb(182,183,186) and rgb(231,239,239) -- and the quarry and cave
+# panels are the same mid warm brown as each other. A search over every clean
+# tone on all fourteen panels for "far from highland, far from snow" returned
+# the lava panel's RED as the best tundra candidate, which is the search
+# telling you the material is not in the source.
+#
+# Worse than reported at first: `frost` and `stone` are 12.1 apart as ripped,
+# but tundra also carries a blue BIOME_TINT, and that tint pulls it TOWARD
+# highland rather than away -- the two floors render 6.6 apart, which is
+# invisible.
+#
+# Direct ask: "I think ground colors do the most to make em feel unique. If we
+# can tune them to reflect the color palette of the biome that would be
+# plenty." So the artist's texture is kept and only its colour is moved.
+#
+# Luma is held within ~10 of the rip's own, deliberately: these textures are
+# lit at runtime by the elevation shading and the day grade, and a ground that
+# changes brightness reads as a different time of day rather than a different
+# place.
+GRADE = {
+    "grass": (176, 222, 150),         # open plains: fresh mint green
+    "grass_forest": (112, 152, 102),  # under canopy: deeper, cooler green
+    "grass_deep": (96, 124, 62),      # jungle floor: saturated olive
+    "marsh": (108, 142, 78),          # wetland: damp olive, a touch browner
+    "dirt": (104, 118, 100),          # mangrove: brackish teal-brown
+    "shore": (247, 240, 208),         # beach: warm cream
+    "sand": (238, 214, 158),          # desert: warmer and more orange than shore
+    "clay": (172, 118, 92),           # badlands: RED-brown, away from the cave floor
+    "wheat": (211, 186, 92),          # savanna: gold
+    "stone": (198, 190, 176),         # highland: WARM grey stone
+    "frost": (182, 196, 208),         # tundra: COLD blue-grey
+    "snow": (236, 240, 246),          # snow: near-white, faintly cool
+    "cave": (138, 130, 124),          # underground: neutral grey-brown
+    "rock": (92, 88, 86),             # mountain: dark solid rock, reads impassable
+}
+
+# Two rendered floors closer than this are not two places. `frost` and `stone`
+# sat at 6.6 before the grading above.
+MIN_GROUND_SEPARATION = 22.0
+
+
+def grade(patch, target):
+    """Move a patch's mean colour to `target`, keeping its texture.
+
+    Per-channel scaling, not an offset: scaling preserves the texture's
+    PROPORTIONAL variation, so a mottled ground stays as mottled as the artist
+    drew it and nothing can go negative. An offset flattens the light/dark
+    spread on any channel it pushes near an end of the range.
+    """
+    mean = patch.reshape(-1, 3).mean(axis=0)
+    scale = np.array(target, float) / np.maximum(mean, 1e-6)
+    return np.clip(patch * scale, 0, 255)
 
 
 def clean_cells(panel, seed, tol=62, outlier=0.05):
@@ -579,6 +650,8 @@ def main():
         cells = same_tone(distinct, ground_colour(panel, seed))
         rng = np.random.default_rng(1234)
         patch = mosaic(cells, rng)
+        if name in GRADE:
+            patch = grade(patch, GRADE[name])
         emitted[name] = np.clip(patch, 0, 255).astype(np.uint8)
         Image.fromarray(emitted[name]).save(os.path.join(TILES, "ground", f"{name}.png"))
         print(f"ground/{name}.png  {int(ok.sum())} clean cells, {len(distinct)} distinct, {len(cells)} same-tone  tone={tuple(int(v) for v in patch.mean(axis=(0, 1)))}")
@@ -593,6 +666,25 @@ def main():
         for b in names[i + 1:]:
             if emitted[a].shape == emitted[b].shape and np.abs(emitted[a].astype(int) - emitted[b].astype(int)).mean() < 1.0:
                 raise SystemExit(f"ERROR: ground/{a}.png and ground/{b}.png are the same texture — reseed one of them")
+
+    # Byte-identical is not the only way two biomes end up looking like one
+    # place. `frost` and `stone` were 12.1 apart in mean colour and passed the
+    # check above for months; with tundra's blue tint applied they RENDERED 6.6
+    # apart, which nobody could tell apart. So the separation the player
+    # actually sees is checked, not the separation the files happen to have.
+    # `water` is exempt: the water layer draws its own body over the top of it.
+    graded = {n: v for n, v in emitted.items() if n != "water"}
+    close = []
+    for i, a in enumerate(graded):
+        for b in list(graded)[i + 1:]:
+            gap = float(np.linalg.norm(graded[a].reshape(-1, 3).mean(axis=0) - graded[b].reshape(-1, 3).mean(axis=0)))
+            if gap < MIN_GROUND_SEPARATION:
+                close.append(f"{a} <-> {b} ({gap:.1f})")
+    if close:
+        raise SystemExit(
+            f"ERROR: these grounds are closer than {MIN_GROUND_SEPARATION} in mean colour and will read as the "
+            f"same place: {'; '.join(close)}. Move one of them in GRADE."
+        )
 
     for name, pi, cx, cy, w, h, seed in DECALS:
         x0, y0 = panel_origin(pi)

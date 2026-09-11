@@ -459,21 +459,27 @@ function drawGroundLayer(ctx: CanvasRenderingContext2D, world: World): void {
  * shadows DO move, so the scatter passes and the grade stay outside this
  * cache — see `drawGroundLayer`.)
  *
- * Cached per world and per layer, keyed by a signature over the one piece of
- * mutable state it reads — which tiles are "sand" terrain. Deliberately not a
- * hash of ALL terrain: crops grow and fires burn every tick, and that would
- * invalidate this every frame for changes it does not draw.
+ * Cached per world and per layer, keyed by a signature over the
+ * mutable state it reads — see `groundSignature`.
  */
 /** Set by `drawGroundTextures` when a ground patch has not decoded yet — see its `if (!patch)` branch. */
 let groundArtPending = false;
 
 const groundLayerCache = new WeakMap<World, Partial<Record<Layer, { signature: number; canvas: HTMLCanvasElement }>>>();
 
-/** Hash of which tiles are "sand" — the only mutable input the ground layer reads. See `groundLayerCanvas`. */
-function sandSignature(tiles: readonly Tile[]): number {
+/**
+ * Hash of the terrain the ground layer actually draws: "sand" (its own ground
+ * patch) and "wall" (the mountain mass). Deliberately not a hash of ALL
+ * terrain — crops grow and fires burn every tick, and that would invalidate
+ * this every frame for changes it does not draw. Walls joined the hash when
+ * the mass moved in here, because digging can remove one.
+ */
+function groundSignature(tiles: readonly Tile[]): number {
   let h = 2166136261;
   for (let i = 0; i < tiles.length; i++) {
-    if (tiles[i]!.terrain === "sand") h = Math.imul(h ^ i, 16777619);
+    const terrain = tiles[i]!.terrain;
+    if (terrain === "sand") h = Math.imul(h ^ i, 16777619);
+    else if (terrain === "wall") h = Math.imul(h ^ (i + 0x5f5e100), 16777619);
   }
   return h >>> 0;
 }
@@ -628,13 +634,71 @@ function fieldCanvas(world: World, alphaAt: (index: number) => number): HTMLCanv
   return small;
 }
 
+/**
+ * How much of a tile's neighbourhood has to be wall before it counts as
+ * inside the mass, and how fast the edge fades. Same shape, and the same
+ * reasoning, as `WATER_THRESHOLD`/`WATER_EDGE_SOFT`.
+ */
+const WALL_THRESHOLD = 0.42;
+const WALL_EDGE_SOFT = 0.1;
+
+/**
+ * The mountain mass: every wall tile on the map, drawn as ONE smoothed body
+ * with a world-space rock texture rather than tile by tile.
+ *
+ * Wall is grid terrain, so a massif's outline is always a run of 90-degree
+ * steps. Drawn per tile it is a staircase of squares, and on a
+ * highland-dominant zone — which comes out ~77% wall — that staircase is most
+ * of the frame. Direct report: "Oof the first shot in game is not good. Lots
+ * of hard squares."
+ *
+ * Two things were wrong and both are fixed here. The outline is now a
+ * threshold on a smoothed coverage field, exactly as the water body already
+ * does it ("a lake outline is always a run of 90-degree steps"). And the fill
+ * is a world-space window into a multi-tile quilted patch instead of the same
+ * 16x16 pattern stamped identically on every tile, which read as wallpaper —
+ * a regular grid of identical blobs.
+ *
+ * Dark on purpose, per the standing ask that mountain should look "more solid
+ * rock... almost blacked out... to show impassable".
+ */
+function drawWallMass(ctx: CanvasRenderingContext2D, world: World): void {
+  const tiles = world.tiles[activeViewLayer];
+  const patch = getGroundPatchByName("rock");
+  if (!patch || patch.width < GROUND_CELL) {
+    groundArtPending = true;
+    return;
+  }
+  const width = world.width * TILE_SIZE;
+  const height = world.height * TILE_SIZE;
+  const coverage = upscaleField(world, (i) => (tiles[i]!.terrain === "wall" ? 255 : 0));
+  const mask = scratchCanvas(width, height);
+  const maskData = new ImageData(width, height);
+  for (let p = 0; p < width * height; p++) {
+    const cover = coverage.data[p * 4 + 3]! / 255;
+    maskData.data[p * 4 + 3] = Math.round(Math.max(0, Math.min(1, (cover - WALL_THRESHOLD) / WALL_EDGE_SOFT)) * 255);
+  }
+  mask.getContext("2d")!.putImageData(maskData, 0, 0);
+
+  const layer = scratchCanvas(width, height);
+  const lctx = layer.getContext("2d")!;
+  lctx.imageSmoothingEnabled = false;
+  const pattern = lctx.createPattern(worldTilePattern(patch), "repeat");
+  if (!pattern) return;
+  lctx.fillStyle = pattern;
+  lctx.fillRect(0, 0, width, height);
+  lctx.globalCompositeOperation = "destination-in";
+  lctx.drawImage(mask, 0, 0);
+  ctx.drawImage(layer, 0, 0);
+}
+
 function groundLayerCanvas(world: World): HTMLCanvasElement {
   let perLayer = groundLayerCache.get(world);
   if (!perLayer) {
     perLayer = {};
     groundLayerCache.set(world, perLayer);
   }
-  const signature = sandSignature(world.tiles[activeViewLayer]);
+  const signature = groundSignature(world.tiles[activeViewLayer]);
   const cached = perLayer[activeViewLayer];
   if (cached && cached.signature === signature) return cached.canvas;
 
@@ -647,6 +711,7 @@ function groundLayerCanvas(world: World): HTMLCanvasElement {
   gctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGroundTextures(gctx, world);
   drawTintFields(gctx, world);
+  drawWallMass(gctx, world);
   drawElevationShade(gctx, world);
   // Only keep it once every tile drew real art; otherwise rebuild next frame.
   if (!groundArtPending) perLayer[activeViewLayer] = { signature, canvas };
@@ -716,6 +781,8 @@ const SCATTER_ALPHA = 0.85;
  * not a flat paint-over.
  */
 const GROUND_TYPE_TINT_ALPHA = 0.16;
+const SUNBEAM_WASH: Rgb = [255, 238, 176];
+const SUNBEAM_WASH_ALPHA = 0.3;
 const BIOME_TINT_ALPHA = 0.14;
 
 /**
@@ -754,6 +821,17 @@ function drawTintFields(ctx: CanvasRenderingContext2D, world: World): void {
     tint,
     weightAt: (i: number) => ((tiles[i]!.groundType ?? "loam") === key ? 1 : 0),
   })), GROUND_TYPE_TINT_ALPHA);
+
+  // Sunbeam had no art at all, so it fell through to a flat `TERRAIN_BG`
+  // fillRect — a fully-saturated dark-mustard square, which is about the most
+  // visible hard square on the map. A soft warm wash over the real ground
+  // instead. NOT a light source: an additive shimmering sunbeam light was
+  // built once and removed on direct instruction ("let's remove the sunbeam
+  // one, fire Pokémon one is awesome"), and this does not bring it back.
+  paintTintStack(ctx, world, [{
+    tint: SUNBEAM_WASH,
+    weightAt: (i: number) => (tiles[i]!.terrain === "sunbeam" ? 1 : 0),
+  }], SUNBEAM_WASH_ALPHA);
 
   if (activeViewLayer !== "surface" || !world.biomeSeeds || world.biomeSeeds.length === 0) return;
   const seeds = world.biomeSeeds;
@@ -1540,7 +1618,11 @@ function drawWorldTiles(
       // availability.
       // "sand" terrain is ground, and `drawGroundLayer` already painted it —
       // see drawGroundTextures' own note on why it cannot be drawn here.
-      if (tile.terrain === "sand") {
+      // Sand is part of the ground pass (`drawGroundTextures`), the mountain
+      // mass is `drawWallMass`, and the sunbeam wash is `drawTintFields` —
+      // all three are whole-map fields, and drawing any of them a tile at a
+      // time is what put hard squares on the map.
+      if (tile.terrain === "sand" || tile.terrain === "wall" || tile.terrain === "sunbeam") {
           continue;
       }
 

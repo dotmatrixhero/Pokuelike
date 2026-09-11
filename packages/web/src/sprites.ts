@@ -123,19 +123,21 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
   tree: 7,
   boulder: 2,
   bush: 4,
-  // No `wall` here on purpose. It had two "variants" and they are not two
-  // variants of one thing: `wall_2.png` is a seamless 16x16 rock pattern,
-  // while `wall_1.png` is a single 144x144 BOULDER SPRITE — one rounded rock
-  // with a lit top and transparent corners. Walls now load `wall.png` (a copy
-  // of the seamless one) and `wall_1.png` is unused.
+  // No `wall`. Walls are not a tile sprite at all any more — renderer.ts's
+  // `drawWallMass` draws the whole mountain as one smoothed body with a
+  // world-space rock texture, because per-tile walls are a staircase of
+  // squares. The old art is gone with it: `wall_2.png` was a seamless 16x16
+  // pattern that read as wallpaper stamped identically on every tile, and
+  // `wall_1.png` was not a texture at all but a single 144x144 BOULDER
+  // sprite that was being diced into random 20x20 crops.
 };
 
 /**
  * A 1:1 source window for a surface texture that is much larger than a tile.
  *
- * `mud.png` is 128x128 and `wall_1.png` is 144x144, but both were being drawn
- * with `drawImage(img, dx, dy, TILE_SIZE, TILE_SIZE)` — the WHOLE image
- * squashed into 20x20. That resampled a 144px texture down to 20px, keeping
+ * `mud.png` is 128x128 and was being drawn with
+ * `drawImage(img, dx, dy, TILE_SIZE, TILE_SIZE)` — the WHOLE image
+ * squashed into 20x20. That resampled a 128px texture down to 20px, keeping
  * roughly 2% of its pixels, and did it every frame; it also made every tile of
  * that terrain identical, since they all showed the same squashed image.
  *
@@ -163,12 +165,12 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
  * incorrectly cropped there."
  *
  * `wall` was ALSO wrong and stayed wrong when that was fixed, because the
- * fix whitelisted it by name. `wall_1.png` is 144x144 and is not a texture —
- * it is one boulder sprite. Windowed, a mountain field became a patchwork of
+ * fix whitelisted it by name. `wall_1.png` was 144x144 and not a texture —
+ * it was one boulder sprite. Windowed, a mountain field became a patchwork of
  * arbitrary 20x20 squares out of it: dark rim crops beside pale centre crops
  * beside the sprite's own transparent corners, hard-edged, every tile
  * different. Direct report: "Still got some ugly square splotches there."
- * Walls now use the seamless 16x16 pattern whole, which needs no window.
+ * Walls left this mechanism entirely — see renderer.ts's `drawWallMass`.
  */
 const TILING_SURFACE_TERRAIN = new Set(["mud"]);
 
