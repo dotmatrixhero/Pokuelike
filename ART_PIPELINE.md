@@ -187,6 +187,58 @@ seedling** — 47 of them in a single frame. `strip_sheet_gridlines.py` clears
 any edge row/column that is >90% opaque and entirely under level 12. It's
 idempotent, and it also caught a left-edge rule on `food_cheri.png`.
 
+### 4e. For a separated object, key against the ground's PALETTE and cut by blob
+
+4a–4d cut a *hand-cropped rectangle*. That works for ground detail (tufts,
+blossoms, moss) and fails for anything the artist drew as a separate object on
+open ground — a stump, a log, a boulder, a mushroom cluster. Hand-cropping
+those is a trap with no winning move: a crop tight enough to exclude the
+neighbouring bush runs through the decal's own edge, and a crop loose enough to
+hold the whole decal drags the bush in with it. Both are visible on a
+checkerboard — half a log, or a log welded to a block of grass.
+
+Three keys were tried against one crop (a cut stump on panel 5's forest grass)
+before one worked:
+
+| Key | What it measured | Why it failed |
+| --- | --- | --- |
+| Hand-picked seed pixel | one colour | lands on the wrong side of a two-ground crop, or on a neighbouring fern |
+| Median of the crop's rim | one colour | a scene crop's rim is routinely pale grass on one side and dark canopy on the other; the median sits between them, matches neither, and the canopy half survives as a solid block |
+| k-means tones off the rim | 3 colours | the cluster **means** sit up to 33 away from the ground pixels they came from — further than the stump sits from the grass. No threshold separated them. |
+
+The fix is to stop averaging. **This is pixel art: the ground is not a colour
+and not three colours, it is a palette of about twenty exact values, and every
+ground pixel is one of them exactly.** Take every colour that appears at least
+twice on the crop's rim and key against the distance to the *nearest* of them.
+The same crop then reads **0–7 on ground and 22–33 on the stump**.
+
+That separation is what lets the floor drop from `lo=45` to `lo=9`, and the low
+floor is what makes the rest work:
+
+```python
+alpha = keyed_alpha(region, border_palette(region), lo=9, hi=15)
+# keep only the connected blob the point landed in, plus blobs within a few
+# pixels of it (a mushroom cluster is several blobs)
+# the tight crop falls out of that blob's bounding box
+```
+
+So you never tune a coordinate against the neighbour. You point at the object
+inside a generous box whose **rim is clear ground**, and the neighbour is
+dropped because it is a different blob. Pass `None` for the point and the cut
+takes the pixel furthest from the ground palette — needed for sparse objects
+(a grass tuft is strokes with ground showing between them, and there is no
+reliable pixel to point at by eye).
+
+Two things this still cannot cut, both real and both worth knowing:
+
+* **An object drawn wider than any clean-rim box.** Panel 10's cobwebs are
+  drawn wide, so the web's own white reaches the rim of every box containing
+  it, the key adopts white as a ground colour, and what survives is the green
+  shadow the web was drawn over.
+* **A detail drawn *on* a band rather than standing on ground.** Panel 4's
+  "boulders" are bumps outlined on a cliff face in the cliff's own colour.
+  Three were cut and all three came back as background — correctly.
+
 ---
 
 ## 5. Verify the rip before wiring it up

@@ -169,6 +169,37 @@ def mosaic(cells, rng, n=PATCH_CELLS):
     return out
 
 
+def border_palette(region, min_count=2):
+    """The ground's PALETTE, read off the crop's own border.
+
+    Three things were tried before this and each failed on the same crop (a
+    cut stump on panel 5's forest grass):
+
+    * a hand-picked seed pixel -- lands on the wrong side of a two-ground
+      crop, or on a neighbouring fern, and keys against a colour that is not
+      the ground;
+    * the rim's median -- a scene crop's rim is routinely pale clearing grass
+      on one side and dark canopy on the other, and the median lands between
+      them, matching neither, so the canopy half survives as a solid block;
+    * k-means tones off the rim -- the cluster MEANS sit up to 33 away from
+      the very ground pixels they came from, which is further than the stump
+      sits from the grass. There was no threshold that separated them.
+
+    This is pixel art, so the ground is not a colour and not three colours --
+    it is a palette of about twenty exact values, and every ground pixel is
+    one of them exactly. Measured against the palette the same crop reads 0-7
+    on ground and 22-33 on the stump, which is separable with room to spare.
+    A colour is only ground if it appears at least twice on the rim; a decal
+    overhanging an edge contributes its colours once or twice, not as a run.
+    """
+    ring = np.concatenate([
+        region[0, :], region[-1, :], region[:, 0], region[:, -1],
+    ]).reshape(-1, 3)
+    colours, counts = np.unique(ring, axis=0, return_counts=True)
+    pal = colours[counts >= min_count]
+    return pal if len(pal) else colours
+
+
 def keyed_alpha(region, ground, lo=45, hi=75):
     """Alpha-key a decal out of its panel against the local ground colour.
 
@@ -184,7 +215,8 @@ def keyed_alpha(region, ground, lo=45, hi=75):
     all. Soft edges survive, because the partial alpha is kept on exactly the
     pixels that border reachable background.
     """
-    d = np.linalg.norm(region - ground, axis=2)
+    tones = np.atleast_2d(np.asarray(ground, float))
+    d = np.min(np.linalg.norm(region[:, :, None, :] - tones[None, None, :, :], axis=3), axis=2)
     alpha = np.clip((d - lo) / (hi - lo), 0, 1)
     h, w = alpha.shape
     transparent = alpha < 0.5
@@ -300,7 +332,157 @@ DECALS = [
     ("log_1", 8, 48, 112, 48, 16, (48, 80)),
     ("blade_cold_1", 9, 20, 72, 12, 40, (24, 216)),
     ("blade_cold_2", 9, 98, 92, 12, 32, (24, 216)),
+
 ]
+
+
+
+# --- objects --------------------------------------------------------------
+# (name, panel, x, y, box x, box y, box w, box h) -- x,y is a point ON the
+# object, or None to let the cut pick the pixel furthest from the ground
+# palette; the box is the region searched, and its RIM must be clear ground.
+#
+# Everything above was hand-cropped, and hand-cropping is what produced the
+# bad ones: a crop tight enough to exclude the neighbouring bush also runs
+# through the decal's own edge, and a crop loose enough to hold the whole
+# decal drags the bush in with it. Both failures are visible on a
+# checkerboard -- half a log, or a log welded to a block of grass.
+#
+# So these are not cropped by hand at all. Point at the object, key a
+# GENEROUS box around it, keep only the blob the point lands in (plus blobs
+# within a few pixels of it, because a mushroom cluster is several blobs),
+# and let the tight crop fall out of that blob's bounding box. The
+# neighbouring bush is a different blob and is dropped without a coordinate
+# ever being tuned against it.
+OBJECTS = [
+    # Forest deadwood and fungus.
+    ("stump_oak_1", 5, 72, 40, 58, 28, 26, 22),
+    ("stump_oak_2", 5, 56, 280, 44, 266, 26, 26),
+    ("log_mossy_1", 5, 32, 71, 14, 60, 36, 24),
+    ("shroom_red_1", 5, 100, 70, 92, 60, 22, 22),
+    ("shroom_red_2", 5, 22, 118, 12, 108, 24, 22),
+    ("stump_cut_1", 8, 72, 87, 60, 76, 26, 24),
+    ("stump_cut_2", 8, 104, 262, 92, 250, 26, 26),
+    ("stump_ring_1", 8, 66, 174, 44, 156, 46, 38),
+    # No second log from panel 8. At 3x, x48..80 y224..240 reads as a fallen
+    # log with a lit end-grain circle; at 8x it is two dark bushes. Third time
+    # this sheet has done that (lava panel, palms, this) -- nothing goes in
+    # without a look at 8x.
+    ("shroom_orange_1", 10, 84, 43, 72, 28, 30, 22),
+    # Stone.
+    ("boulder_pale_1", 10, 44, 144, 26, 129, 40, 31),
+    # No rocks from panel 4. At 3x its "boulders" look like free-standing
+    # stones on dirt; at 8x they are bumps OUTLINED ON a cliff face, in the
+    # cliff's own colour, with no silhouette and nothing behind them. Same
+    # failure as the palms: the object is a drawn detail of a band, not a
+    # sprite. Three were cut and all three came back as background.
+    # No cobwebs. Panel 10 has three and they are the one thing here that the
+    # rim-palette key cannot cut: a web is drawn WIDE, so its own white
+    # reaches the rim of any box that contains it, the key adopts white as a
+    # ground colour and erases the web -- what survives is the green shadow
+    # the web was drawn over. Cutting one needs a rim that excludes the web,
+    # which no box around it has.
+    # Shore.
+    ("rock_sea_1", 12, 57, 234, 46, 220, 28, 28),
+    ("shell_1", 12, 104, 248, 94, 238, 22, 22),
+    # No sea grass. Its strokes are thin and widely spaced, so the cut comes
+    # back as 43 solid pixels of confetti -- at 20px on the map that is noise,
+    # not a plant.
+]
+
+
+def blobs_of(solid):
+    """Connected components of a bool mask, as (pixel list, bbox)."""
+    h, w = solid.shape
+    label = np.full((h, w), -1, int)
+    out = []
+    for sy in range(h):
+        for sx in range(w):
+            if not solid[sy, sx] or label[sy, sx] >= 0:
+                continue
+            idx = len(out)
+            stack, px = [(sy, sx)], []
+            label[sy, sx] = idx
+            while stack:
+                y, x = stack.pop()
+                px.append((y, x))
+                for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                    if 0 <= ny < h and 0 <= nx < w and solid[ny, nx] and label[ny, nx] < 0:
+                        label[ny, nx] = idx
+                        stack.append((ny, nx))
+            ys = [y for y, _ in px]
+            xs = [x for _, x in px]
+            out.append((px, (min(ys), min(xs), max(ys), max(xs))))
+    return out
+
+
+def cut_object(sheet, pi, px, py, x0, y0, bw, bh, near=4, pad=1, lo=9, hi=15):
+    """Cut one object out of a panel by pointing at it.
+
+    The key runs far tighter than the hand-cropped decals' (lo=9 vs 45)
+    because it keys against an exact palette rather than an averaged colour --
+    ground pixels measure ~0, not ~25, so the floor can sit just above the
+    art's own dithering. A tight key keeps stray ground speckle, but speckle
+    is not connected to the object and only the blob the point landed in is
+    kept. The component filter is what buys the tight key.
+    """
+    ox, oy = panel_origin(pi)
+    region = sheet[oy + y0:oy + y0 + bh, ox + x0:ox + x0 + bw]
+    pal = border_palette(region)
+    alpha = keyed_alpha(region, pal, lo=lo, hi=hi)
+    if px is None:
+        # Sparse objects -- a grass tuft is a handful of strokes with ground
+        # showing between them -- have no reliable pixel to point at by eye.
+        # The furthest pixel from the ground palette is on the object by
+        # construction.
+        far = np.min(np.linalg.norm(region[:, :, None, :] - pal[None, None, :, :], axis=3), axis=2)
+        iy, ix = np.unravel_index(int(np.argmax(far)), far.shape)
+        px, py = x0 + int(ix), y0 + int(iy)
+    parts = blobs_of(alpha > 0.5)
+    hit = [b for b in parts if any((y, x) == (py - y0, px - x0) for y, x in b[0])]
+    if not hit:
+        pal = border_palette(region)
+        d = np.min(np.linalg.norm(region[py - y0, px - x0][None, :] - pal, axis=1))
+        raise SystemExit(
+            f"ERROR: ({px},{py}) in panel {pi} keyed out as background: the pixel there is "
+            f"{d:.0f} from the nearest ground colour, under the lo={lo} floor. "
+            f"Either the point is on ground, or the crop box is dragging the object's own "
+            f"colours onto the rim."
+        )
+    keep = list(hit)
+    changed = True
+    while changed:  # pull in nearby blobs: a mushroom cluster is several
+        changed = False
+        for b in parts:
+            if b in keep:
+                continue
+            for k in keep:
+                t0, l0, b0, r0 = b[1]
+                t1, l1, b1, r1 = k[1]
+                if t0 <= b1 + near and t1 <= b0 + near and l0 <= r1 + near and l1 <= r0 + near:
+                    keep.append(b)
+                    changed = True
+                    break
+    mask = np.zeros(alpha.shape, bool)
+    for b in keep:
+        for y, x in b[0]:
+            mask[y, x] = True
+    ys, xs = np.nonzero(mask)
+    t, l = max(int(ys.min()) - pad, 0), max(int(xs.min()) - pad, 0)
+    bo, r = min(int(ys.max()) + pad + 1, bh), min(int(xs.max()) + pad + 1, bw)
+    # Soft edges live just outside the solid mask, so keep alpha there rather
+    # than hard-clipping to the mask -- but only inside the kept bbox, which
+    # is what excludes the neighbour.
+    cut = alpha[t:bo, l:r].copy()
+    keepbox = np.zeros(alpha.shape, bool)
+    keepbox[t:bo, l:r] = True
+    for b in parts:
+        if b in keep:
+            continue
+        for y, x in b[0]:
+            if keepbox[y, x]:
+                cut[y - t, x - l] = 0.0
+    return region[t:bo, l:r], cut
 
 
 def main():
@@ -333,14 +515,25 @@ def main():
             if emitted[a].shape == emitted[b].shape and np.abs(emitted[a].astype(int) - emitted[b].astype(int)).mean() < 1.0:
                 raise SystemExit(f"ERROR: ground/{a}.png and ground/{b}.png are the same texture — reseed one of them")
 
-    for name, pi, cx, cy, w, h, (gx, gy) in DECALS:
+    for name, pi, cx, cy, w, h, seed in DECALS:
         x0, y0 = panel_origin(pi)
         region = sheet[y0 + cy:y0 + cy + h, x0 + cx:x0 + cx + w]
-        ground = np.median(sheet[y0 + gy - 3:y0 + gy + 3, x0 + gx - 3:x0 + gx + 3].reshape(-1, 3), axis=0)
+        if seed is None:
+            ground = border_ground(region)
+        else:
+            gx, gy = seed
+            ground = np.median(sheet[y0 + gy - 3:y0 + gy + 3, x0 + gx - 3:x0 + gx + 3].reshape(-1, 3), axis=0)
         alpha = keyed_alpha(region, ground)
         rgba = np.dstack([region, alpha * 255]).astype(np.uint8)
         Image.fromarray(rgba, "RGBA").save(os.path.join(TILES, "decal", f"{name}.png"))
         print(f"decal/{name}.png  {w}x{h}  {int((alpha > 0.5).sum())} solid px")
+
+    for name, pi, px, py, bx, by, bw, bh in OBJECTS:
+        region, alpha = cut_object(sheet, pi, px, py, bx, by, bw, bh)
+        rgba = np.dstack([region, alpha * 255]).astype(np.uint8)
+        Image.fromarray(rgba, "RGBA").save(os.path.join(TILES, "decal", f"{name}.png"))
+        h, w = alpha.shape
+        print(f"decal/{name}.png  {w}x{h}  {int((alpha > 0.5).sum())} solid px  (object cut)")
 
 
 if __name__ == "__main__":

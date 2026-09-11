@@ -11112,3 +11112,50 @@ Direct ask: *"Let's max the speed at x9 not x32."*
       `setSpeed` has to be a member.
 - [x] Fixed a stale "32x" example in index.html's own comment about the
       battle-step speed readout.
+
+## Biome ripping pass 1: deadwood, stone and fungus
+
+Direct ask: *"Do you have more biome ripping work?"* -> *"I meant more like more
+ripping from the biomes."* -> options, answer *"Yep 1 then 2"*. Pass 1 was the
+rock/stump/log/deadwood pass across panels 4, 5, 8, 10, 12.
+
+**12 new decals**, taking the pool from 20 to 32. All 12 verified on a
+checkerboard before wiring, and all 12 seen drawing in a live frame.
+
+- [x] `stump_oak_1/2`, `stump_cut_1/2`, `stump_ring_1` (5 stumps, panels 5+8)
+- [x] `log_mossy_1` (panel 5)
+- [x] `shroom_red_1/2` (panel 5), `shroom_orange_1` (panel 10) -- these are
+      **top-down**, unlike panel 3's perspective mushrooms that had to be
+      dropped
+- [x] `boulder_pale_1` (panel 10), `rock_sea_1`, `shell_1` (panel 12)
+
+### New technique: point-and-cut instead of hand-cropping
+
+Written up in ART_PIPELINE.md 4e. Short version: key against the ground's exact
+**palette** (~20 colours read off the crop's rim) rather than an averaged
+colour, which separates ground from object by 0-7 vs 22-33 instead of not at
+all; that buys a `lo=9` floor; then keep only the connected blob the point
+landed in and let the crop fall out of its bounding box. No coordinate is ever
+tuned against a neighbour.
+
+### Dropped, with reasons
+
+- **Panel 4's rocks (3).** At 3x they read as free-standing boulders on dirt; at
+  8x they are bumps *outlined on a cliff face* in the cliff's own colour. All
+  three cut to background, correctly. Third time this sheet has done the
+  3x-vs-8x thing (lava panel, palms, now these).
+- **A second panel-8 log.** Same mistake: at 3x a fallen log with a lit
+  end-grain circle, at 8x two dark bushes.
+- **Panel 10's cobwebs (3).** The one thing the palette key cannot cut: a web is
+  drawn wide, so its own white reaches the rim of every box that contains it,
+  the key adopts white as a ground colour and erases the web. What survives is
+  the green shadow it was drawn over.
+- **Panel 12's sea grass.** Thin, widely-spaced strokes; the cut is 43 solid
+  pixels of confetti, which at 20px is noise, not a plant.
+
+### Regression caught in the live check
+
+`shell_1` first went into the fine scatter pool and drew **338 times in one
+frame** on a map that is 83% beach -- a third as dense as the grass tufts, so
+the beach read as a shell beach. Moved to the sparse feature pool: 338 -> 76,
+in line with `boulder_1` (84) and `rock_sea_1` (68).

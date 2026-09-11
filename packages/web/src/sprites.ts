@@ -267,9 +267,9 @@ const GROUND_DEFAULT = "cave";
  */
 const BIOME_SCATTER: Record<string, readonly string[]> = {
   grassland: ["bloom_1", "bloom_2", "flower_red_1", "tuft_green_1"],
-  forest: ["fern_1", "bloom_1", "flower_red_1", "moss_1"],
-  jungle: ["fern_1", "reed_1", "tuft_green_1", "moss_1"],
-  wetland: ["reed_1", "lily_1", "moss_1", "tuft_green_1"],
+  forest: ["fern_1", "bloom_1", "flower_red_1", "moss_1", "shroom_red_1", "shroom_red_2", "shroom_orange_1"],
+  jungle: ["fern_1", "reed_1", "tuft_green_1", "moss_1", "shroom_red_2", "shroom_orange_1"],
+  wetland: ["reed_1", "lily_1", "moss_1", "tuft_green_1", "shroom_red_1"],
   mangrove: ["reed_1", "lily_1", "lily_2", "moss_1"],
   badlands: ["tuft_dry_1", "tuft_dry_2", "succulent_1"],
   desert: ["tuft_dry_1", "tuft_dry_3", "succulent_1"],
@@ -291,18 +291,21 @@ const BIOME_SCATTER: Record<string, readonly string[]> = {
  * rest of this pass exists to show.
  */
 const BIOME_FEATURES: Record<string, readonly string[]> = {
-  grassland: ["boulder_1", "log_1"],
-  forest: ["log_1", "boulder_1"],
-  jungle: ["log_1", "boulder_1"],
-  wetland: ["cattail_1", "log_1"],
-  mangrove: ["cattail_1", "log_1"],
-  badlands: ["cactus_1", "boulder_1"],
-  desert: ["cactus_1", "cactus_2", "boulder_1"],
-  beach: ["log_1", "boulder_1"],
-  savanna: ["cactus_1", "boulder_1", "log_1"],
-  highland: ["boulder_1"],
-  tundra: ["boulder_1", "log_1"],
-  snow: ["boulder_1", "log_1"],
+  grassland: ["boulder_1", "boulder_pale_1", "log_1", "stump_oak_1", "stump_cut_1"],
+  forest: ["log_1", "log_mossy_1", "boulder_1", "boulder_pale_1", "stump_ring_1", "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2"],
+  jungle: ["log_1", "log_mossy_1", "boulder_1", "stump_oak_2", "stump_cut_2"],
+  wetland: ["cattail_1", "log_1", "log_mossy_1", "stump_oak_2"],
+  mangrove: ["cattail_1", "log_1", "log_mossy_1"],
+  badlands: ["cactus_1", "boulder_1", "rock_sea_1"],
+  desert: ["cactus_1", "cactus_2", "boulder_1", "rock_sea_1"],
+  // `shell_1` is a FEATURE, not ground detail. In the fine layer it drew 338
+  // times in one frame on a map that is 83% beach — a third as dense as the
+  // grass tufts, which reads as a shell beach, not a shell.
+  beach: ["log_1", "boulder_1", "rock_sea_1", "shell_1"],
+  savanna: ["cactus_1", "boulder_1", "log_1", "stump_oak_1"],
+  highland: ["boulder_1", "boulder_pale_1", "rock_sea_1"],
+  tundra: ["boulder_1", "boulder_pale_1", "log_1", "stump_cut_1"],
+  snow: ["boulder_1", "boulder_pale_1", "log_1", "stump_cut_2"],
 };
 
 const SCATTER_DEFAULT: readonly string[] = ["moss_1", "tuft_green_1"];
@@ -320,7 +323,14 @@ const FEATURE_DEFAULT: readonly string[] = ["boulder_1"];
  * Lily pads float, blossoms lie in the grass, moss and tufts ARE the ground;
  * ferns, reeds, cattails, cacti, boulders and logs are objects on it.
  */
-const STANDING_DECALS = new Set(["fern_1", "reed_1", "cattail_1", "cactus_1", "cactus_2", "boulder_1", "log_1", "succulent_1"]);
+const STANDING_DECALS = new Set([
+  "fern_1", "reed_1", "cattail_1", "cactus_1", "cactus_2", "boulder_1", "log_1", "succulent_1",
+  // Everything cut by `cut_object` in the rip script is, by construction, a
+  // thing the artist drew standing on the ground rather than painted into it.
+  "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2", "stump_ring_1",
+  "log_mossy_1", "boulder_pale_1", "rock_sea_1", "shell_1",
+  "shroom_red_1", "shroom_red_2", "shroom_orange_1",
+]);
 
 /** Which ground patch a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (grassland vs. forest) apart from a real texture change without duplicating this lookup. */
 export function getFloorBaseName(biome?: string): string {
