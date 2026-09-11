@@ -551,14 +551,14 @@ function groundLayerCanvas(world: World): HTMLCanvasElement {
   return canvas;
 }
 
-type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number) => ScatterDecal | null;
+type DecalPicker = (x: number, y: number, biome: string | undefined, oneIn: number, layer?: string) => ScatterDecal | null;
 
 /** One scatter pass over the whole grid — see `drawGroundLayer` for why decals need a pass of their own, and `BIOME_FEATURES` (sprites.ts) for why there are two. */
 function drawScatterPass(ctx: CanvasRenderingContext2D, world: World, pick: DecalPicker, oneIn: number, alpha: number): void {
   const view = culledBounds(world);
   for (let y = view.y0; y < view.y1; y++) {
     for (let x = view.x0; x < view.x1; x++) {
-      const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn);
+      const decal = pick(x, y, dominantBiomeAt(world, x, y), oneIn, activeViewLayer);
       if (!decal) continue;
       const scale = TILE_SIZE / GROUND_CELL;
       const w = decal.image.width * scale;

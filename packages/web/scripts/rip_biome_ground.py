@@ -250,6 +250,10 @@ def keyed_alpha(region, ground, lo=45, hi=75):
     return drop_edge_fragments(alpha)
 
 
+SPECK = 0.04
+SPECK_MAX = 10  # thin slatted art (a wooden fence) fragments into small real parts
+
+
 def drop_edge_fragments(alpha, share=0.2):
     """Erase small opaque blobs that touch the edge of the crop.
 
@@ -287,7 +291,15 @@ def drop_edge_fragments(alpha, share=0.2):
     biggest = max(len(px) for px, _ in blobs)
     out = alpha.copy()
     for pixels, touches in blobs:
-        if touches and len(pixels) < biggest * share:
+        # Border slivers of the neighbour, at any size up to `share`; and
+        # specks anywhere. A speck is invisible when a boulder is cut out of
+        # grass and lands on grass, and obvious the moment the same boulder is
+        # scattered in a cave -- the cave screenshot had green moss dots on
+        # every rock. Nothing in this sheet's decals has a real part under 4%
+        # of its largest (a two-cap mushroom cluster is ~40/60) -- but a
+        # wooden fence's slats DO come apart into small real pieces, so a
+        # speck also has to be small in absolute terms, not just relatively.
+        if (touches and len(pixels) < biggest * share) or (len(pixels) < biggest * SPECK and len(pixels) <= SPECK_MAX):
             for y, x in pixels:
                 out[y, x] = 0.0
     return out
@@ -327,7 +339,8 @@ DECALS = [
     # "that tree is weirdly cut in half tho". Six different crops were tried;
     # the art simply is not there, and jungle/beach already have real tree
     # obstacles (tree_1..7) for density.
-    ("boulder_1", 10, 24, 128, 32, 32, (88, 120)),
+    # `boulder_1` moved to OBJECTS -- it and the pass-2 cut were the SAME rock
+    # cropped twice, and the hand-crop kept a corner of the bush beside it.
     ("cattail_1", 0, 96, 64, 16, 48, (70, 90)),
     ("log_1", 8, 48, 112, 48, 16, (48, 80)),
     ("blade_cold_1", 9, 20, 72, 12, 40, (24, 216)),
@@ -370,7 +383,7 @@ OBJECTS = [
     # without a look at 8x.
     ("shroom_orange_1", 10, 84, 43, 72, 28, 30, 22),
     # Stone.
-    ("boulder_pale_1", 10, 44, 144, 26, 129, 40, 31),
+    ("boulder_1", 10, 44, 144, 30, 130, 36, 29),
     # No rocks from panel 4. At 3x its "boulders" look like free-standing
     # stones on dirt; at 8x they are bumps OUTLINED ON a cliff face, in the
     # cliff's own colour, with no silhouette and nothing behind them. Same
@@ -382,6 +395,18 @@ OBJECTS = [
     # ground colour and erases the web -- what survives is the green shadow
     # the web was drawn over. Cutting one needs a rim that excludes the web,
     # which no box around it has.
+    # Cave. The underground had no decals at all before this.
+    ("bones_1", 7, None, None, 72, 2, 30, 44),
+    ("bones_2", 7, None, None, 38, 34, 32, 36),
+    ("bones_3", 7, None, None, 58, 168, 30, 34),
+    ("bones_4", 7, None, None, 74, 294, 30, 26),
+    # Badlands. Not scenery -- worked junk, so the quarry reads as a place
+    # somebody dug rather than a colour of dirt.
+    ("barrel_1", 1, None, None, 8, 44, 30, 42),
+    ("barrel_2", 1, None, None, 8, 220, 30, 42),
+    ("barrel_3", 1, None, None, 88, 252, 34, 42),
+    ("sign_danger_1", 1, None, None, 74, 76, 46, 30),
+    ("fence_wood_1", 1, None, None, 42, 170, 44, 44),
     # Shore.
     ("rock_sea_1", 12, 57, 234, 46, 220, 28, 28),
     ("shell_1", 12, 104, 248, 94, 238, 22, 22),
@@ -430,15 +455,18 @@ def cut_object(sheet, pi, px, py, x0, y0, bw, bh, near=4, pad=1, lo=9, hi=15):
     region = sheet[oy + y0:oy + y0 + bh, ox + x0:ox + x0 + bw]
     pal = border_palette(region)
     alpha = keyed_alpha(region, pal, lo=lo, hi=hi)
-    if px is None:
-        # Sparse objects -- a grass tuft is a handful of strokes with ground
-        # showing between them -- have no reliable pixel to point at by eye.
-        # The furthest pixel from the ground palette is on the object by
-        # construction.
-        far = np.min(np.linalg.norm(region[:, :, None, :] - pal[None, None, :, :], axis=3), axis=2)
-        iy, ix = np.unravel_index(int(np.argmax(far)), far.shape)
-        px, py = x0 + int(ix), y0 + int(iy)
     parts = blobs_of(alpha > 0.5)
+    if px is None:
+        # Sparse objects -- a grass tuft is strokes with ground showing
+        # between them, a fence is slats -- have no reliable pixel to point at
+        # by eye. Take the LARGEST surviving blob: picking the pixel furthest
+        # from the ground palette instead landed on a fence slat that the
+        # speck filter had already erased, and the cut then failed claiming
+        # the point was background.
+        if not parts:
+            raise SystemExit(f"ERROR: box ({x0},{y0}) in panel {pi} keyed out entirely as background")
+        py, px = max(parts, key=lambda b: len(b[0]))[0][0]
+        px, py = x0 + px, y0 + py
     hit = [b for b in parts if any((y, x) == (py - y0, px - x0) for y, x in b[0])]
     if not hit:
         pal = border_palette(region)

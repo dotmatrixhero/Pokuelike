@@ -11159,3 +11159,58 @@ tuned against a neighbour.
 frame** on a map that is 83% beach -- a third as dense as the grass tufts, so
 the beach read as a shell beach. Moved to the sparse feature pool: 338 -> 76,
 in line with `boulder_1` (84) and `rock_sea_1` (68).
+
+## Biome ripping pass 2: cave and badlands
+
+**9 new decals**, and the first content the underground has ever had.
+
+- [x] `bones_1..4` (panel 7) -- bone/claw spurs on the cave floor
+- [x] `barrel_1..3`, `sign_danger_1`, `fence_wood_1` (panel 1) -- worked junk for
+      the badlands quarry, so it reads as somewhere somebody dug
+- [x] Verified live: cave (forced view layer, temporary, reverted) draws only
+      bones and rock and zero grass; badlands found by clicking Random until a
+      badlands-dominant map came up (seed 8 of 25, 545/600 sampled tiles) and
+      the DANGER sign, barrels and fence all drew.
+
+### Bug this fixed: the cave was scattering the SURFACE's decals
+
+`getScatterDecal`/`getFeatureDecal` took a biome but not a layer, and the cave
+shares the surface's coordinates -- so a cave under a beach zone scattered dry
+grass tufts. Same bug `getGroundPatch` already fixed for the floor itself; both
+pickers now take `layer` and use cave pools underground.
+
+### Two density findings, both from the live count
+
+| | first try | fixed |
+|---|---|---|
+| `shell_1` (pass 1, beach) | 338/frame in the fine scatter pool | 76 in the feature pool |
+| `bones_*` (cave) | ~2,270/frame in the fine scatter pool | ~180 total in the feature pool |
+
+The cave now has NO fine scatter layer at all. Ground-cover density turns a
+find into a boneyard.
+
+### `boulder_1` and `boulder_pale_1` were the same rock
+
+Cut twice, once by hand and once by point-and-cut. The hand-crop kept a corner
+of the bush beside it -- invisible when a boulder sits on grass, obvious the
+moment the same boulder is scattered in a cave, where the screenshot showed
+green moss dots on every rock. `boulder_1` is now the object cut and
+`boulder_pale_1` is gone.
+
+Also added a speck filter to every decal (drop blobs under 4% of the largest
+AND under 10px). Both bounds are needed: relative alone erases a wooden fence's
+slats, which are small but real.
+
+## Side note to revisit: gather should yield materials from the decal
+
+Direct ask, mid-pass: *"I'm gonna have you keep in mind where you put these
+decals because I want the gather button to allow you gather appropriate
+materials based on the decals"* -> *"So like make them proper tiles in the data
+that represent something data wise"*.
+
+Not built. Design options written up separately -- the short version is that
+decal placement today is a **pure function of (x, y, biome, layer)** in
+`pickDecal`, hashed and stateless, so any tile's decal is re-derivable without
+storing anything. That is either the cheapest possible hook for gather or the
+wrong foundation for it, depending on whether gathering has to CONSUME the
+decal.

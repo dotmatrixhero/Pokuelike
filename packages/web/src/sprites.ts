@@ -291,26 +291,42 @@ const BIOME_SCATTER: Record<string, readonly string[]> = {
  * rest of this pass exists to show.
  */
 const BIOME_FEATURES: Record<string, readonly string[]> = {
-  grassland: ["boulder_1", "boulder_pale_1", "log_1", "stump_oak_1", "stump_cut_1"],
-  forest: ["log_1", "log_mossy_1", "boulder_1", "boulder_pale_1", "stump_ring_1", "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2"],
+  grassland: ["boulder_1", "log_1", "stump_oak_1", "stump_cut_1"],
+  forest: ["log_1", "log_mossy_1", "boulder_1", "stump_ring_1", "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2"],
   jungle: ["log_1", "log_mossy_1", "boulder_1", "stump_oak_2", "stump_cut_2"],
   wetland: ["cattail_1", "log_1", "log_mossy_1", "stump_oak_2"],
   mangrove: ["cattail_1", "log_1", "log_mossy_1"],
-  badlands: ["cactus_1", "boulder_1", "rock_sea_1"],
+  // Worked junk, not scenery: a quarry should read as somewhere somebody dug.
+  badlands: ["cactus_1", "boulder_1", "rock_sea_1", "barrel_1", "barrel_2", "barrel_3", "sign_danger_1", "fence_wood_1"],
   desert: ["cactus_1", "cactus_2", "boulder_1", "rock_sea_1"],
   // `shell_1` is a FEATURE, not ground detail. In the fine layer it drew 338
   // times in one frame on a map that is 83% beach — a third as dense as the
   // grass tufts, which reads as a shell beach, not a shell.
   beach: ["log_1", "boulder_1", "rock_sea_1", "shell_1"],
   savanna: ["cactus_1", "boulder_1", "log_1", "stump_oak_1"],
-  highland: ["boulder_1", "boulder_pale_1", "rock_sea_1"],
-  tundra: ["boulder_1", "boulder_pale_1", "log_1", "stump_cut_1"],
-  snow: ["boulder_1", "boulder_pale_1", "log_1", "stump_cut_2"],
+  highland: ["boulder_1", "rock_sea_1"],
+  tundra: ["boulder_1", "log_1", "stump_cut_1"],
+  snow: ["boulder_1", "log_1", "stump_cut_2"],
 };
 
 const SCATTER_DEFAULT: readonly string[] = ["moss_1", "tuft_green_1"];
-/** Cave/underground features. */
 const FEATURE_DEFAULT: readonly string[] = ["boulder_1"];
+
+/**
+ * Underground pools. The cave is not a biome — it shares the surface's
+ * coordinates — so before this it scattered whatever the zone ABOVE it
+ * scattered, which under this scenario's map meant dry grass tufts in a cave.
+ * Same bug `getGroundPatch` already fixes for the floor itself.
+ *
+ * The cave gets NO fine scatter layer. Bones went there first and drew ~2,270
+ * times in one frame -- ground-cover density, which reads as a boneyard rather
+ * than as a find. They belong in the sparse feature pool, where each draws
+ * under a hundred times.
+ */
+const CAVE_SCATTER: readonly string[] = [];
+const CAVE_FEATURES: readonly string[] = [
+  "bones_1", "bones_2", "bones_3", "bones_4", "boulder_1", "rock_sea_1",
+];
 
 /**
  * Which decals STAND UP off the ground, and so cast a contact shadow.
@@ -328,8 +344,10 @@ const STANDING_DECALS = new Set([
   // Everything cut by `cut_object` in the rip script is, by construction, a
   // thing the artist drew standing on the ground rather than painted into it.
   "stump_oak_1", "stump_oak_2", "stump_cut_1", "stump_cut_2", "stump_ring_1",
-  "log_mossy_1", "boulder_pale_1", "rock_sea_1", "shell_1",
+  "log_mossy_1", "rock_sea_1", "shell_1",
   "shroom_red_1", "shroom_red_2", "shroom_orange_1",
+  "bones_1", "bones_2", "bones_3", "bones_4",
+  "barrel_1", "barrel_2", "barrel_3", "sign_danger_1", "fence_wood_1",
 ]);
 
 /** Which ground patch a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (grassland vs. forest) apart from a real texture change without duplicating this lookup. */
@@ -360,12 +378,14 @@ export function getGroundPatch(biome?: string, layer?: string): HTMLImageElement
  */
 export type ScatterDecal = { image: HTMLImageElement; jitterX: number; jitterY: number; standing: boolean };
 
-export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
+export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number, layer?: string): ScatterDecal | null {
+  if (layer && layer !== "surface") return pickDecal({}, CAVE_SCATTER, x, y, undefined, oneIn, 31337, 7919);
   return pickDecal(BIOME_SCATTER, SCATTER_DEFAULT, x, y, biome, oneIn, 31337, 7919);
 }
 
 /** The sparse landmark layer — see `BIOME_FEATURES`. Same placement rules as the fine scatter, different pool, different hash, much lower density. */
-export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
+export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number, layer?: string): ScatterDecal | null {
+  if (layer && layer !== "surface") return pickDecal({}, CAVE_FEATURES, x, y, undefined, oneIn, 15485863, 32452843);
   return pickDecal(BIOME_FEATURES, FEATURE_DEFAULT, x, y, biome, oneIn, 15485863, 32452843);
 }
 
