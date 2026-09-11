@@ -10790,3 +10790,39 @@ shit. It would be perfect."* Chose **1 and 3** off the menu.
 - [ ] Not built, still on the menu: contact shadows under objects scaled by sun
       height (layer 2), and real local lights from campfires/torches/lava
       (layer 4, the one with actual gameplay consequence).
+
+## Built: contact shadows and golden-hour highlights (lighting layer 2)
+
+Direct ask: *"We will need contact shadows... And highlights."*
+
+- [x] **Contact shadow** under every standing object and every upright agent — a
+      soft ellipse that puts a thing ON the ground instead of letting it float.
+      Centred and round, never cast off to one side, for the same measured
+      reason the day grade is not directional: the art has no side light.
+      Tightness and depth track the sun (`CONTACT_SHADOW_SUN = 0.26`), with an
+      ambient residue at midnight (`0.07`) since an object still occludes the
+      sky. A low sun spreads and softens the patch; a high one pulls it in.
+- [x] Corpses deliberately get none — the shadow is what says "this is
+      upright", so a body lying on the ground should not have one.
+- [x] **Golden-hour rim.** The day grade multiplies, which can only ever take
+      light AWAY: it warms the world by removing blue, so at dawn/dusk
+      everything went amber but nothing looked *lit*. The rim is the other
+      half — real light composited with `lighter`, masked to the sprite's own
+      pixels and weighted toward its top, which is exactly where the source art
+      already puts its baked highlight. It reinforces the art's light direction
+      instead of arguing with it.
+- [x] Rim variants are cached per (sprite, quantised golden bucket) —
+      `GOLDEN_BUCKETS = 6` — so this is a cached drawImage per sprite, not a
+      per-frame composite. Frame rate 9.0 paused vs 10.0 before the change and
+      8.2 on the original baseline: within noise.
+- [x] **Dropped `palm_1`.** Direct report: "that tree is weirdly cut in half
+      tho." Panel 12's palms are a CONTINUOUS canopy band, not separable tree
+      sprites — six different crops were tried and every one lands mid-frond
+      and reads as a mirrored half-tree. Same lesson as the perspective
+      mushrooms: the art is not there, so don't fake it. Jungle/beach already
+      have real tree obstacles for density.
+- [ ] `GOLDEN_RIM_MAX` (0.4) and the `DAY_GRADE` dawn/dusk keyframes are both
+      strong — at dusk the ground goes deep orange and canopies go gold. Reads
+      as golden hour, but they are plain dials if it is too much in motion.
+- [ ] Still on the menu: real local lights from campfires/torches/lava (layer
+      4), the one with actual gameplay consequence rather than mood.

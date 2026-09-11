@@ -289,7 +289,12 @@ DECALS = [
     # scatter layer's density.
     ("cactus_1", 6, 80, 48, 32, 48, (56, 40)),
     ("cactus_2", 6, 16, 0, 32, 64, (56, 40)),
-    ("palm_1", 12, 64, 272, 48, 48, (72, 40)),
+    # No palm here on purpose. Panel 12's palms are a CONTINUOUS canopy band,
+    # not separable tree sprites -- every crop of one lands in the middle of
+    # overlapping fronds and reads as a mirrored half-tree. Direct report:
+    # "that tree is weirdly cut in half tho". Six different crops were tried;
+    # the art simply is not there, and jungle/beach already have real tree
+    # obstacles (tree_1..7) for density.
     ("boulder_1", 10, 24, 128, 32, 32, (88, 120)),
     ("cattail_1", 0, 96, 64, 16, 48, (70, 90)),
     ("log_1", 8, 48, 112, 48, 16, (48, 80)),

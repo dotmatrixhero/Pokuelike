@@ -211,7 +211,122 @@ function drawGroundBacking(ctx: CanvasRenderingContext2D, world: World, x: numbe
 const STANDING_MAX_TILES = 1.7;
 function drawStandingSprite(ctx: CanvasRenderingContext2D, sprite: CanvasImageSource, srcW: number, srcH: number, x: number, y: number): void {
   const height = Math.min(TILE_SIZE * STANDING_MAX_TILES, (srcH / srcW) * TILE_SIZE);
+  drawContactShadow(ctx, (x + 0.5) * TILE_SIZE, (y + 1) * TILE_SIZE - TILE_SIZE * 0.12, TILE_SIZE);
   ctx.drawImage(sprite, x * TILE_SIZE, (y + 1) * TILE_SIZE - height, TILE_SIZE, height);
+  drawGoldenRim(ctx, sprite, srcW, srcH, x * TILE_SIZE, (y + 1) * TILE_SIZE - height, TILE_SIZE, height);
+}
+
+/**
+ * How high the sun is (0 at midnight, 1 at noon) and how golden the light is
+ * (0 when neutral or cold, 1 at the warmest minute of dawn/dusk). Set once per
+ * frame from the world clock and read by the shadow/highlight helpers, the
+ * same module-level-per-frame idiom `activeViewLayer` already uses — passing
+ * them down through every draw call would mean touching a dozen signatures for
+ * two numbers that are constant for the whole frame.
+ */
+let sunHeight = 1;
+let goldenAmount = 0;
+
+/** Shadow opacity with the sun overhead, and the residue left at midnight (ambient contact darkening never fully disappears — an object still occludes the sky). */
+const CONTACT_SHADOW_SUN = 0.26;
+const CONTACT_SHADOW_AMBIENT = 0.07;
+
+/**
+ * The soft dark ellipse that sits an object ON the ground instead of letting
+ * it float above it.
+ *
+ * Deliberately centred and round rather than cast off to one side: the source
+ * art is lit from straight above with no side light (measured: +37 to +43
+ * top-to-bottom, within a point left-to-right), so a shadow thrown sideways
+ * would contradict every sprite's own baked highlight. What varies with the
+ * clock is tightness and depth, not direction — crisp and dark under a high
+ * sun, wide and faint at dawn and dusk, down to a faint ambient smudge at
+ * midnight.
+ */
+let contactShadowCache: HTMLCanvasElement | undefined;
+function contactShadowStamp(): HTMLCanvasElement {
+  if (contactShadowCache) return contactShadowCache;
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const sctx = canvas.getContext("2d")!;
+  const grad = sctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(0,0,0,1)");
+  grad.addColorStop(0.45, "rgba(0,0,0,0.75)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  sctx.fillStyle = grad;
+  sctx.fillRect(0, 0, size, size);
+  contactShadowCache = canvas;
+  return canvas;
+}
+
+function drawContactShadow(ctx: CanvasRenderingContext2D, cx: number, cy: number, footprint: number): void {
+  const alpha = CONTACT_SHADOW_AMBIENT + CONTACT_SHADOW_SUN * sunHeight;
+  if (alpha <= 0.01) return;
+  // A low sun spreads and softens the contact patch; a high one pulls it in.
+  const spread = 1.3 - 0.35 * sunHeight;
+  const w = footprint * 0.9 * spread;
+  const h = w * 0.4;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(contactShadowStamp(), cx - w / 2, cy - h / 2, w, h);
+  ctx.restore();
+}
+
+/** How strongly golden-hour light rims an object at its warmest. */
+const GOLDEN_RIM_MAX = 0.4;
+/** Golden amount is quantised into this many buckets so the rim variants can be cached per sprite instead of rebuilt every draw. */
+const GOLDEN_BUCKETS = 6;
+
+/**
+ * A warm light on an object's upper half at dawn and dusk.
+ *
+ * The day grade (see `drawDayNightTint`) multiplies, which can only ever take
+ * light away — it warms the world by darkening blue, so at golden hour
+ * everything goes amber but nothing actually looks LIT. This adds the other
+ * half: real light, composited with `lighter`, masked to the sprite's own
+ * pixels and weighted toward its top, which is exactly where the source art
+ * already puts its baked highlight. It reinforces the art's light direction
+ * rather than arguing with it.
+ */
+const goldenRimCache = new Map<string, HTMLCanvasElement>();
+function goldenRimStamp(sprite: CanvasImageSource, key: string, srcW: number, srcH: number): HTMLCanvasElement {
+  const cached = goldenRimCache.get(key);
+  if (cached) return cached;
+  const canvas = document.createElement("canvas");
+  canvas.width = srcW;
+  canvas.height = srcH;
+  const rctx = canvas.getContext("2d")!;
+  rctx.drawImage(sprite, 0, 0, srcW, srcH);
+  rctx.globalCompositeOperation = "source-atop";
+  const grad = rctx.createLinearGradient(0, 0, 0, srcH);
+  grad.addColorStop(0, "rgba(255, 196, 132, 1)");
+  grad.addColorStop(0.55, "rgba(255, 150, 90, 0.25)");
+  grad.addColorStop(1, "rgba(255, 120, 70, 0)");
+  rctx.fillStyle = grad;
+  rctx.fillRect(0, 0, srcW, srcH);
+  goldenRimCache.set(key, canvas);
+  return canvas;
+}
+
+function drawGoldenRim(ctx: CanvasRenderingContext2D, sprite: CanvasImageSource, srcW: number, srcH: number, dx: number, dy: number, dw: number, dh: number): void {
+  const bucket = Math.round(goldenAmount * GOLDEN_BUCKETS) / GOLDEN_BUCKETS;
+  if (bucket <= 0) return;
+  const key = spriteCacheKey(sprite, srcW, srcH);
+  if (!key) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = bucket * GOLDEN_RIM_MAX;
+  ctx.drawImage(goldenRimStamp(sprite, key, srcW, srcH), dx, dy, dw, dh);
+  ctx.restore();
+}
+
+/** A stable cache key for a sprite source — its URL for an <img>, its size for a generated canvas (tinted obstacle variants, which are already cached by their own key upstream). */
+function spriteCacheKey(sprite: CanvasImageSource, srcW: number, srcH: number): string | null {
+  if (sprite instanceof HTMLImageElement) return sprite.src;
+  if (sprite instanceof HTMLCanvasElement) return `canvas:${srcW}x${srcH}:${(sprite as HTMLCanvasElement).dataset.rimKey ?? ""}`;
+  return null;
 }
 
 /** Draws tile `(x, y)`'s cell of a multi-tile ground patch, windowed in world space so neighbouring tiles are continuous. */
@@ -1118,6 +1233,11 @@ function drawWorldTiles(
   // after `drawDayNightTint` — see `drawCropIdentity`'s own doc comment.
   const cropIdentityTiles: { x: number; y: number; tile: Tile }[] = [];
 
+  // Set once per frame, read by drawContactShadow/drawGoldenRim.
+  sunHeight = activeViewLayer === "surface" ? lightLevel(world.tick) : 0;
+  const tint = activeViewLayer === "surface" ? dayTint(world.tick) : ([255, 255, 255] as Rgb);
+  goldenAmount = Math.max(0, Math.min(1, (tint[0] - tint[2]) / 120));
+
   ctx.fillStyle = rgbToCss(TERRAIN_BG.floor);
   ctx.fillRect(0, 0, world.width * TILE_SIZE, world.height * TILE_SIZE);
   drawGroundLayer(ctx, world);
@@ -1660,7 +1780,11 @@ function drawAgent(ctx: CanvasRenderingContext2D, agent: Agent, isSelected: bool
     const h = TILE_SIZE * SPRITE_SCALE;
     const dx = px + TILE_SIZE / 2 - w / 2 + jitterX;
     const dy = py + TILE_SIZE - h + jitterY;
+    // A corpse lies on the ground rather than standing on it, so it gets no
+    // contact shadow — the shadow is what says "this thing is upright".
+    if (!isCorpse) drawContactShadow(ctx, px + TILE_SIZE / 2 + jitterX, py + TILE_SIZE - TILE_SIZE * 0.14 + jitterY, TILE_SIZE);
     ctx.drawImage(sprite, dx, dy, w, h);
+    drawGoldenRim(ctx, sprite, sprite.width, sprite.height, dx, dy, w, h);
   } else {
     const primaryType = agent.types?.[0];
     const fill = isCorpse ? [90, 90, 90] : primaryType ? TYPE_COLOR[primaryType] : ([200, 200, 200] as const);
