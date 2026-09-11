@@ -1,3 +1,5 @@
+import { DECALS, decalJitter, type DecalId, type DecalSlot } from "@pokuelike/engine";
+
 /**
  * Sprite loading with a graceful fallback. Directional overworld sprites
  * (ripped from legacy-cpp/data/sprites/Sir_Henry's_32x32 and sprites.png —
@@ -121,15 +123,21 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
   tree: 7,
   boulder: 2,
   bush: 4,
-  wall: 2,
+  // No `wall`. Walls are not a tile sprite at all any more — renderer.ts's
+  // `drawWallMass` draws the whole mountain as one smoothed body with a
+  // world-space rock texture, because per-tile walls are a staircase of
+  // squares. The old art is gone with it: `wall_2.png` was a seamless 16x16
+  // pattern that read as wallpaper stamped identically on every tile, and
+  // `wall_1.png` was not a texture at all but a single 144x144 BOULDER
+  // sprite that was being diced into random 20x20 crops.
 };
 
 /**
  * A 1:1 source window for a surface texture that is much larger than a tile.
  *
- * `mud.png` is 128x128 and `wall_1.png` is 144x144, but both were being drawn
- * with `drawImage(img, dx, dy, TILE_SIZE, TILE_SIZE)` — the WHOLE image
- * squashed into 20x20. That resampled a 144px texture down to 20px, keeping
+ * `mud.png` is 128x128 and was being drawn with
+ * `drawImage(img, dx, dy, TILE_SIZE, TILE_SIZE)` — the WHOLE image
+ * squashed into 20x20. That resampled a 128px texture down to 20px, keeping
  * roughly 2% of its pixels, and did it every frame; it also made every tile of
  * that terrain identical, since they all showed the same squashed image.
  *
@@ -155,8 +163,16 @@ const TILE_VARIANT_COUNTS: Record<string, number> = {
  * rendered as a random 20x20 crop out of the middle of a tree — half a
  * canopy, or a bare length of trunk. Direct report: "The trees are kina
  * incorrectly cropped there."
+ *
+ * `wall` was ALSO wrong and stayed wrong when that was fixed, because the
+ * fix whitelisted it by name. `wall_1.png` was 144x144 and not a texture —
+ * it was one boulder sprite. Windowed, a mountain field became a patchwork of
+ * arbitrary 20x20 squares out of it: dark rim crops beside pale centre crops
+ * beside the sprite's own transparent corners, hard-edged, every tile
+ * different. Direct report: "Still got some ugly square splotches there."
+ * Walls left this mechanism entirely — see renderer.ts's `drawWallMass`.
  */
-const TILING_SURFACE_TERRAIN = new Set(["mud", "wall"]);
+const TILING_SURFACE_TERRAIN = new Set(["mud"]);
 
 export function tileWindow(img: HTMLImageElement, terrainKind: string, x: number, y: number, tileSize: number): { sx: number; sy: number } | null {
   if (!TILING_SURFACE_TERRAIN.has(terrainKind)) return null;
@@ -243,7 +259,12 @@ const BIOME_GROUND: Record<string, string> = {
   beach: "shore",            // very pale cream
   desert: "sand",
   badlands: "clay",          // warm red-brown
-  savanna: "grass_dry",      // dry gold grass
+  // Was `grass_dry`, which is the PALE DRY GRASS beside panel 13's wheat
+  // field rather than the crop itself -- 16.5 from `field` in mean RGB and
+  // only 30.7 from `sand`, so savanna read as a slightly greener beach.
+  // `wheat` is the field interior, 57.8 away, and it is golden and banded
+  // with crop rows, which is what "dry plains" is supposed to look like.
+  savanna: "wheat",
   highland: "stone",         // warm grey rock
   tundra: "frost",           // cool grey, plus its own blue tint
   snow: "snow",
@@ -251,76 +272,6 @@ const BIOME_GROUND: Record<string, string> = {
 
 /** The default patch for a tile with no biome data (bare test worlds) and for the underground layer. */
 const GROUND_DEFAULT = "cave";
-
-/**
- * The off-grid scatter layer: which transparent decals
- * (public/tiles/decal/*.png) a biome scatters over its ground.
- *
- * This is the technique the source panels actually use to stop reading as a
- * grid — not base-tile variety (see `BIOME_GROUND` above for the measurement
- * that settled that). renderer.ts places these at hash-jittered sub-tile
- * offsets at their NATIVE size, so a 32x24 decal straddles two tiles and
- * lands wherever the hash puts it rather than snapping to a tile origin.
- * That is the whole difference from the old `getFloorOverlay` decals, which
- * were masked to exactly one tile and drawn at the tile origin — a perfect
- * lattice of rounded squares, visible in a before-shot as a checkerboard.
- */
-const BIOME_SCATTER: Record<string, readonly string[]> = {
-  grassland: ["bloom_1", "bloom_2", "flower_red_1", "tuft_green_1"],
-  forest: ["fern_1", "bloom_1", "flower_red_1", "moss_1"],
-  jungle: ["fern_1", "reed_1", "tuft_green_1", "moss_1"],
-  wetland: ["reed_1", "lily_1", "moss_1", "tuft_green_1"],
-  mangrove: ["reed_1", "lily_1", "lily_2", "moss_1"],
-  badlands: ["tuft_dry_1", "tuft_dry_2", "succulent_1"],
-  desert: ["tuft_dry_1", "tuft_dry_3", "succulent_1"],
-  beach: ["tuft_dry_2", "tuft_dry_3"],
-  savanna: ["tuft_dry_1", "tuft_dry_2", "tuft_dry_3", "succulent_1"],
-  highland: ["moss_1", "tuft_dry_1", "tuft_green_1"],
-  tundra: ["blade_cold_2", "moss_1", "tuft_dry_2"],
-  snow: ["blade_cold_1", "blade_cold_2"],
-};
-
-/**
- * The sparse FEATURE layer: landmark-sized art (a cactus cluster, a palm, a
- * boulder, a fallen log) scattered far more thinly than the ground detail
- * above.
- *
- * Separate from `BIOME_SCATTER` because size and density are coupled. These
- * are two to four tiles tall; at the fine layer's one-in-seven they would read
- * as a hedge rather than as a landmark, and they would bury the ground the
- * rest of this pass exists to show.
- */
-const BIOME_FEATURES: Record<string, readonly string[]> = {
-  grassland: ["boulder_1", "log_1"],
-  forest: ["log_1", "boulder_1"],
-  jungle: ["log_1", "boulder_1"],
-  wetland: ["cattail_1", "log_1"],
-  mangrove: ["cattail_1", "log_1"],
-  badlands: ["cactus_1", "boulder_1"],
-  desert: ["cactus_1", "cactus_2", "boulder_1"],
-  beach: ["log_1", "boulder_1"],
-  savanna: ["cactus_1", "boulder_1", "log_1"],
-  highland: ["boulder_1"],
-  tundra: ["boulder_1", "log_1"],
-  snow: ["boulder_1", "log_1"],
-};
-
-const SCATTER_DEFAULT: readonly string[] = ["moss_1", "tuft_green_1"];
-/** Cave/underground features. */
-const FEATURE_DEFAULT: readonly string[] = ["boulder_1"];
-
-/**
- * Which decals STAND UP off the ground, and so cast a contact shadow.
- *
- * Not a size test and not a per-layer rule, because neither works: `moss_1`
- * and `fern_1` are both 32x32 and both live in the fine scatter pool, but one
- * is flat ground cover and the other is a waist-high plant. The first pass
- * gave the whole fine layer no shadow at all, which left ferns sitting flat
- * beside shadowed trees — direct report: "Ferns don't have much shadow."
- * Lily pads float, blossoms lie in the grass, moss and tufts ARE the ground;
- * ferns, reeds, cattails, cacti, boulders and logs are objects on it.
- */
-const STANDING_DECALS = new Set(["fern_1", "reed_1", "cattail_1", "cactus_1", "cactus_2", "boulder_1", "log_1", "succulent_1"]);
 
 /** Which ground patch a biome resolves to — exported so renderer.ts's edge-blend code can tell "same art, different biome name" (grassland vs. forest) apart from a real texture change without duplicating this lookup. */
 export function getFloorBaseName(biome?: string): string {
@@ -338,56 +289,37 @@ export function getFloorBaseName(biome?: string): string {
  * look calm. A cave floor is a cave floor whatever is above it.
  */
 export function getGroundPatch(biome?: string, layer?: string): HTMLImageElement | null {
-  const name = layer && layer !== "surface" ? GROUND_DEFAULT : getFloorBaseName(biome);
+  return getGroundPatchByName(layer && layer !== "surface" ? GROUND_DEFAULT : getFloorBaseName(biome));
+}
+
+/** The patch for a ground name straight off `BIOME_GROUND`'s values — renderer.ts's smooth biome cross-fade works in texture names, not biome names, because several biomes share one texture and blending a texture against itself is wasted work. */
+export function getGroundPatchByName(name: string): HTMLImageElement | null {
   return loadSprite(`ground_${name}`, `/tiles/ground/${name}.png`);
 }
 
+/** The ground name for the underground layer and for a world with no biome data. */
+export const GROUND_NAME_DEFAULT = GROUND_DEFAULT;
+/** The ground name a `sand` TERRAIN tile paints with, whatever biome it sits in. */
+export const GROUND_NAME_SAND = "shore";
+
 /**
- * The scatter decal for this tile, or null for the (large) majority of tiles
- * that get none. Returns the image plus the sub-tile offset it should be
- * drawn at, both derived from the same tile hash so a given tile's decal is
- * stable across frames and across zoom changes.
+ * The image for a decal the engine placed on a tile.
+ *
+ * The pools, the placement hash and the per-decal facts (what it yields,
+ * whether it regrows, whether it stands up) all moved into
+ * `@pokuelike/engine`'s decals.ts, because a decal stopped being a render
+ * flourish and became tile data you can gather off. What is left here is the
+ * only part that is genuinely presentation: turning an id into a PNG.
  */
 export type ScatterDecal = { image: HTMLImageElement; jitterX: number; jitterY: number; standing: boolean };
 
-export function getScatterDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
-  return pickDecal(BIOME_SCATTER, SCATTER_DEFAULT, x, y, biome, oneIn, 31337, 7919);
-}
-
-/** The sparse landmark layer — see `BIOME_FEATURES`. Same placement rules as the fine scatter, different pool, different hash, much lower density. */
-export function getFeatureDecal(x: number, y: number, biome: string | undefined, oneIn: number): ScatterDecal | null {
-  return pickDecal(BIOME_FEATURES, FEATURE_DEFAULT, x, y, biome, oneIn, 15485863, 32452843);
-}
-
-function pickDecal(
-  pools: Record<string, readonly string[]>,
-  fallback: readonly string[],
-  x: number,
-  y: number,
-  biome: string | undefined,
-  oneIn: number,
-  saltX: number,
-  saltY: number
-): ScatterDecal | null {
-  const pool = (biome ? pools[biome] : undefined) ?? fallback;
-  if (pool.length === 0) return null;
-  // Offset so "which tiles get a decal" doesn't correlate with anything else
-  // keyed off (x, y) — same reason getFloorOverlay offset its own hash.
-  const h = hashTile(x + saltX, y + saltY);
-  if (h % oneIn !== 0) return null;
-  const name = pool[Math.floor(h / oneIn) % pool.length]!;
-  const image = loadSprite(`decal_${name}`, `/tiles/decal/${name}.png`);
+export function decalArt(id: DecalId, x: number, y: number, slot: DecalSlot): ScatterDecal | null {
+  const image = loadSprite(`decal_${id}`, `/tiles/decal/${id}.png`);
   if (!image) return null;
-  // A second, independent hash for placement, so two tiles that rolled the
-  // same decal don't also land at the same offset within their tile.
-  const j = hashTile(x + saltX + 104729, y + saltY + 1299709);
-  return {
-    image,
-    jitterX: ((j % 16) / 16) - 0.5,
-    jitterY: ((Math.floor(j / 16) % 16) / 16) - 0.5,
-    standing: STANDING_DECALS.has(name),
-  };
+  const jitter = decalJitter(x, y, slot);
+  return { image, jitterX: jitter.x, jitterY: jitter.y, standing: DECALS[id].standing };
 }
+
 
 /**
  * The "fertile ground" patch drawn under food/flora/seedling tiles — direct

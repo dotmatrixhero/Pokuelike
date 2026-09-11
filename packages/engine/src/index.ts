@@ -60,3 +60,4 @@ export * from "./landmarks.js";
 export * from "./overworld.js";
 export * from "./utilityMoves.js";
 export * from "./climb.js";
+export * from "./decals.js";

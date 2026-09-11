@@ -11455,6 +11455,403 @@ Six asks from a real phone session.
 - [x] Verified live at 390px: **14/14** new checks, plus the earlier suites
       still green (radial 13/13, autosave 13/13, action log 6/6). Full suite
       engine 1629, data 475, web build clean.
+## Biome ripping pass 1: deadwood, stone and fungus
+
+Direct ask: *"Do you have more biome ripping work?"* -> *"I meant more like more
+ripping from the biomes."* -> options, answer *"Yep 1 then 2"*. Pass 1 was the
+rock/stump/log/deadwood pass across panels 4, 5, 8, 10, 12.
+
+**12 new decals**, taking the pool from 20 to 32. All 12 verified on a
+checkerboard before wiring, and all 12 seen drawing in a live frame.
+
+- [x] `stump_oak_1/2`, `stump_cut_1/2`, `stump_ring_1` (5 stumps, panels 5+8)
+- [x] `log_mossy_1` (panel 5)
+- [x] `shroom_red_1/2` (panel 5), `shroom_orange_1` (panel 10) -- these are
+      **top-down**, unlike panel 3's perspective mushrooms that had to be
+      dropped
+- [x] `boulder_pale_1` (panel 10), `rock_sea_1`, `shell_1` (panel 12)
+
+### New technique: point-and-cut instead of hand-cropping
+
+Written up in ART_PIPELINE.md 4e. Short version: key against the ground's exact
+**palette** (~20 colours read off the crop's rim) rather than an averaged
+colour, which separates ground from object by 0-7 vs 22-33 instead of not at
+all; that buys a `lo=9` floor; then keep only the connected blob the point
+landed in and let the crop fall out of its bounding box. No coordinate is ever
+tuned against a neighbour.
+
+### Dropped, with reasons
+
+- **Panel 4's rocks (3).** At 3x they read as free-standing boulders on dirt; at
+  8x they are bumps *outlined on a cliff face* in the cliff's own colour. All
+  three cut to background, correctly. Third time this sheet has done the
+  3x-vs-8x thing (lava panel, palms, now these).
+- **A second panel-8 log.** Same mistake: at 3x a fallen log with a lit
+  end-grain circle, at 8x two dark bushes.
+- **Panel 10's cobwebs (3).** The one thing the palette key cannot cut: a web is
+  drawn wide, so its own white reaches the rim of every box that contains it,
+  the key adopts white as a ground colour and erases the web. What survives is
+  the green shadow it was drawn over.
+- **Panel 12's sea grass.** Thin, widely-spaced strokes; the cut is 43 solid
+  pixels of confetti, which at 20px is noise, not a plant.
+
+### Regression caught in the live check
+
+`shell_1` first went into the fine scatter pool and drew **338 times in one
+frame** on a map that is 83% beach -- a third as dense as the grass tufts, so
+the beach read as a shell beach. Moved to the sparse feature pool: 338 -> 76,
+in line with `boulder_1` (84) and `rock_sea_1` (68).
+
+## Biome ripping pass 2: cave and badlands
+
+**9 new decals**, and the first content the underground has ever had.
+
+- [x] `bones_1..4` (panel 7) -- bone/claw spurs on the cave floor
+- [x] `barrel_1..3`, `sign_danger_1`, `fence_wood_1` (panel 1) -- worked junk for
+      the badlands quarry, so it reads as somewhere somebody dug
+- [x] Verified live: cave (forced view layer, temporary, reverted) draws only
+      bones and rock and zero grass; badlands found by clicking Random until a
+      badlands-dominant map came up (seed 8 of 25, 545/600 sampled tiles) and
+      the DANGER sign, barrels and fence all drew.
+
+### Bug this fixed: the cave was scattering the SURFACE's decals
+
+`getScatterDecal`/`getFeatureDecal` took a biome but not a layer, and the cave
+shares the surface's coordinates -- so a cave under a beach zone scattered dry
+grass tufts. Same bug `getGroundPatch` already fixed for the floor itself; both
+pickers now take `layer` and use cave pools underground.
+
+### Two density findings, both from the live count
+
+| | first try | fixed |
+|---|---|---|
+| `shell_1` (pass 1, beach) | 338/frame in the fine scatter pool | 76 in the feature pool |
+| `bones_*` (cave) | ~2,270/frame in the fine scatter pool | ~180 total in the feature pool |
+
+The cave now has NO fine scatter layer at all. Ground-cover density turns a
+find into a boneyard.
+
+### `boulder_1` and `boulder_pale_1` were the same rock
+
+Cut twice, once by hand and once by point-and-cut. The hand-crop kept a corner
+of the bush beside it -- invisible when a boulder sits on grass, obvious the
+moment the same boulder is scattered in a cave, where the screenshot showed
+green moss dots on every rock. `boulder_1` is now the object cut and
+`boulder_pale_1` is gone.
+
+Also added a speck filter to every decal (drop blobs under 4% of the largest
+AND under 10px). Both bounds are needed: relative alone erases a wooden fence's
+slats, which are small but real.
+
+## Side note to revisit: gather should yield materials from the decal
+
+Direct ask, mid-pass: *"I'm gonna have you keep in mind where you put these
+decals because I want the gather button to allow you gather appropriate
+materials based on the decals"* -> *"So like make them proper tiles in the data
+that represent something data wise"*.
+
+Not built. Design options written up separately -- the short version is that
+decal placement today is a **pure function of (x, y, biome, layer)** in
+`pickDecal`, hashed and stateless, so any tile's decal is re-derivable without
+storing anything. That is either the cheapest possible hook for gather or the
+wrong foundation for it, depending on whether gathering has to CONSUME the
+decal.
+
+## Decals became tile data, and gather reads them
+
+Direct ask: *"A then B together."* Built; design and evidence in
+`DECALS_AS_DATA.md`.
+
+The two options composed instead of stacking. B (decals as placed tile data)
+needs an oracle for "what naturally belongs on this tile" so a picked fern can
+grow back without anything storing what it was — and A's stateless hash IS that
+oracle. So the hash was not replaced, it was demoted from *being* the decal
+system to `naturalDecalAt`, which worldgen stamps from and regrowth restores
+from.
+
+- [x] `packages/engine/src/decals.ts` — `DecalId`, pools, placement hash, and
+      per-decal facts (`yields`, `regrows`, `footing`, `standing`)
+- [x] `Tile.scatterDecal` / `Tile.featureDecal`, `World.origin`
+- [x] `scatterDecals(world)` runs last in `generateWorld`
+- [x] `harvestableAt` yields them, `takeHarvest` consumes them,
+      `tickHarvestRegrowth` regrows only the ones whose spec says so
+- [x] Five new materials: `fiber`, `shroom`, `bone`, `shell`, `scrap`
+- [x] Renderer reads the tile instead of hashing
+
+### The defect this closed
+
+`harvestableAt` decided yields from invisible proximity heuristics — deadwood
+if a sunbeam was nearby, flint if a wall was within 1 — while the renderer drew
+an actual log on a specific tile and ignored it. You could stand on a drawn log
+and be told there was no deadwood, and stand on bare sand and be handed some.
+
+### Verified live, not just by test
+
+| Check | Result |
+|---|---|
+| Stand on a `stump_oak_1` tile, press Gather 12x | **Deadwood x3** in the pack, tile's decal **gone**, further gathers empty |
+| Stand on a `tuft_dry_1` tile, gather | pack UI reads **"Pack 3/33 · Fiber x3"** |
+| Ground decals on water | **0** |
+| Lilies on land | **0** |
+| Decals in the canopy | **0** |
+| Reachability over 40 seeds | every decal appears; rarest `fence_wood_1` at 9/40 |
+
+Plus 6 engine tests and the full suite (1,617 engine + 475 data) green.
+
+### Two bugs found on the way, both mine to report
+
+1. **The renderer's scatter pass never checked terrain.** It ran over every
+   tile in view, so decals drew on water, walls and trees — which is why lily
+   pads landed on dry ground and grass tufts floated out to sea. Fixed by the
+   `footing` gate (`tileTakesDecal`).
+2. **Decals were placed in the canopy** — 5-7 boulders and fallen logs in the
+   treetops per 60x60 zone. Invisible before only because nothing looked at the
+   canopy with the old hash.
+
+### One test I wrote wrong first
+
+The density test summed scatter and feature across ALL THREE layers and read
+199 vs 218, which looked like the two pools had been crossed. They had not: the
+cave has no fine scatter layer by design, so it contributes features and no
+scatter, and the sum hid a surface ratio that was exactly 6.9x — the 47/7 the
+constants ask for. Fixed to measure per layer, with the cave and canopy as
+their own explicit assertions.
+
+### Balance surfaced, not tuned
+
+Tiles yielding each material, mean over 5 seeds of 60x60, all layers:
+
+| fiber | bone | flint | herbs | deadwood | shroom | scrap | shell |
+|---|---|---|---|---|---|---|---|
+| 179 | 42 | 40 | 23 | 18 | 18 | 1 | 0 (37/40 over a wider sweep) |
+
+`fiber` is abundant on purpose — it is the fine scatter layer. `shroom` is in
+`FOOD_MATERIAL_IDS` at a neutral 1x nutrition, so forests and jungles now carry
+a food supply they did not have. Neither number has been touched.
+
+## The square splotches: three separate causes, all fixed
+
+Direct reports, in order: *"Still got some ugly square splotches there"* ->
+*"Oof yeah those are rough"* -> *"Splotches 😭"*.
+
+Three different bugs were drawing hard-edged tile rectangles. All three are the
+same underlying mistake -- resolving a field to one value per tile and filling
+a rectangle with it -- and the file had already solved it once, for elevation:
+*"Elevation is a smooth field, but shading it a tile at a time quantises it
+into flat rectangular plateaus."*
+
+### 1. Wall tiles stamped random crops of a boulder sprite
+
+`wall_1.png` is 144x144 and is not a texture: it is ONE boulder, lit on top,
+with transparent corners. `tileWindow` carved it into a 7x7 grid and picked a
+20x20 crop per tile by hash. A mountain field came out as a patchwork of
+arbitrary squares -- dark rim crops beside pale centre crops beside the
+sprite's own corners.
+
+Same class as the mis-cropped trees, and **it survived that fix because my fix
+whitelisted `"wall"` by name**. Walls now use the seamless 16x16 pattern whole.
+
+### 2. Ground textures picked one biome per tile
+
+`dominantBiomeAt` resolved the continuous biome-weight field to a single
+winner, so a grassland/mangrove border put a (122,104,93) brown tile hard
+against a (182,225,161) green one. The one-tile `drawBiomeEdgeBlend` gradient
+could not hide a jump that size, and only ever showed one of a corner tile's
+two boundaries.
+
+Replaced with `drawGroundTextures`: accumulate each texture's weight per tile,
+order by total, paint with an incremental alpha of `w_k / (w_0 + ... + w_k)`.
+That composites to exactly `w_k`, and the masks are rasterised one pixel per
+tile and bilinearly upscaled, so there is no tile structure in them at all.
+`drawGroundBacking`, `drawPatchCell`, `drawBiomeEdgeBlend`, `edgeBlendStamp`
+and `edgeGradientMask` are all gone.
+
+### 3. The soil and biome tints were per-tile `fillRect`s
+
+`drawGroundTypeTint` and `drawBiomeTint` each painted a flat rectangle of
+colour over one tile, so every soil and biome boundary drew its own square.
+Now one smooth wash per family (`drawTintFields`).
+
+**A bug I introduced and caught here:** painting each tint as its own pass at
+its own alpha means a boundary pixel picks up partial coverage from BOTH sides,
+so two 0.16 washes stacked to 0.32 and the fix drew a *dark* seam exactly where
+it had removed a hard one. Blending the colours into one layer first and
+applying a single alpha at the end fixes it.
+
+### 4. The ground patches had visible seams inside themselves
+
+Separate from the above, and only found by measuring: comparing the mean
+pixel-to-pixel difference ACROSS a 16px cell join against the same measure
+inside a cell, `frost` read 9.9 vs 1.8 and `field` 14.0 vs 2.9. `mosaic`'s
+claim that the joins were "seamless by construction" was simply false -- the
+source cells do not tile against themselves (`stone` is a single cell and still
+read 4.7 excess against its own copy).
+
+The flips were suspected first and **cleared by measurement**: removing them
+makes every ground worse, not better. A one-pixel feather at each join fixes
+it (frost 8.1 -> 3.0, grass_dry 5.2 -> 1.3, stone 3.3 -> -0.7) while leaving 14
+of every 16 pixels exactly as drawn. k=2 and k=3 were measured and are worse.
+
+### Performance: faster, not slower
+
+| | before | after |
+|---|---|---|
+| paused median frame | 20.4 ms (49 fps) | **17.2 ms (58 fps)** |
+| world load + first draw | 781 ms | **765 ms** |
+
+The ground layer build traded 5,400 per-tile `drawImage` calls plus up to 5,400
+edge-blend stamps for a handful of full-map pattern fills.
+
+### A measurement that misled me twice, recorded so it does not again
+
+I built a "hard seam" metric: adjacent bare-ground tiles whose mean colour
+differs by more than 45. It produced two false readings before it produced a
+true one.
+
+- First it reported the five worst seams at **exactly tx=64 every single run**.
+  Those were the viewport-culled columns the renderer never draws, read against
+  pure black backdrop.
+- Then, with that fixed, it reported the tint fix as a **regression** (4242
+  went 37 -> 46). It was not: the tint fix visibly removes the pale rectangles.
+  The metric counts a wide smooth gradient as a seam once the two ends exceed
+  its threshold, which is exactly what a correct fade looks like.
+
+Screenshots settled it both times. The metric is useful for finding candidates
+and useless as the arbiter.
+
+## Ground colours graded to the biome palette; the mountain is one mass
+
+Direct ask: *"I think ground colors do the most to make em feel unique. If we
+can tune them to reflect the color palette of the biome that would be plenty."*
+Then, on the first screenshot back: *"Oof the first shot in game is not good.
+Lots of hard squares."*
+
+### Reseeding could not have worked, and the data says so
+
+The ask started as "reseed `frost` and `cave`". That is not fixable by picking
+a different source cell:
+
+- Panel 11 (the only tundra panel) holds **no cold-steppe tone at all**. Every
+  clean cell on it is a pale near-neutral grey between rgb(182,183,186) and
+  rgb(231,239,239).
+- The quarry and cave panels are the **same mid warm brown** as each other.
+- A search over every clean tone on all fourteen panels for "far from highland,
+  far from snow" returned **the lava panel's RED** as the best tundra
+  candidate. That is the search saying the material is not in the source.
+
+**And it was worse than first reported.** `frost` and `stone` are 12.1 apart as
+ripped — but tundra also carries a blue `BIOME_TINT`, and that tint pulls it
+*toward* highland, not away. The two floors RENDERED **6.6 apart**. Measuring
+the file instead of the frame understated the bug by half.
+
+### What was done: grade the texture, keep the art
+
+New `GRADE` table in the rip script: per-channel scaling to a target mean, so
+the artist's texture keeps its proportional light/dark variation and only its
+colour moves. Luma held within ~10 of the rip's own on purpose — these are lit
+at runtime by elevation shading and the day grade, and a ground that changes
+brightness reads as a different time of day, not a different place.
+
+| rendered pair | before | after |
+|---|---|---|
+| highland <-> tundra | **6.6** | **34.5** |
+| badlands <-> underground | 14.5 | 48 |
+| jungle <-> mangrove | 22.4 | 36.4 |
+| closest pair on the whole map | 6.6 | **26.1** (forest <-> wetland) |
+
+`MIN_GROUND_SEPARATION = 22` now fails the rip if any two grounds would read as
+the same place. The old guard only caught byte-identical textures, which is why
+`frost`/`stone` passed it for months.
+
+The guard immediately caught `sand` <-> `grass_dry` at 20.4. `grass_dry` was
+savanna's old ground, is unused since savanna moved to `wheat`, and is gone
+along with the orphan `field.png` — closing the "field ground ripped but
+unused" note.
+
+### The hard squares were the mountain, and one terrain with no art
+
+- **Walls were drawn per tile.** Wall is grid terrain, so a massif's outline is
+  always a run of 90-degree steps, and on a highland-dominant zone (~77% wall)
+  that staircase is most of the frame. `drawWallMass` now draws the whole
+  mountain as ONE smoothed body — a threshold on a smoothed coverage field,
+  exactly as the water body already does it — filled from a world-space
+  window into a multi-tile quilted rock patch instead of the same 16x16
+  pattern stamped identically on every tile, which read as wallpaper. Graded
+  dark, per the standing ask that mountain look "almost blacked out... to show
+  impassable". `wall.png`, `wall_1.png` and `wall_2.png` are deleted.
+- **`sunbeam` had no art at all**, so it fell through to a flat `TERRAIN_BG`
+  fillRect: a fully-saturated dark-mustard square. Now a soft warm wash over
+  the real ground. Explicitly NOT a light source — an additive shimmering
+  sunbeam light was built once and removed on direct instruction ("let's remove
+  the sunbeam one, fire Pokémon one is awesome"), and this does not bring it
+  back.
+
+The ground layer cache key grew from `sandSignature` to `groundSignature`,
+covering walls too, since digging can remove one.
+
+### Perf
+
+| | before this round | after |
+|---|---|---|
+| paused median frame | 17.2 ms (58 fps) | 18.3 ms (55 fps) |
+| world load + first draw | 765 ms | 702 ms |
+
+### One change to something already approved
+
+The cave floor moved from rgb(152,130,113) warm brown to rgb(138,130,124)
+neutral grey-brown, to pull it off badlands clay. That floor had been approved
+directly ("Yes! Good cave floor"), so it is flagged rather than buried — say
+the word and `GRADE["cave"]` comes out and badlands moves instead.
+
+### Still open, not touched
+
+- A highland-dominant zone is ~77% wall: 783 walkable tiles of 5,400.
+- Pale rectangles still appear where `sand` terrain meets water: the sand
+  coverage field is 0/1 per tile and only the bilinear upscale softens it.
+- ~~Fog of war still has hard tile edges.~~ Done, see below.
+
+## Fog of war is soft now
+
+Direct ask: *"Fog of war softness would be nice."*
+
+Fifth and last thing in the renderer that resolved a field to one value per
+tile and filled a rectangle with it. Per tile, fog is a hard-edged circle of
+squares around the player and a stepped rectangle around everything
+remembered.
+
+`drawFog` now rasterises fog DEPTH as a field and bilinearly upscales it, so
+the edge feathers instead of switching at a tile border. Same technique as the
+elevation shading, the ground textures, the biome tints and the mountain mass.
+
+**Corrected once, on their call.** The first version rasterised one pixel per
+tile and let the 20x upscale spread every edge over a whole tile: *"I was
+wrong. Can you lower the blur significantly, just make it a slight feather, not
+a deep blur."* The field is now rasterised in `FOG_FEATHER_PX`-sized blocks
+(4px, so 5 samples per tile) and upscaled 4x, which puts the ramp at about four
+pixels.
+
+Scale is the right knob for this and a threshold curve is not: the three fog
+depths are LEVELS, not a gradient, and steepening a combined field around 0.5
+would push "remembered" (0.66) up toward "unseen" (1.0). Supersampling leaves
+every interior pixel surrounded by its own value, so the plateaus stay exact
+and only the boundary ramps. `fieldCanvasAt` carries that reasoning.
+
+- The three depths used to be three slightly different colours as well —
+  (5,6,10) opaque, (4,6,14) at 0.66, (4,6,16) at 0.32. At those alphas the hue
+  difference is imperceptible and it stopped them from being one interpolable
+  field, so they are one colour at three alphas.
+- **Cached, keyed on the vision sets plus `world.tick`.** Unlike the ground
+  layer this runs every frame, but in player mode the clock only advances when
+  the player acts, so the field rebuilds about once per turn instead of 60
+  times a second.
+- Measured in player mode in the cave: median **16.6 ms, 60 fps**, p95 17.4 ms
+  — no measurable cost. (The before/after here is honest-only on the after
+  number: the "before" dev server had already hot-reloaded the restored code by
+  the time it was measured, so both readings are the new build. The screenshots
+  are the real evidence.)
+- Verified live on both layers: soft falloff underground (lit chamber ->
+  remembered corridor -> unseen) and on the surface.
+
 
 ## Fixed: attack that actually connects, radial hemispheres, utility moves
 

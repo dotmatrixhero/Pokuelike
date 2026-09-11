@@ -3,6 +3,7 @@ import type { PokemonType } from "./typing.js";
 import type { Stats } from "./stats.js";
 import type { Disposition, StatKey } from "./nature.js";
 import type { MaterialId } from "./harvest.js";
+import type { DecalId } from "./decals.js";
 import type { SeededRng } from "./rng.js";
 
 export interface Vec2 {
@@ -369,6 +370,19 @@ export interface Tile {
   stock?: number;
   /** "seedling" tiles only: ticks since it took root. Becomes "food" or "flora" once mature — see flora.ts. */
   growth?: number;
+  /**
+   * The small thing standing on this tile — a fern, a log, a boulder, a bone
+   * spur. Two slots because the art has two densities and they are not
+   * interchangeable: `scatterDecal` is fine ground detail on roughly one tile
+   * in seven, `featureDecal` is a landmark on roughly one in fifty. A tile can
+   * carry one of each.
+   *
+   * Real data, not a render flourish: `harvest.ts` reads these to decide what
+   * gathering here hands you, and clears them when it is taken. See decals.ts
+   * for why they stopped being a renderer-side hash.
+   */
+  scatterDecal?: DecalId;
+  featureDecal?: DecalId;
   /**
    * ROADMAP.md M5: how many times this tile has been gathered from since it
    * last regrew — see harvest.ts (`HARVEST_YIELD_PER_TILE` takes, then bare;
@@ -2495,6 +2509,17 @@ export type HuntRules = Record<string, true>;
 export interface World {
   width: number;
   height: number;
+  /**
+   * Where this zone's tile grid sits in the macro world's coordinates, as
+   * `generateWorld` was told (`WorldPlacement.origin`). Absent on a
+   * standalone map or a bare `createWorld`.
+   *
+   * Needed outside generation because decal placement hashes on ABSOLUTE
+   * coordinates — zone-local ones would make every zone repeat its
+   * neighbour's scatter — and `tickHarvestRegrowth` has to reproduce that
+   * same hash long after generation to know what regrows on a tile.
+   */
+  origin?: Vec2;
   /** One tile grid per layer, all sharing the same width/height footprint. */
   tiles: Record<Layer, Tile[]>;
   agents: Agent[];

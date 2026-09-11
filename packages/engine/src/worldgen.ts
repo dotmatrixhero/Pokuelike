@@ -1,5 +1,6 @@
 import type { Agent, BiomeSeedInfo, GroundType, Layer, Vec2, WaterKind, World } from "./types.js";
 import { createWorld, setElevation, setTile, tileAt } from "./world.js";
+import { scatterDecals } from "./decals.js";
 import { CANOPY_APPLE_RIPEN_TICKS, pickCrop } from "./crops.js";
 import { mulberry32 } from "./rng.js";
 import { canEnterWater, isLargeWaterBody, waterBodySizeAt } from "./waterBody.js";
@@ -2937,6 +2938,7 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   const origin = placement?.origin ?? WORLD_ORIGIN;
   const fieldSeed = placement?.fieldSeed ?? seed;
   const world = createWorld(width, height, seed ^ BEHAVIOR_RNG_SEED_XOR);
+  world.origin = origin;
   const placementRng = mulberry32(seed);
   // A zone of a macro world draws its biome seeds from the world-shared
   // lattice; a standalone map still scatters its own, unchanged.
@@ -3116,6 +3118,12 @@ export function generateWorld(width: number, height: number, seed: number, bias?
   // moisture field dropped onto land. See assignWaterKinds's own doc
   // comment.
   assignWaterKinds(world, width, height);
+
+  // Decals last of all, after every overlay above has settled the terrain
+  // they have to stand on. See decals.ts — these are real tile data now
+  // (`Tile.scatterDecal`/`featureDecal`), not a renderer-side hash, because
+  // gathering reads and consumes them.
+  scatterDecals(world);
 
   return world;
 }
