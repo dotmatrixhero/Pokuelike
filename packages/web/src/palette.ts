@@ -113,9 +113,17 @@ export const FLAVOR_FG: Record<string, Rgb> = {
   apple: [200, 40, 40],
   potato: [150, 110, 70],
   pumpkin: [230, 130, 30],
+  // Flora flavours (moss/fern/bloom) are purely decorative ground cover and
+  // yield nothing — `harvest.ts` has no flora branch. Direct ask: "Can you
+  // make flora that does not have berries just be plain green?" Moss and fern
+  // already were; `bloom` was a saturated pink [205, 125, 195], which is the
+  // colour a real crop uses to say "something worth picking grew here". These
+  // are the ASCII mode's glyph colours and the tile mode's fallback when the
+  // sprite has not loaded — the sprites themselves are repainted by
+  // renderer.ts's `greenedSprite`.
   moss: [120, 165, 100],
   fern: [80, 130, 80],
-  bloom: [205, 125, 195],
+  bloom: [105, 155, 95],
 };
 
 /**

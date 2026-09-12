@@ -12318,3 +12318,49 @@ stairs a are really hard to see. Make em have a light radius like sunbeams"*
 - [ ] The stairs tile's own ART still reads as a flat dark square against the
       lit floor around it — visible now, but as a hole rather than as steps.
       Flagging rather than changing it: that is a look-and-feel call.
+
+## Fixed: flora that isn't food no longer looks like berries
+
+Direct ask: *"Can you make flora that does not have berries just be plain
+green?"* Then, on seeing it: *"i think its fine ship it"*.
+
+- [x] **The map was saying the opposite of the truth.** `flora` is decorative
+      ground cover that yields NOTHING — `harvest.ts`'s `harvestableAt` has no
+      flora branch at all; only `"food"` terrain gives a crop. But all three
+      flora sprites are drawn with prominent fruit: `flora_moss` pink berries,
+      `flora_fern` red ones, `flora_bloom` blue-grey pods. Meanwhile the
+      actually-gatherable `food_oran` is a muted grey-yellow pod that reads as
+      LESS berry-like than the decoration. The "mechanics should be visible on
+      the map" pillar, inverted.
+- [x] `renderer.ts`'s `greenedSprite` repaints flora art by mapping each
+      pixel's Rec. 601 luma onto a foliage ramp (34,62,32 → 148,196,116).
+      Alpha untouched, so the transparent corners stay transparent. Cached per
+      flavour, so it runs once per sprite ever.
+- [x] **Recolour rather than new art**, so each flavour keeps its own
+      silhouette — moss, fern and bloom still differ in form, and the ground
+      cover stays varied without any of it claiming to be food. The berry
+      shapes now read as leaves and buds.
+- [x] **Not `tintedSprite`**: that helper fills at 0.4 alpha with
+      `source-atop`, which turns a saturated pink berry into a muted pink
+      berry. A hue that must not survive cannot be handled by a wash.
+- [x] `FLAVOR_FG.bloom` went from a saturated pink [205, 125, 195] to green —
+      that's the ASCII mode's glyph colour and the tile mode's fallback before
+      the sprite loads, and pink is the register a real crop uses to say
+      "something worth picking grew here". Moss and fern were already green.
+- [x] Verified by looking at the real frame with its control in it: the three
+      flora tiles and two real food crops (Oran, Cheri) planted side by side
+      in one row under the same lighting. Flora renders plain green; **the
+      food controls keep their berry colours**, which is the half that makes
+      the result mean anything.
+- [x] No unit test — the web package has no test runner at all, and this is a
+      colour transform on canvas. The evidence is the screenshot, said plainly
+      rather than dressed up as a proven invariant.
+- [x] Full suite unaffected: engine 1682, data 479, web build clean.
+
+### Open, for the user to rule on
+
+- [ ] `bloom` presumably meant "a flowering plant", and greening it removes
+      the flowers along with the fake berries. Flowers are not food, so it
+      could keep a floral colour and still not lie about being gatherable.
+      One line in `greenedFlora` to exempt it — not taken unilaterally, since
+      it is a look-and-feel call.

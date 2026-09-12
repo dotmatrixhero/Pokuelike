@@ -957,6 +957,71 @@ function tintedSprite(sprite: HTMLImageElement, key: string, tint: Rgb): HTMLCan
 }
 
 /**
+ * Repaints a sprite in plain green, keeping its shape and shading.
+ *
+ * Direct ask: **"Can you make flora that does not have berries just be plain
+ * green?"**
+ *
+ * Flora is decorative ground cover and yields NOTHING — `harvest.ts`'s
+ * `harvestableAt` has no flora branch at all; only `"food"` terrain gives a
+ * crop. But all three flora sprites are drawn with prominent fruit:
+ * `flora_moss` has pink berries, `flora_fern` red ones, `flora_bloom`
+ * blue-grey pods. Worse, the actually-gatherable `food_oran` is a muted
+ * grey-yellow pod that reads as LESS berry-like than the decoration. So the
+ * map was telling the player the opposite of the truth about where food is —
+ * exactly the "mechanics should be visible on the map" pillar, inverted.
+ *
+ * Recolouring rather than swapping the art keeps each flavour's own
+ * silhouette (moss, fern and bloom still differ in form), so the ground cover
+ * stays varied without any of it claiming to be food.
+ *
+ * Luminance onto a green ramp, not a `tintedSprite` wash: that helper fills at
+ * 0.4 alpha with `source-atop`, which turns a saturated pink berry into a
+ * muted pink berry. A hue that must not survive cannot be handled by a wash.
+ * Alpha is preserved untouched so the transparent corners stay transparent.
+ */
+const GREEN_SPRITE_CACHE = new Map<string, HTMLCanvasElement>();
+/** Darkest and lightest ends of the foliage ramp. Sampled to sit in the same band as the existing `flora` palette entry (110,150,90). */
+const FOLIAGE_DARK: Rgb = [34, 62, 32];
+const FOLIAGE_LIGHT: Rgb = [148, 196, 116];
+
+function greenedSprite(sprite: HTMLImageElement, key: string): HTMLCanvasElement | null {
+  const cached = GREEN_SPRITE_CACHE.get(key);
+  if (cached) return cached;
+  // A sprite that has not finished decoding has zero size, and reading pixels
+  // off it would cache an empty canvas forever. Skip this frame; the image's
+  // own load will draw it next one.
+  if (!sprite.complete || sprite.naturalWidth === 0) return null;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = sprite.width;
+  canvas.height = sprite.height;
+  const gctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  gctx.drawImage(sprite, 0, 0);
+  const image = gctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = image.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    // Rec. 601 luma — perceptual brightness, so a bright red berry lands high
+    // on the ramp (a pale leaf) rather than dark, and the plant keeps the
+    // light-and-shade it was drawn with.
+    const luma = (0.299 * d[i]! + 0.587 * d[i + 1]! + 0.114 * d[i + 2]!) / 255;
+    d[i] = Math.round(FOLIAGE_DARK[0] + (FOLIAGE_LIGHT[0] - FOLIAGE_DARK[0]) * luma);
+    d[i + 1] = Math.round(FOLIAGE_DARK[1] + (FOLIAGE_LIGHT[1] - FOLIAGE_DARK[1]) * luma);
+    d[i + 2] = Math.round(FOLIAGE_DARK[2] + (FOLIAGE_LIGHT[2] - FOLIAGE_DARK[2]) * luma);
+  }
+  gctx.putImageData(image, 0, 0);
+  GREEN_SPRITE_CACHE.set(key, canvas);
+  return canvas;
+}
+
+/** The flora sprite for a flavour, repainted green — see `greenedSprite`. */
+function greenedFlora(flavor: string): HTMLCanvasElement | null {
+  const sprite = getFloraSprite(flavor);
+  return sprite ? greenedSprite(sprite, `flora:${flavor}`) : null;
+}
+
+/**
  * A food/flora/seedling tile's own identity mark — real fruit emoji, real
  * berry-plant art, a growing sprout, or the muted fallback glyph. Called
  * once per crop tile, after `drawDayNightTint`, instead of inline in
@@ -972,7 +1037,7 @@ function drawCropIdentity(ctx: CanvasRenderingContext2D, tile: Tile, x: number, 
     tile.terrain === "food" && tile.flavor
       ? getFoodSprite(tile.flavor)
       : tile.terrain === "flora" && tile.flavor
-        ? getFloraSprite(tile.flavor)
+        ? greenedFlora(tile.flavor)
         : tile.terrain === "seedling"
           ? getSeedlingSprite(x, y)
           : null;
