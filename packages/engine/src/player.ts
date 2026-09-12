@@ -2,7 +2,7 @@ import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
 import { setTile, tileAt } from "./world.js";
-import { FIRE_BURN_TICKS } from "./fire.js";
+import { FIRE_BURN_TICKS, nearFire } from "./fire.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, thirstReliefFactor } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
@@ -676,17 +676,12 @@ export function waterWithinReach(world: World, agent: Agent): boolean {
   return false;
 }
 
-/** A deployed campfire's real cooking range — `RecipeDef.requiresNearFire`'s own precondition. A little wider than "adjacent" (`waterWithinReach`'s radius 1): you cook AROUND a fire, not standing in the one tile it occupies. */
-const NEAR_FIRE_RADIUS = 2;
-
-export function nearFire(world: World, agent: Agent): boolean {
-  for (let dy = -NEAR_FIRE_RADIUS; dy <= NEAR_FIRE_RADIUS; dy++) {
-    for (let dx = -NEAR_FIRE_RADIUS; dx <= NEAR_FIRE_RADIUS; dx++) {
-      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "fire") return true;
-    }
-  }
-  return false;
-}
+// `nearFire` moved to fire.ts so `needs.ts` can ask the same question for the
+// campfire energy restore without importing this module — player.ts imports
+// needs.ts, so the reverse edge would be a real runtime cycle. Re-exported
+// here because every existing caller reaches for it through player.ts.
+export { NEAR_FIRE_RADIUS } from "./fire.js";
+export { nearFire };
 
 /** Whether the tile under the player is food with anything left on it. */
 export function foodUnderfoot(world: World, agent: Agent): boolean {

@@ -64,10 +64,25 @@ import { findWalkableNear } from "./worldgen.js";
 import { HERD_CONFLICT_MIN_BLOCKED_TICKS, applyHerdRivalryConflict, applyRivalryRetaliation, applyTerritorialGuard } from "./herdConflict.js";
 import { maybeUseUtilityMove } from "./utilityMoves.js";
 import { thirstDecayMultiplier } from "./weather.js";
+import { nearFire } from "./fire.js";
 import { CONFUSION_STUMBLE_CHANCE, PARALYSIS_SKIP_CHANCE, isAsleep, isConfused, isFrozen, isParalyzed, tickStatusEffects } from "./status.js";
 
+/**
+ * Direct ask: "generaly energy drains too quick. should be 1/3 the speed."
+ * Kept as a divisor on the original 0.005 rather than a rewritten literal, so
+ * the change is legible and reversible, and so every doc comment that quotes
+ * the old number can be read against it.
+ *
+ * Knock-on worth knowing: `ENERGY_SLEEP_THRESHOLD`'s own doc comment says a
+ * fully rested agent reaches the sleep threshold in ~140 ticks. At a third
+ * the drain that becomes ~420, so WILD agents sleep about a third as often
+ * too. That is a real sim-wide balance change riding along with a
+ * player-facing one — flagged rather than absorbed silently.
+ */
+export const ENERGY_DRAIN_DIVISOR = 3;
+
 const DECAY_PER_TICK = {
-  energy: 0.005,
+  energy: 0.005 / ENERGY_DRAIN_DIVISOR,
   mateDrive: 0.01,
 } as const;
 
@@ -236,6 +251,55 @@ export const SLEEP_NEEDS_DECAY_MULTIPLIER = 0.15;
  * a few hundred ticks meaningfully refills energy) without being instant.
  */
 export const SLEEP_ENERGY_RESTORE_RATE = 0.02;
+
+/**
+ * Resting recovers more the longer you keep at it.
+ *
+ * Direct ask: "i want waiting to restore a lot more energy - non linear
+ * though. like quadratic, so you have to rest multiple turns in a row to
+ * recharge."
+ *
+ * The per-tick restore is `REST_RESTORE_STEP * restTicks`, which makes the
+ * TOTAL recovered over n consecutive ticks `step * n(n+1)/2` — quadratic in
+ * the number of turns rested, which is the shape asked for. Expressed as a
+ * ramping linear rate rather than a literal `n^2` per tick because `n^2` per
+ * tick is quartic in total and runs away inside a dozen turns; this ramps
+ * hard without exploding.
+ *
+ * What it buys, against the old flat 0.02/tick (0 to full in 50 ticks):
+ *
+ * | consecutive rest ticks | this tick | total recovered |
+ * | --- | --- | --- |
+ * | 1 | 0.004 | 0.004 |
+ * | 5 | 0.020 | 0.060 |
+ * | 10 | 0.040 | 0.220 |
+ * | 20 | 0.080 | 0.840 |
+ * | 22 | 0.088 | 1.012 |
+ *
+ * So a single rest turn is nearly worthless (0.004, a fifth of the old flat
+ * rate) and a real sit-down is much faster than before (full in ~22 ticks vs
+ * 50). That asymmetry IS the ask — resting has to be something you commit to.
+ *
+ * Sim-original numbers; the shape is what the ask specifies, the values are
+ * for the user to rule on against a real run.
+ */
+export const REST_RESTORE_STEP = 0.004;
+/** Ramp ceiling, so a very long rest cannot reach an absurd per-tick rate. At 25 the cap is 0.1/tick. */
+export const REST_RAMP_MAX_TICKS = 25;
+
+/**
+ * Energy restored per tick to anyone within `nearFire`'s reach of a deployed
+ * campfire, awake or asleep. Direct ask: "being near a campfire should auto
+ * restore energy."
+ *
+ * Flat, and deliberately additive with the rest ramp rather than folded into
+ * it: a fire helps whether or not you sit down, and sitting down BY a fire is
+ * the best rest available. Same "both bonuses stack" shape `decayNeeds`
+ * already uses for asleep-and-sheltered. At 0.01/tick a fire alone roughly
+ * cancels six ticks of the new drain rate, so standing by one holds you
+ * steady and then some without making rest pointless.
+ */
+export const CAMPFIRE_ENERGY_RESTORE_RATE = 0.01;
 
 /**
  * Heal-over-time multiplier while asleep — support.ts's `applyHealOverTime`
@@ -708,13 +772,39 @@ export function createNeeds(overrides: Partial<Needs> = {}): Needs {
  * reduced" bonus outright — but an asleep agent that's ALSO home gets both,
  * multiplicatively, the best rest available in this sim.
  */
-export function decayNeeds(needs: Needs, thirstMultiplier = 1, asleep = false, hungerMultiplier = 1, shelterMultiplier = 1): void {
+export function decayNeeds(
+  needs: Needs,
+  thirstMultiplier = 1,
+  asleep = false,
+  hungerMultiplier = 1,
+  shelterMultiplier = 1,
+  /**
+   * How many ticks in a row this agent has been resting — drives the
+   * quadratic-total ramp in `REST_RESTORE_STEP`. 0/undefined means the ramp
+   * has not started, which is what every caller that does not track rest
+   * gets: they fall back to the old flat `SLEEP_ENERGY_RESTORE_RATE`.
+   */
+  restTicks = 0,
+  /** Within reach of a deployed campfire — see `CAMPFIRE_ENERGY_RESTORE_RATE`. */
+  nearFire = false,
+): void {
   const needsMultiplier = (asleep ? SLEEP_NEEDS_DECAY_MULTIPLIER : 1) * shelterMultiplier;
   needs.hunger = Math.max(0, needs.hunger - (needs.hunger * HUNGER_DECAY_RATE + HUNGER_DECAY_FLOOR) * needsMultiplier * hungerMultiplier);
   needs.thirst = Math.max(0, needs.thirst - (needs.thirst * THIRST_DECAY_RATE + THIRST_DECAY_FLOOR) * thirstMultiplier * needsMultiplier);
-  needs.energy = asleep
-    ? Math.min(1, needs.energy + SLEEP_ENERGY_RESTORE_RATE)
-    : Math.max(0, needs.energy - DECAY_PER_TICK.energy);
+
+  // Energy is the one need that can move either direction, so it is computed
+  // as a signed delta rather than a multiplied decay.
+  const fireGain = nearFire ? CAMPFIRE_ENERGY_RESTORE_RATE : 0;
+  const restGain = asleep
+    ? // A caller that tracks consecutive rest gets the ramp; one that does not
+      // keeps the original flat rate, so no existing caller changes behaviour
+      // by accident.
+      restTicks > 0
+      ? REST_RESTORE_STEP * Math.min(restTicks, REST_RAMP_MAX_TICKS)
+      : SLEEP_ENERGY_RESTORE_RATE
+    : -DECAY_PER_TICK.energy;
+  needs.energy = Math.max(0, Math.min(1, needs.energy + restGain + fireGain));
+
   needs.mateDrive = Math.min(1, needs.mateDrive + DECAY_PER_TICK.mateDrive);
 }
 
@@ -1155,12 +1245,23 @@ export function tickAgentNeeds(
   // mid-rest, or just passing through all count) — see shelter.ts's
   // "Incentive to actually stay" doc comment.
   const nearShelter = world !== undefined && hasNearbyShelter(world, agent.layer, agent.pos, SHELTER_REST_RADIUS);
+  // Consecutive rest, for the `REST_RESTORE_STEP` ramp. Counted here rather
+  // than inside `decayNeeds` because the ramp is per-AGENT state and
+  // `decayNeeds` only ever sees a bare `Needs`. Cleared on any tick not spent
+  // resting, so an interrupted rest starts over.
+  const resting = agent.asleep === true;
+  agent.restTicks = resting ? (agent.restTicks ?? 0) + 1 : undefined;
+  // "being near a campfire should auto restore energy" — the same `nearFire`
+  // reach cooking already uses, so one fire means one thing everywhere.
+  const warmedByFire = world !== undefined && nearFire(world, agent);
   decayNeeds(
     agent.needs,
     thirstMultiplier,
-    agent.asleep === true,
+    resting,
     digesting ? KILL_SATIATION_HUNGER_DECAY_MULTIPLIER : 1,
-    nearShelter ? SHELTER_NEEDS_DECAY_MULTIPLIER : 1
+    nearShelter ? SHELTER_NEEDS_DECAY_MULTIPLIER : 1,
+    agent.restTicks ?? 0,
+    warmedByFire
   );
 
   // Hunger and thirst each get their own consecutive-zero-ticks counter and

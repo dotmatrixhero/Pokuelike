@@ -46,8 +46,24 @@ export interface TileReport {
   lit: boolean;
   /** A living agent standing here, if any. */
   occupantId?: string;
-  /** A truly-dead body here — what `loot`/`butcher` need. */
+  /** A truly-dead body here — what `butcher` needs. */
   corpseId?: string;
+  /**
+   * A downed-but-living agent here. `support.ts`'s `applyLooting` has always
+   * accepted "fainted OR truly dead" (see `isFainted`'s own doc comment:
+   * "can be looted (not eaten) or carried"), but `examineTile` only ever
+   * reported a corpse, so the tile menu never offered Loot on a fainted
+   * creature and the engine's own allowance was unreachable. Direct report:
+   * "still can't gather from dead bodies or fainted ones."
+   */
+  faintedId?: string;
+  /**
+   * Whether the body/downed agent here is actually carrying anything.
+   * Measured on a real cave run: **0 of 4 wild agents carried a single
+   * item**, so offering Loot on every corpse was a button that could never
+   * succeed. `verbsForTile` uses this to leave the verb out instead.
+   */
+  lootable?: boolean;
   stairs?: "down" | "up" | "exit";
 }
 
@@ -63,10 +79,17 @@ export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport |
   // both be on the same tile, and callers want each named separately.
   let occupantId: string | undefined;
   let corpseId: string | undefined;
+  let faintedId: string | undefined;
+  let lootable = false;
   for (const agent of world.agents) {
     if (agent.layer !== layer || agent.pos.x !== pos.x || agent.pos.y !== pos.y) continue;
     if (agent.alive === false) corpseId ??= agent.id;
-    else occupantId ??= agent.id;
+    else {
+      occupantId ??= agent.id;
+      if (agent.fainted === true) faintedId ??= agent.id;
+    }
+    // Either state can be looted — `applyLooting` accepts both.
+    if ((agent.alive === false || agent.fainted === true) && (agent.inventory?.length ?? 0) > 0) lootable = true;
   }
 
   return {
@@ -82,6 +105,8 @@ export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport |
     lit: isLightSource(tile.terrain),
     occupantId,
     corpseId,
+    faintedId,
+    lootable,
     stairs: tile.terrain === "stairsDown" ? "down" : tile.terrain === "stairsUp" ? "up" : tile.terrain === "exit" ? "exit" : undefined,
   };
 }
@@ -130,7 +155,13 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
   if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");
-  if (report.corpseId && adjacent) verbs.push("loot", "butcher");
+  // Loot and butcher are no longer one pair. Loot works on a fainted agent
+  // too and needs something to actually take; butcher needs a true corpse
+  // (DESIGN.md's "only true death is consumable"). Bundling them meant Loot
+  // appeared on every body and failed on nearly all of them, while a downed
+  // creature offered neither.
+  if (adjacent && report.lootable) verbs.push("loot");
+  if (adjacent && report.corpseId) verbs.push("butcher");
   if (here && report.stairs) verbs.push("useStairs");
 
   return verbs;
@@ -163,16 +194,20 @@ export function selfVerbsFor(world: World, agent: Agent, layer: Layer): TileVerb
   // Anything within one step, diagonals included.
   let waterNear = false;
   let corpseNear = false;
+  let lootNear = false;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       const near = examineTile(world, layer, { x: agent.pos.x + dx, y: agent.pos.y + dy });
       if (!near) continue;
       if (near.drinkable) waterNear = true;
       if (near.corpseId) corpseNear = true;
+      if (near.lootable) lootNear = true;
     }
   }
   if (waterNear) verbs.push("drink");
-  if (corpseNear) verbs.push("loot", "butcher");
+  // Same split as `verbsForTile` — see its comment.
+  if (lootNear) verbs.push("loot");
+  if (corpseNear) verbs.push("butcher");
   if (here.stairs) verbs.push("useStairs");
   return verbs;
 }

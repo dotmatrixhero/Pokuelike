@@ -12364,3 +12364,142 @@ green?"* Then, on seeing it: *"i think its fine ship it"*.
       could keep a floral colour and still not lie about being gatherable.
       One line in `greenedFlora` to exempt it — not taken unilaterally, since
       it is a look-and-feel call.
+
+## Round: bodies, panel auto-swap, and the energy economy
+
+### Gathering from bodies — two different defects under one report
+
+Direct report: *"still can't gather from dead bodies or fainted ones."*
+
+- [x] Reproduced first, both states, through the real UI:
+
+      | target | radial offered | loot | butcher |
+      | --- | --- | --- | --- |
+      | truly dead | examine, moveHere, attack, **loot, butcher** | **failed** | worked |
+      | fainted | examine, moveHere, pet, attack | failed | failed |
+
+- [x] **Loot was a button that could never work.** Measured on a real cave
+      run: **0 of 4 wild agents carried a single item**, and `applyLooting`
+      requires a non-empty inventory. So Loot appeared on every corpse and
+      failed on all of them. It is now offered only when the body actually
+      has something — `TileReport.lootable`.
+- [x] **Fainted creatures were unreachable content.** `applyLooting` has
+      always accepted "fainted OR truly dead" (`isFainted`'s own doc comment:
+      "can be looted (not eaten) or carried"), but `examineTile` only ever
+      reported `corpseId`, so the tile menu never offered Loot on a downed
+      creature and the engine's own allowance could not be reached. Added
+      `TileReport.faintedId` and split the verbs: **loot** needs something to
+      take and accepts either state; **butcher** still needs a true corpse.
+- [x] Live, with controls: fainted+empty offers no loot (control); fainted+
+      carrying offers loot and taking it moves the item across ("You loot the
+      body."); dead+empty offers butcher and no loot, and butchering yields
+      meat.
+- [x] **A fixture bug that looked like an engine bug, worth recording.** The
+      first attempt set `fainted: true` on a full-HP agent;
+      `maybeRecoverFromFaint` woke it on the very next tick, so by the time
+      `loot` ran the target was neither fainted nor dead. The failure looked
+      exactly like the reported bug. A downed fixture needs real low HP.
+
+### The panel follows what just happened
+
+Direct asks: *"when any attack is used on or by a player or on or by a pokemon
+follwing, i want the panel to swapt to event logs, auto swap on the ui to show
+what is happening"* and *"similarly when eating or drinking i want to auto swap
+to your own hp/hunger/thirst"*.
+
+- [x] `focusPlayerPanel("log" | "vitals")`. Both live on the You tab, so what
+      differs is which part is brought into view and, on mobile, how far the
+      sheet opens: the vitals strip IS the peek row, so a meal needs peek,
+      while a fight opens the sheet to full and forces the Log section open
+      (a collapsed section would make the swap show nothing new).
+- [x] Combat detection counts **both directions and both outcomes** — the ask
+      says "on or by", and a swing that MISSED you is as worth looking at as
+      one that landed. `fought`, `missed`, `killed`, `defeated`, matched
+      against the player plus every current follower.
+- [x] Read off `displayEvents`, not the raw batch, so the finishing-blow
+      repeats already filtered for the log cannot re-trigger the swap every
+      tick a mob keeps hitting a body that is already down.
+- [x] Never fires while a modal is up (pack, command picker, Look) — those
+      cover the panel anyway, and yanking the tab mid-interaction is worse
+      than a beat of missed narration.
+- [x] Eating/drinking swaps only on a turn that actually **landed**: swapping
+      the panel to announce "No water within reach." would be noise.
+- [x] Live: World tab + closed Log → a real strike → You tab, Log open, sheet
+      at full. Eat → You tab. Control: a FAILED drink stays on World.
+- [x] **A contaminated control, caught and redone.** The first failed-drink
+      control reported a swap, which looked like the guard was broken. It was
+      a real wild attack landing on the player during the same turn — a
+      legitimate swap. Re-run with the neighbourhood cleared, it stays on
+      World. An uncontrolled control is not a control.
+
+### Energy
+
+Direct ask: *"i want waiting to restore a lot more energy - non linear though.
+like quadratic, so you have to rest multiple turns in a row to recharge, and
+generaly energy drains too quick. should be 1/3 the speed. being near a
+campfire should auto restore energy."*
+
+- [x] `ENERGY_DRAIN_DIVISOR = 3`. Full to empty: **200 → 600 ticks**.
+- [x] Rest ramps: per-tick restore is `REST_RESTORE_STEP * restTicks`, which
+      makes the TOTAL over n consecutive ticks `step * n(n+1)/2` — quadratic
+      in turns rested, which is the shape asked for. Written as a ramping
+      linear rate rather than a literal `n²` per tick, because `n²` per tick
+      is quartic in total and runs away inside a dozen turns.
+
+      | consecutive rest ticks | this tick | total |
+      | --- | --- | --- |
+      | 1 | 0.004 | 0.004 |
+      | 5 | 0.020 | 0.060 |
+      | 10 | 0.040 | 0.220 |
+      | 20 | 0.080 | 0.840 |
+
+      Empty to full in **22 ticks**, against the old flat rate's 50 — while a
+      SINGLE rest tick now gives a fifth of what it used to. That asymmetry
+      is the ask: resting has to be something you commit to.
+- [x] Capped at `REST_RAMP_MAX_TICKS` (25), so a very long rest cannot reach
+      an absurd per-tick rate.
+- [x] An interruption clears `restTicks` — the next rest starts the ramp over
+      rather than resuming. That restart IS the cost of being interrupted.
+- [x] `CAMPFIRE_ENERGY_RESTORE_RATE` (0.01/tick) within `nearFire`'s existing
+      reach, awake or asleep, additive with the rest ramp — a fire helps
+      whether or not you sit down, and sitting down BY one is the best rest
+      available. Same "both bonuses stack" shape `decayNeeds` already used
+      for asleep-and-sheltered.
+- [x] `nearFire`/`NEAR_FIRE_RADIUS` moved from player.ts to fire.ts and
+      re-exported: needs.ts has to ask the same question, and player.ts
+      imports needs.ts, so the reverse edge would have been a real runtime
+      cycle.
+- [x] Measured live, in PLAYER TURNS (what the user actually feels — one turn
+      is several world ticks): energy 0.20 → **1.00 in 12 waits**. Campfire
+      while awake and moving: 0.50 → **0.808**, against a no-fire control of
+      **0.433** over the same turns.
+- [x] **Sim-wide knock-on, flagged not buried:** `ENERGY_SLEEP_THRESHOLD`'s
+      own doc comment says a rested agent hits the sleep threshold in ~140
+      ticks. At a third the drain that is now ~420, so WILD agents sleep
+      about a third as often too. That is a real ecology change riding along
+      with a player-facing one.
+- [x] 12 new tests (10 energy + 2 tile-query). Three existing tests encoded
+      the old behaviour and were updated, with the reason written into them.
+- [x] Full suite: engine **1694**, data 479, web build clean.
+
+### Not a bug: cooking already yields 3
+
+Reported as *"cooking should grant 3x of a cooked recipe"*, then *"like potato
+stew? i don't see it as 3 potato stews i can only eat one"*.
+
+- [x] Shipped in `c14db2f`, and re-verified on master three ways: the live
+      recipe table reads `{roastedApple:3, berryStew:3, potatoMash:3,
+      vegetableStew:3, roastedMeat:3}`; crafting Potato Mash from 4 potatoes
+      leaves `potato ×2, potatoMash ×3`; the pack row renders **"Potato Mash
+      ×3"**; and eating goes 3 → 2 → 1 → 0, one per turn, hunger rising each
+      time. Nothing changed — the build being played predates that commit.
+
+### Open, for the user to rule on
+
+- [ ] **Butchering a FAINTED creature.** Looting one now works. Butchering one
+      does not, because DESIGN.md rules "only true death is consumable" — and
+      a fainted animal wakes up, so butchering it is really killing it. Left
+      as-is rather than decided unilaterally.
+- [ ] **Wild agents carry nothing**, so Loot will almost never appear even
+      now. If corpses should be worth searching, someone has to put something
+      in them.

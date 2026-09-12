@@ -129,6 +129,16 @@ const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
 const tabYouBtn = document.getElementById("tab-you") as HTMLButtonElement;
 const tabWorldBtn = document.getElementById("tab-world") as HTMLButtonElement;
 const youPageEl = document.getElementById("you-page") as HTMLElement;
+const logSectionEl = document.getElementById("section-log") as HTMLDetailsElement;
+/**
+ * Whether the sidebar is the mobile bottom sheet rather than a desktop
+ * column. Matches the one breakpoint index.html's own `@media (max-width:
+ * 768px)` rules use, read live rather than cached — a phone rotating, or a
+ * desktop window dragged narrow, changes the answer.
+ */
+function isMobileLayout(): boolean {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
 const youTitleEl = document.getElementById("you-title") as HTMLElement;
 const partyBodyEl = document.getElementById("party-body") as HTMLElement;
 const partyCountEl = document.getElementById("party-count") as HTMLElement;
@@ -1878,6 +1888,65 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
+ * Pull the sidebar to the part of it that just became the story.
+ *
+ * Direct asks, one message: *"when any attack is used on or by a player or on
+ * or by a pokemon follwing, i want the panel to swapt to event logs, auto swap
+ * on the ui to show what is happening"* and *"similarly when eating or
+ * drinking i want to auto swap to your own hp/hunger/thirst"*.
+ *
+ * Both land on the You tab — vitals and the Log live on the same page — so
+ * the difference is which part of it is brought into view, and on mobile how
+ * far the bottom sheet is opened. The vitals strip IS the peek row, so a meal
+ * needs no more than peek; a fight needs the sheet open to read the log.
+ *
+ * Skipped entirely while a modal is up (pack, command picker, Look): those
+ * cover the panel anyway, and yanking the tab out from under someone
+ * mid-interaction is worse than a beat of missed narration. Also skipped in
+ * watch mode, which has no You tab at all.
+ */
+function focusPlayerPanel(part: "log" | "vitals"): void {
+  if (!playerMode) return;
+  if (!packMenuEl.hidden || !commandMenuEl.hidden || !lookMenuEl.hidden) return;
+
+  if (activeTab !== "you") selectTab("you", false);
+  if (part === "log") {
+    // A collapsed Log section would make the swap a no-op — the tab would
+    // change and still show nothing new.
+    logSectionEl.open = true;
+    if (isMobileLayout() && sheetDetent !== "full") setSheetDetent("full");
+    // Only scroll where there is somewhere to scroll to; on desktop the whole
+    // page is usually already visible and this would jump the panel for
+    // nothing.
+    if (isMobileLayout()) logSectionEl.scrollIntoView({ block: "nearest" });
+  } else if (isMobileLayout()) {
+    // Peek is exactly the vitals row, so "show me my own bars" is peek, not
+    // full — opening the sheet all the way would bury the map instead.
+    youPageEl.scrollTop = 0;
+  }
+}
+
+/**
+ * Did this batch of events contain a swing involving the player or one of
+ * their followers, in either direction? "on or by" in the ask, so both the
+ * attacker and the defender side count, and a miss counts too — a swing that
+ * missed you is exactly as worth looking at as one that landed.
+ */
+function combatTouchesParty(events: readonly SimEvent[], me: Agent): boolean {
+  const mine = new Set<string>([me.id, ...bondedPartnersInZone(me).map((a) => a.id)]);
+  for (const event of events) {
+    if (event.kind === "fought" || event.kind === "missed") {
+      if (mine.has(event.attackerId) || mine.has(event.defenderId)) return true;
+    } else if (event.kind === "killed") {
+      if (mine.has(event.predatorId) || mine.has(event.preyId)) return true;
+    } else if (event.kind === "defeated") {
+      if (mine.has(event.winnerId) || mine.has(event.loserId)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Every bonded follower's HP, order and current behaviour, rendered into the
  * You panel. Direct ask: "I want one sidebar with my player status, and my
  * party members at a glance."
@@ -2261,6 +2330,14 @@ function playerAct(action: PlayerAction): void {
   // missed one — outranks the routine "You move."/"You wait." outcome
   // message `renderPlayerHud` just set, so it applies last.
   if (pendingCombatNotice) say(pendingCombatNotice);
+  // Direct ask: "when eating or drinking i want to auto swap to your own
+  // hp/hunger/thirst." Only on a turn that actually landed — swapping the
+  // panel to celebrate "No water within reach." would be noise. After the
+  // combat notice above, so a meal interrupted by a bite still ends up on
+  // the log where the bite is.
+  if ((action.kind === "eat" || action.kind === "drink") && player.lastActionOutcome?.ok) {
+    focusPlayerPanel("vitals");
+  }
   if (!findPlayer(world)) showGameOver(player.id);
   else checkWinCondition(player);
 }
@@ -2515,6 +2592,11 @@ function afterTick(): void {
   // if they were following you at the time.
   if (noticePlayer) {
     actionLogPanel.ingest(displayEvents, world, new Set(bondedPartnersInZone(noticePlayer).map((a) => a.id)));
+    // Direct ask: any attack on or by you or a follower pulls the panel to
+    // the log. Checked against `displayEvents`, not `newEvents`, so the
+    // finishing-blow repeats filtered above cannot re-trigger it every tick
+    // a mob keeps hitting a body that is already down.
+    if (combatTouchesParty(displayEvents, noticePlayer)) focusPlayerPanel("log");
   }
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);

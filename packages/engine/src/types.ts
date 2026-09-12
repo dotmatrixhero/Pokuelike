@@ -1133,6 +1133,14 @@ export interface Agent {
    */
   lastPetTick?: number;
   /**
+   * Consecutive ticks spent resting — `needs.ts`'s `REST_RESTORE_STEP` ramp.
+   * Direct ask: "you have to rest multiple turns in a row to recharge."
+   * Cleared the moment the agent stops resting, so an interrupted rest starts
+   * the ramp over rather than resuming where it left off: that restart IS the
+   * cost of being interrupted.
+   */
+  restTicks?: number;
+  /**
    * ROADMAP.md M6, lever 3 (habituation): how many times THIS individual
    * has ever taken a berry from the player. Never decremented, never
    * cleared by rapport pruning — unlike the numeric trust score, this

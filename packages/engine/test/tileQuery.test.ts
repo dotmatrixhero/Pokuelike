@@ -92,15 +92,49 @@ describe("verbsForTile", () => {
     expect(verbsForTile(w, me, "surface", { x: 6, y: 5 })).not.toContain("gather");
   });
 
-  it("offers loot and butcher only next to an actual corpse", () => {
+  /**
+   * Direct report: "still can't gather from dead bodies or fainted ones."
+   * Loot and butcher used to be offered as one pair on any adjacent corpse.
+   * Two things were wrong with that. Measured on a real cave run, **0 of 4
+   * wild agents carried a single item**, so Loot was a button that could
+   * essentially never succeed; and `applyLooting` has always accepted a
+   * FAINTED agent too (see `isFainted`: "can be looted... or carried"), but
+   * `examineTile` only reported corpses, so the engine's own allowance was
+   * unreachable from the UI.
+   */
+  it("offers butcher on any adjacent corpse, but loot only when there is something to take", () => {
     const w = world();
     const me = makeAgent("me", 4, 4);
-    w.agents.push(me, makeAgent("body", 5, 4, { alive: false }), makeAgent("faraway", 9, 9, { alive: false }));
+    const empty = makeAgent("body", 5, 4, { alive: false });
+    w.agents.push(me, empty, makeAgent("faraway", 9, 9, { alive: false }));
+
+    // An empty body is still worth butchering, and offering Loot on it would
+    // be a button that always fails.
+    expect(verbsForTile(w, me, "surface", { x: 5, y: 4 })).toContain("butcher");
+    expect(verbsForTile(w, me, "surface", { x: 5, y: 4 })).not.toContain("loot");
+
+    // Give it a pack and Loot appears.
+    empty.inventory = [{ itemKey: "oran", weight: 1, count: 1 }];
     expect(verbsForTile(w, me, "surface", { x: 5, y: 4 })).toEqual(expect.arrayContaining(["loot", "butcher"]));
+
     // A corpse across the room is out of reach.
     expect(verbsForTile(w, me, "surface", { x: 9, y: 9 })).not.toContain("loot");
     // Empty adjacent ground is not a corpse.
     expect(verbsForTile(w, me, "surface", { x: 3, y: 4 })).not.toContain("butcher");
+  });
+
+  it("offers loot on a FAINTED creature carrying something, but never butcher", () => {
+    const w = world();
+    const me = makeAgent("me", 4, 4);
+    const downed = makeAgent("downed", 5, 4, { fainted: true });
+    downed.inventory = [{ itemKey: "oran", weight: 1, count: 1 }];
+    w.agents.push(me, downed);
+
+    const verbs = verbsForTile(w, me, "surface", { x: 5, y: 4 });
+    expect(verbs).toContain("loot");
+    // DESIGN.md's "only true death is consumable" — a downed animal is still
+    // alive, and butchering it would be a different act entirely.
+    expect(verbs).not.toContain("butcher");
   });
 
   it("offers command only while a bonded follower is actually with you", () => {
@@ -186,10 +220,14 @@ describe("selfVerbsFor", () => {
     expect(selfVerbsFor(w, me, "surface")).toContain("useStairs");
   });
 
-  it("offers loot and butcher for a corpse one step away, diagonals included", () => {
+  it("offers butcher for a corpse one step away, diagonals included, and loot once it carries something", () => {
     const w = world();
     const me = makeAgent("me", 4, 4);
-    w.agents.push(me, makeAgent("body", 5, 5, { alive: false }));
+    const body = makeAgent("body", 5, 5, { alive: false });
+    w.agents.push(me, body);
+    expect(selfVerbsFor(w, me, "surface")).toContain("butcher");
+    expect(selfVerbsFor(w, me, "surface")).not.toContain("loot"); // nothing on it
+    body.inventory = [{ itemKey: "oran", weight: 1, count: 1 }];
     expect(selfVerbsFor(w, me, "surface")).toEqual(expect.arrayContaining(["loot", "butcher"]));
   });
 

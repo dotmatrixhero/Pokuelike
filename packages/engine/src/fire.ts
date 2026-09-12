@@ -2,7 +2,7 @@ import { activeWeatherAt } from "./weather.js";
 import { setTile, tileAt } from "./world.js";
 import { maybeInflictStatus, suppressPassiveHealing } from "./status.js";
 import type { EventLog } from "./events.js";
-import type { Layer, TerrainKind, Tile, World } from "./types.js";
+import type { Agent, Layer, TerrainKind, Tile, World } from "./types.js";
 
 /**
  * Persistent fire. Direct ask: "for fire based move we gotta add the fire
@@ -217,4 +217,29 @@ export function applyFireDamage(world: World, log?: EventLog, rng: () => number 
       log?.record({ kind: "burned", tick: world.tick, agentId: agent.id, species: agent.species, pos: agent.pos, herdId: agent.herdId });
     }
   }
+}
+
+
+/**
+ * A deployed campfire's real reach. `RecipeDef.requiresNearFire`'s own
+ * precondition, and — direct ask, "being near a campfire should auto restore
+ * energy" — the reach of `needs.ts`'s `CAMPFIRE_ENERGY_RESTORE_RATE` too, so
+ * one fire means one thing everywhere.
+ *
+ * A little wider than "adjacent" (`waterWithinReach`'s radius 1): you sit
+ * AROUND a fire, not in the one tile it occupies.
+ *
+ * Lives here rather than in player.ts (where it used to) because needs.ts
+ * needs to ask it, and player.ts imports needs.ts — the reverse edge would be
+ * a real runtime cycle.
+ */
+export const NEAR_FIRE_RADIUS = 2;
+
+export function nearFire(world: World, agent: Agent): boolean {
+  for (let dy = -NEAR_FIRE_RADIUS; dy <= NEAR_FIRE_RADIUS; dy++) {
+    for (let dx = -NEAR_FIRE_RADIUS; dx <= NEAR_FIRE_RADIUS; dx++) {
+      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "fire") return true;
+    }
+  }
+  return false;
 }
