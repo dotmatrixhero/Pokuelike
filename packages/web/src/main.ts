@@ -1379,29 +1379,39 @@ function openOrderRing(partner: Agent, tile: Vec2): void {
   const name = SPECIES[partner.species]?.name ?? partner.species;
   const report = examineTile(world, viewLayer(), tile);
   const items: TileMenuItem[] = [];
-  for (const move of partner.moves ?? []) {
-    if (move.utilityMove && !move.terrainEffect) continue; // self-buffs have no tile to aim at
-    const cooling = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
-    items.push({
-      id: `move:${move.id}`,
-      label: move.name,
-      icon: cooling ? "⏳" : "⚔️",
-      hint: cooling ? `${move.name} is not ready` : `${name}: ${move.name} here`,
-    });
-  }
+
+  // The partner's moves sit behind an Attack wedge rather than one wedge each,
+  // exactly like the player's own. Two reasons: the grammar matches (Attack
+  // always means "pick a move, then it lands here"), and inlining four moves
+  // plus Go, Eat, Stance, Heel and Release put nine wedges on one ring, which
+  // is past the point a radial can be read without looking.
+  const aimable = (partner.moves ?? []).filter((m) => !m.utilityMove || m.terrainEffect);
+  if (aimable.length > 0) items.push({ id: "attack", label: "Attack", icon: "⚔️", hint: `Pick a move for ${name}` });
   if (report?.walkable) items.push({ id: "go", label: "Go", icon: "👣", hint: `${name} goes here and holds` });
-  // Only offered when there is actually a post to leave — a Heel wedge on a
-  // partner already at heel is a button that does nothing.
-  if (partner.commandedAction) items.push({ id: "heel", label: "Heel", icon: "🦴", hint: `${name} comes back to you` });
   if (report?.terrain === "food" && (tileAt(world, viewLayer(), tile.x, tile.y)?.stock ?? 0) > 0) {
     items.push({ id: "eat", label: "Eat", icon: "🍓", hint: `${name} eats here` });
   }
   if (report?.terrain === "water") items.push({ id: "drink", label: "Drink", icon: "💧", hint: `${name} drinks here` });
+  // Standing orders used to live only in the scrolling command menu, which the
+  // radial rounds left reachable by keyboard alone. They belong here: a stance
+  // is the most persistent thing you can tell a partner.
+  items.push({ id: "stance", label: "Stance", icon: "🧭", hint: `How ${name} behaves on its own` });
+  // Only offered when there is actually a post to leave — a Heel wedge on a
+  // partner already at heel is a button that does nothing.
+  if (partner.commandedAction) items.push({ id: "heel", label: "Heel", icon: "🦴", hint: `${name} comes back to you` });
   items.push({ id: RELEASE_ID, label: "Release", icon: "✋", hint: "Stop giving orders", destructive: true });
 
   tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (id) => {
     if (id === RELEASE_ID) {
       setCommandingPartner(undefined);
+      return;
+    }
+    if (id === "attack") {
+      openPartnerMoveRing(partner, tile);
+      return;
+    }
+    if (id === "stance") {
+      openStanceRing(partner, tile);
       return;
     }
     if (id === "eat" || id === "drink") {
@@ -1417,15 +1427,63 @@ function openOrderRing(partner: Agent, tile: Vec2): void {
       // ordinary following on its next tick.
       partner.commandedAction = undefined;
       say(`${name} falls back in beside you.`);
-      return;
     }
-    const moveId = id.slice("move:".length);
+  });
+}
+
+/** One partner's aimable moves, committing on the tile the order ring was opened over. */
+function openPartnerMoveRing(partner: Agent, tile: Vec2): void {
+  const name = SPECIES[partner.species]?.name ?? partner.species;
+  const moves = (partner.moves ?? []).filter((m) => !m.utilityMove || m.terrainEffect);
+  const items: TileMenuItem[] = moves.map((move) => {
+    const cooling = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
+    return {
+      id: move.id,
+      label: move.name,
+      icon: cooling ? "⏳" : "⚔️",
+      hint: cooling ? `${move.name} is not ready` : `${name}: ${move.name} here`,
+    };
+  });
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (moveId) => {
     if ((partner.moveCooldowns?.[moveId] ?? 0) > 0) {
-      say(`${name}'s ${partner.moves?.find((m) => m.id === moveId)?.name ?? "move"} is not ready yet.`);
+      say(`${name}'s ${moves.find((m) => m.id === moveId)?.name ?? "move"} is not ready yet.`);
       return;
     }
     const foe = occupantAt(tile, partner.id);
     commitMove(partner.id, moveId, tile, foe?.id);
+  });
+}
+
+/**
+ * The four standing orders, as a ring.
+ *
+ * Unlike everything else in the order ring these are not about the tile you
+ * pressed at all — a stance is how the partner behaves when you are not
+ * telling it anything. The ring opens over the pressed tile only because that
+ * is where your thumb already is.
+ *
+ * The current stance is marked rather than hidden, so the ring answers "what
+ * is it doing now" as well as "what should it do".
+ */
+const STANCES: { order: "follow" | "patrol" | "hunt" | "defend"; label: string; icon: string; hint: string }[] = [
+  { order: "follow", label: "Follow", icon: "🐾", hint: "Stays close, doesn't engage on its own" },
+  { order: "patrol", label: "Patrol", icon: "🧭", hint: "Wanders loosely nearby" },
+  { order: "hunt", label: "Hunt", icon: "🩸", hint: "Seeks out and fights nearby threats" },
+  { order: "defend", label: "Defend", icon: "🛡️", hint: "Stays close, fights off anything near you" },
+];
+
+function openStanceRing(partner: Agent, tile: Vec2): void {
+  const name = SPECIES[partner.species]?.name ?? partner.species;
+  const current = partner.standingOrder ?? "follow";
+  const items: TileMenuItem[] = STANCES.map((st) => ({
+    id: st.order,
+    label: st.order === current ? `${st.label} ✓` : st.label,
+    icon: st.icon,
+    hint: st.order === current ? `${name} is already on ${st.label}` : `${st.hint}`,
+  }));
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (order) => {
+    if (order === current) return; // already there; say nothing rather than burn a turn
+    playerAct({ kind: "setStandingOrder", agentId: partner.id, order: order as "follow" | "patrol" | "hunt" | "defend" });
   });
 }
 

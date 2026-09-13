@@ -16550,3 +16550,46 @@ Two failures in the first run of that harness were the harness, not the game,
 and are worth naming: a throwaway long-press left the Look **modal** over the
 canvas so the next press never reached the map, and the foe was placed at
 distance 2 where Tackle (range 1) correctly chases instead of landing.
+
+## Standing orders get a ring, and the order ring stops overflowing
+
+The radial rounds left `openCommandMenu` — the scrolling list — reachable by
+keyboard only, and it still owned the four standing orders
+(Follow/Patrol/Hunt/Defend). Those had no radial route at all.
+
+Adding a Stance wedge straight into the order ring would have made nine
+wedges on one circle (four moves + Go + Eat + Stance + Heel + Release), well
+past what a radial can be read at. So the partner's moves moved behind an
+**Attack** wedge — the same grammar the player's own moves already use, where
+Attack always means "pick a move, then it lands here".
+
+| order ring | before | after |
+|---|---|---|
+| empty tile | `Tackle, Body Slam, Low Kick, Go, Release` | `Attack, Go, Stance, Release` |
+| on a foe | same five | `Attack, Go, Stance, Release` → Attack → `Tackle, Body Slam, Low Kick` |
+
+A stance is the one thing in that ring that is **not** about the tile you
+pressed — it is how the partner behaves when you are not telling it anything.
+The ring opens over the pressed tile only because that is where your thumb
+already is. The current stance is marked with a tick rather than hidden, so
+the ring answers "what is it doing now" as well as "what should it do", and
+re-picking the current one costs no turn.
+
+**Verified with real touch, seed 4242:**
+
+```
+order ring          ["attack:Attack","go:Go","stance:Stance","__release:Release"]
+STANCE ring         ["follow:Follow ✓","patrol:Patrol","hunt:Hunt","defend:Defend"]
+pick Hunt           standingOrder = "hunt", log "Machop is now on hunt."
+re-open stance ring ["follow:Follow","patrol:Patrol","hunt:Hunt ✓","defend:Defend"]
+tap map away        ring closes
+Attack sub-ring     ["tackle:Tackle","body_slam:Body Slam","low_kick:Low Kick"]
+pick Tackle         order {kind:"move", moveId:"tackle"}, log "You signal Machop."
+```
+
+Two harness faults in earlier runs of that script, both mine and both worth
+naming because they look exactly like product bugs: `document.body.click()`
+does not dismiss a ring (the outside-dismiss listens for a **pointerdown on
+the map area**), so the ring stayed open and the next long-press was swallowed
+by `if (tileMenu.isOpen) return`; and `__cancel` is the hub, not a wedge, so
+there was no element to tap.

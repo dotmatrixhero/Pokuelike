@@ -12771,9 +12771,11 @@ rapport and all that for a unit."*
 
 ### Still open
 
-- [ ] `openCommandMenu` (the scrolling list) is now only reachable by
-      keyboard. It still carries the per-partner standing-order rows
-      (Follow/Patrol/Hunt/Defend), which have no radial route yet.
+- [x] **Standing orders have a radial route.** A Stance wedge in the order
+      ring opens Follow/Patrol/Hunt/Defend with the current one ticked. The
+      partner's moves moved behind an Attack wedge to make room — nine
+      wedges on one ring was past readable. `openCommandMenu` survives as
+      the keyboard path.
 - [ ] Ring 1's hub commits Look on a release-without-drag, by design. With
       rings nested two deep that means a fumbled release opens the Look modal
       over the map — mildly annoying, not wrong. Worth a look in play.
