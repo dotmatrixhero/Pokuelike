@@ -12591,3 +12591,78 @@ order stayed queued looking perfectly healthy. Reproduced:
 - [ ] `hasUrgentNeed` at 0.3 may simply be too aggressive now that it is
       visible — a partner spends a lot of a cave run under it. Left alone
       rather than retuned unilaterally.
+
+## Round: the UI, four asks
+
+Direct asks, one message: *"Events log, filtered to player should be a tab that
+is auto switched to when something of note happens. I think status of player
+needs to be shown when hp goes down or thirst, hunger, energy changes or gets
+under a threshold. So I guess on desktop we need to show logs and player status
+at same time. Also the examine modal needs to show everything. Like moves and
+rapport and all that for a unit."*
+
+### The Log is its own thing now
+
+- [x] It used to be a collapsible `<details>` INSIDE the You page, so it
+      competed with vitals/party/pack for one column and could be scrolled out
+      of sight exactly when it mattered.
+- [x] **Mobile:** a real tab — You | Log | World — and the auto-switch targets
+      it directly.
+- [x] **Desktop:** pinned as a permanent lower pane (42%) so logs and player
+      status are on screen together and no tab switch is needed. Measured
+      across a tab switch: You 440px + Log 323px, then World 389px + **Log
+      286px, still shown**.
+- [x] The desktop pane works by beating the `hidden` attribute with a
+      `display: flex !important` rule. That inversion is index.html's own
+      documented scar used deliberately — so any check of this pane must
+      measure computed style, never the flag, which is what the verification
+      does.
+- [x] `focusPlayerPanel("log")` now does nothing on desktop: switching tabs
+      there would move the player AWAY from what they were reading to show
+      them something already on screen.
+- [x] **A specificity trap, caught by measuring rather than by reading.** The
+      rule hiding the redundant Log tab on desktop was
+      `body.player-mode #tab-log` (one id), which loses to the existing
+      `body.player-mode #panel-tabs .play-tab { display: flex }` (one id, two
+      classes). The tab stayed visible. Scoped through `#panel-tabs` to win on
+      id count. Same family as the `.play-tab` scar already recorded here.
+
+### Vitals react to change
+
+- [x] Two separate signals, deliberately not merged: any real drop **pulses**
+      the bar, and crossing DOWN through 50% / 25% / 10% **says so in words**.
+      A pulse is "that cost you"; a threshold is "do something about this".
+- [x] **`VITAL_PULSE_MIN` is load-bearing, and measured.** Hunger, thirst and
+      energy all decay every tick, so pulsing on *any* drop made all four bars
+      flash on **every single turn** — constant noise that trains you to
+      ignore the signal. Gated at 2%: measured 0 pulses on an ordinary turn, 1
+      on a real hit.
+- [x] Live lines: `You are thirsty. (50% thirst)`, `You are hungry. (50%
+      hunger)`, `You are hurt. (50% health)`.
+- [x] **A fixture fighting the sim, not a bug.** HP set to 40% read back at
+      55.9% by the time the HUD drew — heal-over-time outran the drop, and the
+      crossing fired a turn later at 36.2%. Stated rather than tidied away.
+- [x] Thresholds and the pulse floor are sim-original; judge against a real
+      run.
+
+### The Look modal shows everything
+
+- [x] Moves went from a chip reading `Tackle` to a row per move with what a
+      player can actually act on: `Tackle: normal · power 40 · melee · cd 3`,
+      plus "not ready (n)" when on cooldown. `accuracy: -1` is a never-misses
+      sentinel and is suppressed, same family as the `power -1` bug caught
+      last round.
+- [x] **Rapport, both directions**, using the engine's own prose: trust stage,
+      `They remember: She has petted me three times.`, and what you remember of
+      them. Labelled, because one unattributed block of "She has defended me."
+      is ambiguous about who is speaking.
+- [x] Also nature, age, standing order, a stalled order, and what it is
+      carrying.
+- [x] Full suite: engine 1699, data 479, web build clean.
+
+### Still open
+
+- [ ] "Auto switched to when something of note happens" currently means combat
+      and threshold crossings. Level-ups, a follower bonding or leaving, and
+      finding a landmark are arguably also notable and do not switch.
+- [ ] The desktop split is a fixed 42%. Not draggable.

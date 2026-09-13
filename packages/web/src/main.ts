@@ -5,7 +5,7 @@ import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { herdDisplayName } from "./notableTitles.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
-import { examineTile, selfVerbsFor, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { describeRapport, examineTile, selfVerbsFor, trustStage, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
 import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -128,8 +128,9 @@ const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLB
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
 const tabYouBtn = document.getElementById("tab-you") as HTMLButtonElement;
 const tabWorldBtn = document.getElementById("tab-world") as HTMLButtonElement;
+const tabLogBtn = document.getElementById("tab-log") as HTMLButtonElement;
+const logPageEl = document.getElementById("log-page") as HTMLElement;
 const youPageEl = document.getElementById("you-page") as HTMLElement;
-const logSectionEl = document.getElementById("section-log") as HTMLDetailsElement;
 /**
  * Whether the sidebar is the mobile bottom sheet rather than a desktop
  * column. Matches the one breakpoint index.html's own `@media (max-width:
@@ -1008,6 +1009,13 @@ function renderLookModal(tile: Vec2, report: TileReport): void {
         lookMenuBodyEl.append(lookBar("Energy", who.needs.energy * 100, 100, "#c7a3e8"));
       }
       if (who.status) lookMenuBodyEl.append(lookRow("Status", who.status.kind));
+      if (who.nature) lookMenuBodyEl.append(lookRow("Nature", who.nature));
+      if (who.age !== undefined) lookMenuBodyEl.append(lookRow("Age", String(who.age)));
+      if (who.standingOrder) lookMenuBodyEl.append(lookRow("Order", who.standingOrder));
+      if (who.commandedAction?.stalled) lookMenuBodyEl.append(lookRow("Order stalled", who.commandedAction.stalled));
+      if ((who.inventory?.length ?? 0) > 0) {
+        lookMenuBodyEl.append(lookRow("Carrying", who.inventory!.map((i) => `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}`).join(", ")));
+      }
       if (who.stats) {
         lookMenuBodyEl.append(lookHeading("Stats"));
         const grid = document.createElement("div");
@@ -1037,19 +1045,45 @@ function renderLookModal(tile: Vec2, report: TileReport): void {
       }
       if (who.moves?.length) {
         lookMenuBodyEl.append(lookHeading("Moves"));
-        const chips = document.createElement("div");
-        chips.className = "look-chips";
+        // Direct ask: "the examine modal needs to show everything. Like moves
+        // and rapport and all that for a unit." A chip reading just "Tackle"
+        // told the player nothing they could act on — what decides whether to
+        // stand next to this thing is how hard it hits, from how far, and how
+        // often. One row per move instead of a chip cloud, since that is four
+        // facts and a cloud only fits one.
         for (const move of who.moves) {
-          const chip = document.createElement("span");
-          chip.className = "look-chip";
-          // Says what the move IS, not just that it exists — power is what a
-          // player deciding whether to stand next to this thing actually
-          // needs. `power <= 0` is a sentinel for "no fixed power" (Low Kick
-          // scales with weight), and printing it read as "Low Kick · -1".
-          chip.textContent = (move.power ?? 0) > 0 ? `${move.name} · ${move.power}` : move.name;
-          chips.append(chip);
+          const cd = who.moveCooldowns?.[move.id] ?? 0;
+          const facts: string[] = [];
+          facts.push(move.type);
+          if ((move.power ?? 0) > 0) facts.push(`power ${move.power}`);
+          // `accuracy: -1` is the "never misses" sentinel, same family as the
+          // power one that printed "Low Kick · -1" before it was caught.
+          if ((move.accuracy ?? -1) >= 0 && move.accuracy !== 100) facts.push(`${move.accuracy}% acc`);
+          const reach = move.range ? (move.range.max <= 1 ? "melee" : `reach ${move.range.min}–${move.range.max}`) : undefined;
+          if (reach) facts.push(reach);
+          if (move.cooldownTicks) facts.push(`cd ${move.cooldownTicks}`);
+          const row = lookRow(move.name, facts.join(" · "));
+          if (cd > 0) {
+            const wait = document.createElement("span");
+            wait.className = "look-dim";
+            wait.textContent = `  — not ready (${cd})`;
+            row.append(wait);
+          }
+          lookMenuBodyEl.append(row);
         }
-        lookMenuBodyEl.append(chips);
+      }
+
+      // Rapport, both directions. The engine already writes the prose
+      // (`describeRapport`); this only has to ask for it and say whose view it
+      // is. Without the labels a single block of "She has defended me." is
+      // ambiguous about who is speaking.
+      if (me && who.id !== me.id) {
+        lookMenuBodyEl.append(lookHeading("Between you"));
+        lookMenuBodyEl.append(lookRow("Trust", trustStage(world, who, me.id)));
+        const theirView = describeRapport(who, me, me.id);
+        const myView = describeRapport(me, who, who.id);
+        lookMenuBodyEl.append(lookRow("They remember", theirView || "nothing about you yet"));
+        if (myView) lookMenuBodyEl.append(lookRow("You remember", myView));
       }
     } else if (corpse) {
       lookMenuBodyEl.append(lookRow("Body", `${SPECIES[corpse.species]?.name ?? corpse.species}, not yet butchered`));
@@ -1560,15 +1594,78 @@ modePlayBtn.addEventListener("click", () => {
  * bars for whichever agent is selected; this one is the player's and does
  * not go away when you click a Sandshrew.
  */
+/**
+ * The vitals as they were last drawn, so a CHANGE can be noticed.
+ *
+ * Direct ask: "I think status of player needs to be shown when hp goes down or
+ * thirst, hunger, energy changes or gets under a threshold."
+ *
+ * Two different signals, deliberately not merged: any drop pulses the bar so
+ * the eye catches it, and crossing DOWN through a threshold says so in words,
+ * once. A bar that pulsed and a bar that crossed 25% are different events —
+ * one is "that cost you", the other is "you need to do something about this".
+ */
+let lastVitals: Record<string, number> | undefined;
+/**
+ * Sim-original. Three steps rather than one: a single "low" line arriving at
+ * 25% is the only warning you would ever get, which is too late to act on for
+ * hunger and thirst at their current decay. Judge against a real run.
+ */
+const VITAL_THRESHOLDS = [0.5, 0.25, 0.1] as const;
+/** A drop has to beat ordinary per-tick decay to be worth flashing — see the call site. */
+const VITAL_PULSE_MIN = 0.02;
+const VITAL_WORDS: Record<string, { noun: string; low: string }> = {
+  hp: { noun: "health", low: "hurt" },
+  hunger: { noun: "hunger", low: "hungry" },
+  thirst: { noun: "thirst", low: "thirsty" },
+  energy: { noun: "energy", low: "tired" },
+};
+
+/** The lowest threshold `value` has crossed down through since `was`, if any. */
+function crossedDown(was: number, value: number): number | undefined {
+  for (const t of VITAL_THRESHOLDS) {
+    if (was > t && value <= t) return t;
+  }
+  return undefined;
+}
+
 function renderPlayerHud(): void {
   const player = findPlayer(world);
   if (!player) return;
+  const next: Record<string, number> = {};
   const bar = (id: string, value: number, text: string) => {
     const fill = document.getElementById(`hud-${id}`) as HTMLElement;
     const num = document.getElementById(`hud-${id}-text`) as HTMLElement;
     fill.style.width = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
     fill.classList.toggle("low", value < 0.25);
     num.textContent = text;
+    next[id] = value;
+
+    const was = lastVitals?.[id];
+    if (was === undefined) return;
+    // Restart the animation rather than just adding the class: an identical
+    // class already present does not re-run, so a second hit in a row would
+    // flash nothing.
+    //
+    // `VITAL_PULSE_MIN` is load-bearing, and measured: hunger, thirst and
+    // energy all decay a little EVERY tick, so a pulse on any drop at all made
+    // all four bars flash on every single turn — constant noise that would
+    // train the player to ignore exactly the signal this is for. Ordinary
+    // per-turn decay is well under 1%; a real hit or a real gulp is far above.
+    if (value < was - VITAL_PULSE_MIN) {
+      const row = fill.closest(".hud-row") as HTMLElement | null;
+      row?.classList.remove("vital-hit");
+      void row?.offsetWidth;
+      row?.classList.add("vital-hit");
+    }
+    const crossed = crossedDown(was, value);
+    if (crossed !== undefined) {
+      const words = VITAL_WORDS[id]!;
+      say(crossed <= 0.1 ? `You are critically ${words.low}.` : `You are ${words.low}. (${Math.round(crossed * 100)}% ${words.noun})`);
+      // A threshold crossing is exactly the "something of note" the panel
+      // should be showing — same treatment a hit gets.
+      focusPlayerPanel("vitals");
+    }
   };
   const maxHp = player.maxHp ?? 1;
   const hp = player.hp ?? maxHp;
@@ -1576,6 +1673,7 @@ function renderPlayerHud(): void {
   bar("hunger", player.needs.hunger, `${Math.round(player.needs.hunger * 100)}%`);
   bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
   bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
+  lastVitals = next;
   // Who you are, at the top of your own panel. The row under it is depth,
   // which reads as "Level 1 of 5" and is emphatically not your level.
   const speciesName = SPECIES[player.species]?.name ?? player.species;
@@ -1962,21 +2060,20 @@ function focusPlayerPanel(part: "log" | "vitals"): void {
   if (!playerMode) return;
   if (!packMenuEl.hidden || !commandMenuEl.hidden || !lookMenuEl.hidden) return;
 
-  if (activeTab !== "you") selectTab("you", false);
   if (part === "log") {
-    // A collapsed Log section would make the swap a no-op — the tab would
-    // change and still show nothing new.
-    logSectionEl.open = true;
-    if (isMobileLayout() && sheetDetent !== "full") setSheetDetent("full");
-    // Only scroll where there is somewhere to scroll to; on desktop the whole
-    // page is usually already visible and this would jump the panel for
-    // nothing.
-    if (isMobileLayout()) logSectionEl.scrollIntoView({ block: "nearest" });
-  } else if (isMobileLayout()) {
-    // Peek is exactly the vitals row, so "show me my own bars" is peek, not
-    // full — opening the sheet all the way would bury the map instead.
-    youPageEl.scrollTop = 0;
+    // On desktop the log is a permanent pane, already on screen beside
+    // whatever tab is up — switching tabs there would take the player AWAY
+    // from what they were reading to show them something they can already
+    // see. Mobile has no room to split, so it gets the tab.
+    if (!isMobileLayout()) return;
+    if (activeTab !== "log") selectTab("log", false);
+    if (sheetDetent !== "full") setSheetDetent("full");
+    return;
   }
+  if (activeTab !== "you") selectTab("you", false);
+  // Peek is exactly the vitals row, so "show me my own bars" is peek, not
+  // full — opening the sheet all the way would bury the map instead.
+  if (isMobileLayout()) youPageEl.scrollTop = 0;
 }
 
 /**
@@ -2947,7 +3044,7 @@ function examineNext(): void {
 // gone; Events moved from third to last in both the tab bar (index.html)
 // and this file's own tab order.
 
-type PanelTab = "you" | "inspector" | "battle-screen" | "chronicle" | "events";
+type PanelTab = "you" | "log" | "inspector" | "battle-screen" | "chronicle" | "events";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -2963,6 +3060,7 @@ let lastAutoSwitchedBattleSeq: number | undefined;
 
 const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
   you: tabYouBtn,
+  log: tabLogBtn,
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
   chronicle: tabChronicleBtn,
@@ -2970,6 +3068,7 @@ const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
   you: youPageEl,
+  log: logPageEl,
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
   chronicle: chronicleEl,
@@ -2998,6 +3097,7 @@ function selectTab(tab: PanelTab, manual: boolean): void {
   }
 }
 
+tabLogBtn.addEventListener("click", () => selectTab("log", true));
 tabYouBtn.addEventListener("click", () => {
   document.body.classList.remove("world-tabs-open");
   selectTab("you", true);
