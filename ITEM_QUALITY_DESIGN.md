@@ -212,3 +212,60 @@ A secondary, non-colour cue (a small rarity pip or a border on the inventory
 slot) is worth considering so rarity is not carried by hue alone — it also
 survives the map's darker biomes, where purple and blue lose contrast against
 cave and badlands ground.
+
+## Wrap-up decisions
+
+6. **The axe grants `cut` (i.e. `slash`) as well as `fell`.** *"Sure axe
+   should give you cut though. Just we don't have a skill tree for it."* The
+   gap above is confirmed as a gap. It pairs the axe the way the machete is
+   already paired — a terrain move plus a combat move — and needs no tree to
+   ship, since every other tool grant is an unmodified base move today.
+
+## Ground items: the emoji ask, and why it cannot be built yet
+
+Direct ask: *"I think we don't show very well when have items dropped on the
+ground. Can you represent it with a money-bag emoji? Unless it has an assigned
+axe / crossed-swords / knife / club / torch / bow one specifically."*
+
+**Checked before speccing: there are no ground items at all.** `player.ts`'s
+`"drop"` case removes the item from the agent and stops there, with its own
+comment saying so — *"No ground-item/pickup system exists yet, so this does
+not leave anything retrievable; see TODO.md."* `Tile` carries no item or loot
+field, and `world.items` is the item **catalog** (definitions keyed by key),
+not instances placed in the world. `TODO.md` already records the gap.
+
+So this is not a rendering problem. Dropped items are not drawn badly; they
+do not exist. Dropping destroys the item.
+
+**What is actually required, in order:**
+
+1. Ground-item storage — item instances at a position, with the quality tier
+   and per-move point allocations from this document travelling with the
+   instance (an item's build lives on the item, so a dropped axe keeps it).
+2. A `pickup` action, and drop changed to place rather than destroy.
+3. Then the rendering below.
+
+### Rendering spec, ready for when the above exists
+
+A per-item glyph where one is assigned, falling back to a money bag:
+
+| item | glyph |
+|---|---|
+| axe | 🪓 |
+| sword / bladed weapon | ⚔️ |
+| knife | 🔪 |
+| club | ♣️ |
+| torch | 🔦 |
+| bow | 🏹 |
+| *anything else* | 💰 |
+
+There is precedent: the renderer already draws per-archetype emoji for wild
+humans, so the glyph path exists.
+
+Two notes carried down from the tier work above, both of which apply here:
+
+- Ground items must draw in the **dynamic pass**, not a cached static layer —
+  required anyway for blue-and-above shimmer.
+- The tier colour should show on the ground item, not only in the inventory,
+  or the shimmer has nothing to shimmer on and rarity stays invisible until
+  pickup — which is the opposite of "visible on the map."
