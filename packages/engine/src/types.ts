@@ -1818,6 +1818,18 @@ export interface Agent {
    * before it commits to a mob fight (predation.ts's `mobThreshold`).
    */
   mobDefenseBonus?: number;
+  /**
+   * This villager's job in its settlement — "elder", "smith", "guard" and so
+   * on, assigned at placement from what the town is known for. Present only
+   * on a settlement's individuated people (settlementPlacement.ts); wild
+   * humans and every other species leave it unset.
+   *
+   * Deliberately NOT the same thing as `archetype`, which is a spawn-time
+   * tendency for wild humans. HUMANS_DESIGN.md decision 5 wants roles
+   * eventually EARNED and inherited as offices; this is the placement-time
+   * seed for that, not the finished mechanism.
+   */
+  settlementRole?: string;
 
   /**
    * Denormalized from `SpeciesDef.obligateAquatic` at spawn time
@@ -2642,6 +2654,13 @@ export interface World {
   tiles: Record<Layer, Tile[]>;
   agents: Agent[];
   tick: number;
+  /**
+   * The settlement standing in this zone, carried down from the macro grid's
+   * history pass at promotion — same "carry it down once" treatment as
+   * `territoryName`/`sanctuaryDistance`. Absent in the overwhelming majority
+   * of zones, which are wilderness. See settlementPlacement.ts.
+   */
+  settlement?: import("./settlementPlacement.js").SettlementPresence;
   /** ROADMAP.md M5: the recipe table the scenario handed this world (data package `crafting.ts`). Absent in a world with no crafting. */
   recipes?: Record<string, RecipeDef>;
   /** ROADMAP.md M5: the item table, keyed by item key. Materials (harvest.ts) are not here; only made things. */

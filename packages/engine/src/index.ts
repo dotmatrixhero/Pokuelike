@@ -21,6 +21,7 @@ export * from "./names.js";
 export * from "./chronicle.js";
 export * from "./territories.js";
 export * from "./settlementHistory.js";
+export * from "./settlementPlacement.js";
 export * from "./crops.js";
 export * from "./herding.js";
 export * from "./herdMigration.js";

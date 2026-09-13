@@ -9,6 +9,15 @@ import { countTerrainNear, findNearestIndexed, foodStockNear } from "./resourceI
 import { mulberry32 } from "./rng.js";
 import { type MacroGrid, type MacroZone, zoneAt, zoneKey, parseZoneKey, zoneNeighbors, biasForZone, estimateZoneResourceIndex, estimateZoneSpecies, speciesFitsZone, distanceToNearestLandmark } from "./macroGrid.js";
 import { territoryAt } from "./territories.js";
+import { placeSettlement } from "./settlementPlacement.js";
+
+/**
+ * Level a village's individuated people spawn at. Humans are weak by design
+ * (attack 28, one base move) — HUMANS_DESIGN.md's "individually weak and
+ * collectively formidable" — so this is a modest band, and their survival is
+ * meant to come from the palisade and from `mobDefenseBonus`, not from stats.
+ */
+const VILLAGER_LEVEL = 12;
 
 /**
  * The overworld system — a macro grid of thousands of zone-cells (see
@@ -572,6 +581,29 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
       region.world.items = ctx.itemCatalog.items;
       region.world.recipes = ctx.itemCatalog.recipes;
       region.world.playerBaseMoves = ctx.itemCatalog.playerBaseMoves;
+    }
+
+    // People, if the history pass put a settlement on this zone. Same
+    // "carry it down once, at promotion" treatment as territoryName and
+    // sanctuaryDistance above — the settlement's existence, site and fate
+    // were all decided at worldgen; this only realises it in tiles and
+    // agents. The overwhelming majority of zones are wilderness and skip
+    // this entirely.
+    const settled = mw.grid.history?.settlements.find((s) => s.row === row && s.col === col);
+    if (settled) {
+      const settlementRng = mulberry32(zoneSeed(mw.worldSeed, row, col) ^ 0x5bd1e995);
+      region.world.settlement = placeSettlement(region.world, settled, settlementRng, (id, pos, role) => {
+        // Villagers are ordinary humans by the roster, not a special-cased
+        // unit: same spawnAgent path, gear and archetype assignment every
+        // other wild human gets, so everything downstream (combat, needs,
+        // the new mobDefenseBonus) applies to them unchanged.
+        const villager = ctx.spawnAgent("human", id, pos, VILLAGER_LEVEL, settlementRng);
+        villager.sex = settlementRng() < 0.5 ? "male" : "female";
+        assignHumanArchetype(villager, ctx, settlementRng);
+        villager.herdId = `${settled.id}-folk`;
+        villager.settlementRole = role;
+        return villager;
+      });
     }
   }
 
