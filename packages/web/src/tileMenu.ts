@@ -94,6 +94,21 @@ export class TileMenu {
   private armed: TileMenuItem | undefined;
   private centre: TileMenuItem | undefined;
   private onPick: ((id: string) => void) | undefined;
+  /**
+   * The pointer gesture currently allowed to resolve this menu, if any.
+   *
+   * This exists because of a reported bug: the second ring could not be
+   * tapped at all. The host's `pointerup` handler resolved ANY open menu, so
+   * the moment you touched a party wedge it committed whatever was armed —
+   * and nothing was armed but the hub, because `track()` only ran from the
+   * canvas listener and a wedge sits above the canvas. Result: the ring
+   * cancelled itself the instant you touched it.
+   *
+   * A ring opened from inside a commit (the second ring) starts with NO
+   * owner, so the finger-lift that opened it cannot also resolve it. Touching
+   * the ring claims ownership, and only then does a release commit.
+   */
+  private gesture: number | undefined;
 
   /**
    * `onVisibilityChange` lets the host lock map panning while the menu is up.
@@ -115,10 +130,38 @@ export class TileMenu {
     this.hub.className = "tile-menu-hub";
     this.root.appendChild(this.hub);
     this.container.appendChild(this.root);
+
+    // The menu drives itself once open. Arming on pointerDOWN is what makes a
+    // discrete tap work: a tap never produces a pointermove, so without this
+    // the armed item stays the hub and every tap reads as cancel.
+    this.root.addEventListener("pointerdown", (event) => {
+      if (!this.isOpen) return;
+      this.gesture = event.pointerId;
+      try {
+        this.root.setPointerCapture(event.pointerId);
+      } catch {
+        /* capture is a nicety here; the pointerup still resolves */
+      }
+      this.track({ x: event.clientX, y: event.clientY });
+    });
+    this.root.addEventListener("pointermove", (event) => {
+      if (!this.isOpen || this.gesture !== event.pointerId) return;
+      this.track({ x: event.clientX, y: event.clientY });
+    });
   }
 
   get isOpen(): boolean {
     return !this.root.hidden;
+  }
+
+  /** Lets the long-press that opened this menu resolve it on release. */
+  claimGesture(pointerId: number): void {
+    this.gesture = pointerId;
+  }
+
+  /** Whether `pointerId` is the gesture allowed to commit this menu. */
+  ownsGesture(pointerId: number): boolean {
+    return this.gesture === pointerId;
   }
 
   /**
@@ -177,6 +220,9 @@ export class TileMenu {
     this.onPick = onPick;
     this.centre = centre;
     this.armed = centre;
+    // A ring opened from inside a commit belongs to no gesture yet — the
+    // finger-lift that opened it must not also resolve it.
+    this.gesture = undefined;
     for (const { el } of this.wedges) el.remove();
     this.wedges = [];
 
@@ -204,10 +250,6 @@ export class TileMenu {
       label.className = "tile-menu-label";
       label.textContent = item.label;
       el.append(icon, label);
-      el.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this.commit(item.id);
-      });
       this.root.appendChild(el);
       this.wedges.push({ el, item, angle });
     });
@@ -277,6 +319,7 @@ export class TileMenu {
   close(): void {
     if (this.root.hidden) return;
     this.root.hidden = true;
+    this.gesture = undefined;
     this.armed = undefined;
     this.centre = undefined;
     this.hub.classList.remove("armed", "destructive");

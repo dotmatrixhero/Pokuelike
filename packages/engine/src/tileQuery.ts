@@ -160,7 +160,17 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   // first would defeat the point of offering.
   if (report.occupantId && report.occupantId !== agent.id && offerableFoodItems(world, agent).length > 0) verbs.push("offer");
   const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
-  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
+  // Your own tile offers Attack too, when you have a move to use. It is NOT
+  // "hit yourself" — `range.min` is 1 now, so that is not even legal. It is
+  // the way into your own move list from the one tile you can always press.
+  //
+  // Reported: "all my fucking tackles and embers are missing." Attack was
+  // gated on having something to hit, and `command` — which used to open the
+  // menu that listed your moves — became the party picker. So long-pressing
+  // where you stand offered Command and nothing else, and your own moves had
+  // no route at all. Picking a move here arms targeting instead of swinging.
+  const hasUsableMove = (agent.moves ?? []).some((m) => !m.utilityMove || m.terrainEffect);
+  if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && (terrainWorkable || hasUsableMove))) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");
   // Loot and butcher are no longer one pair. Loot works on a fainted agent
   // too and needs something to actually take; butcher needs a true corpse

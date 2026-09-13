@@ -1191,11 +1191,7 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
       openPartyRing(tile);
       return;
     case "attack":
-      // Needs a move picked, and the command menu is where moves live — but
-      // the tile is already decided, so it commits on the pick instead of
-      // asking for a target again.
-      pendingTargetTile = tile;
-      openCommandMenu();
+      openMoveRing(tile);
       return;
   }
 }
@@ -1210,6 +1206,62 @@ function occupantAt(tile: Vec2, excludeId: string): Agent | undefined {
   return world.agents.find(
     (a) => a.alive !== false && !a.isEgg && a.layer === viewLayer() && a.pos.x === tile.x && a.pos.y === tile.y && a.id !== excludeId
   );
+}
+
+/**
+ * Second ring: your own moves.
+ *
+ * This replaces routing Attack into the scrolling command menu. Direct call:
+ * *"Its so hard to scroll menus."* Your moves are a short list and they
+ * belong on a ring like everything else.
+ *
+ * Two commit paths, decided by what you pressed:
+ *  - a real target (anything but the tile you stand on) — swing at it now.
+ *  - your own tile — there is nothing there to hit, so picking a move arms
+ *    targeting and the next tap says where. This is the route back to your
+ *    own moves from the one tile you can always press.
+ *
+ * Self-buffs are on the ring too, committing instantly, so the ring is the
+ * whole of "my moves" rather than most of it.
+ */
+function openMoveRing(tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  const moves = me.moves ?? [];
+  if (moves.length === 0) {
+    say("You know no moves.");
+    return;
+  }
+  const aimingFromHere = tile.x === me.pos.x && tile.y === me.pos.y;
+  const items: TileMenuItem[] = moves.map((move) => {
+    const selfBuff = !!move.utilityMove && !move.terrainEffect;
+    const cooling = (me.moveCooldowns?.[move.id] ?? 0) > 0;
+    return {
+      id: move.id,
+      label: move.name,
+      icon: cooling ? "⏳" : selfBuff ? "✨" : "⚔️",
+      hint: cooling ? `${move.name} is not ready` : selfBuff ? `Use ${move.name} now` : aimingFromHere ? `${move.name} — then tap a target` : `${move.name} here`,
+    };
+  });
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (moveId) => {
+    const move = moves.find((m) => m.id === moveId);
+    if (!move) return;
+    if ((me.moveCooldowns?.[move.id] ?? 0) > 0) {
+      say(`${move.name} is not ready yet.`);
+      return;
+    }
+    if (move.utilityMove && !move.terrainEffect) {
+      playerAct({ kind: "useUtilityMove", moveId: move.id });
+      return;
+    }
+    if (aimingFromHere) {
+      targeting = { moveId: move.id };
+      hudMessageEl.textContent = `Targeting with ${move.name} — tap a tile. Esc to cancel.`;
+      return;
+    }
+    const occupant = occupantAt(tile, me.id);
+    commitMove(undefined, move.id, tile, move.terrainEffect ? undefined : occupant?.id);
+  });
 }
 
 /**
@@ -1469,6 +1521,11 @@ canvas.addEventListener("pointerdown", (event) => {
       return;
     }
     openTileMenu(tile);
+    // This gesture opened it, so this gesture is allowed to resolve it on
+    // release. Anything opened later (a second ring, from inside a commit)
+    // owns no gesture and must be touched before it will commit — see
+    // `TileMenu.gesture`.
+    tileMenu.claimGesture(pointerId);
     // Capture, or the drag half of press-drag-release simply does not work:
     // the radial's wedges sit above the canvas, so once the menu is open every
     // pointermove lands on a wedge and never reaches the canvas listener that
@@ -1496,9 +1553,13 @@ canvas.addEventListener("pointermove", (event) => {
 // to resolve the menu rather than leaving it stuck open.
 window.addEventListener("pointerup", (event) => {
   if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-  if (tileMenu.isOpen) {
-    // Only a genuine drag-release commits. A press-and-release in place leaves
-    // the menu up so the wedges can be tapped one at a time instead.
+  // Only the gesture that owns the menu resolves it. Without this test, the
+  // finger-lift that opened a SECOND ring went straight on to commit that
+  // ring's armed item — the hub, i.e. cancel — so the ring closed the instant
+  // it appeared and a party member could never be picked. Reported as: "then
+  // my finger is lifted and second ring shows up. And then I see my party but
+  // I can't select it."
+  if (tileMenu.isOpen && tileMenu.ownsGesture(event.pointerId)) {
     if (tileMenu.release()) suppressNextClick = true;
   }
   cancelPress();
@@ -4080,6 +4141,18 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     beginAllyTargeting(agentId: string, moveId: string): void {
       targeting = { agentId, moveId };
     },
+    /**
+     * A tile's position in CLIENT coordinates, so a check can dispatch real
+     * pointer events at it. This exists because `pickWedge` below drives the
+     * DOM directly and therefore cannot catch anything in the long-press /
+     * drag / release path — which is exactly where a reported bug turned out
+     * to live. Prefer driving real events through this.
+     */
+    screenPosOf(x: number, y: number): { x: number; y: number } {
+      const areaRect = mapAreaEl.getBoundingClientRect();
+      const p = tileScreenPos({ x, y });
+      return { x: areaRect.left + p.x, y: areaRect.top + p.y };
+    },
     /** Who the inspector is currently showing, or undefined for nobody. */
     selected(): string | undefined {
       return selectedAgentId;
@@ -4099,11 +4172,21 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
         label: (el.querySelector(".tile-menu-label") as HTMLElement | null)?.textContent ?? "",
       }));
     },
-    /** Commit a wedge by id — the same entry point a click on it uses. */
+    /**
+     * Commit a wedge by id, by dispatching the REAL pointer events a finger
+     * would. It used to call `el.click()`, and that is exactly why a check
+     * could report the second ring working while it was in fact impossible to
+     * tap: the bug lived in the pointerdown/pointerup path this was skipping.
+     * Prefer driving `screenPosOf` + real input; this is for the cases where
+     * only the choice matters, not the gesture.
+     */
     pickWedge(id: string): boolean {
-      const el = document.querySelector(`#tile-menu .tile-menu-wedge[data-verb="${id}"]`) as HTMLElement | null;
+      const el = document.querySelector(`#tile-menu .tile-menu-wedge[data-verb="${CSS.escape(id)}"]`) as HTMLElement | null;
       if (!el) return false;
-      el.click();
+      const r = el.getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, pointerId: 1, bubbles: true };
+      el.dispatchEvent(new PointerEvent("pointerdown", at));
+      window.dispatchEvent(new PointerEvent("pointerup", at));
       return true;
     },
     /** The tiles the targeting overlay would light up with the cursor on a named tile — the same call a real pointermove makes. */

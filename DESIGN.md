@@ -16454,3 +16454,99 @@ Worth recording because both looked like findings:
 
 Also worth noting: I claimed `eligibleBiomes` on crops was read by nothing.
 It is read, by `pickCrop` — I had filtered `crops.ts` out of my own grep.
+
+## The second ring could not be tapped, and my verification could not have caught it
+
+Direct report: *"Only when I lift my finger does it do anything, which is
+typical but for second ring stuff it's kinda fucked up. Cuz then my finger is
+lifted and second ring shows up. And then I see my party but I can't select
+it. Also all my fucking tackles and embers are missing."*
+
+Three separate faults, and the reason none of them were caught is worth
+recording first.
+
+### Why the previous round's verification was worthless
+
+The checks drove the radial through a debug hook that called `el.click()` on
+a wedge. Every bug here lives in the **pointerdown / drag / pointerup** path,
+which `el.click()` skips entirely. The check exercised a code path no player
+can reach, and agreed with me. Same shape as the `-s` swallowing compiler
+errors and the `el.hidden` that hid nothing: a check that can only agree is
+not a check.
+
+Fixed by driving real input: a `screenPosOf(x, y)` hook returns CLIENT
+coordinates so a check can dispatch genuine pointer events at a tile, and
+`pickWedge` now dispatches real `pointerdown`/`pointerup` instead of `click`.
+The repro below is the same script that caught the bug, re-run after the fix.
+
+### 1. The second ring cancelled itself the instant you touched it
+
+`window`'s `pointerup` handler resolved **any** open menu:
+
+```js
+if (tileMenu.isOpen) { if (tileMenu.release()) suppressNextClick = true; }
+```
+
+`release()` commits whatever is *armed*. Arming happens in `track()`, which
+only ran from the **canvas** `pointermove` listener — and a wedge sits above
+the canvas, so touching one never armed it. The armed item was therefore
+still the hub: Cancel. So the sequence was:
+
+1. Drag to Command, lift → `release()` commits Command.
+2. `onPick` opens the party ring **synchronously, inside that same commit**.
+3. Finger is now up, party ring visible.
+4. Touch a party wedge → `pointerup` reaches `window` → menu is open → it
+   commits the armed item, which is Cancel. Ring gone, nothing selected.
+
+The fix is ownership. `TileMenu` now tracks which pointer gesture is allowed
+to resolve it. The long-press that opens ring 1 claims that gesture; a ring
+opened from inside a commit claims **nothing**, so the finger-lift that
+created it cannot also resolve it. The menu also listens for its own
+`pointerdown`/`pointermove` on its root, and **arms on pointerdown** — a
+discrete tap never produces a pointermove, so without that a tap could only
+ever read as cancel. Per-wedge `click` listeners are gone: pointer handling
+covers tap *and* drag, and a stale click could otherwise close a ring that
+the commit had just opened.
+
+| gesture | before | after |
+|---|---|---|
+| tap a party wedge | ring closes, nothing selected | selects |
+| press-drag-release inside ring 2 | impossible | selects |
+
+### 2. Your own moves had no route at all
+
+`attack` is only offered where there is something to hit, and the previous
+round changed `command` — which used to open the menu that listed **your**
+moves — into the party picker. So long-pressing the tile you stand on offered
+Command and nothing else, and Tackle and Ember were genuinely unreachable
+from the radial. Measured on the real UI: ring 1 on the player's own tile was
+`["command"]`, full stop.
+
+`attack` now also appears on your own tile when you know a usable move. It is
+not "hit yourself" — `range.min` is 1, so that is not legal — it is the way
+into your own move list from the one tile you can always press.
+
+### 3. Attack opened a scrolling menu
+
+Same complaint as the rest of the round, so Attack now opens a **ring** of
+your own moves, with two commit paths decided by what you pressed: a real
+target swings now; your own tile arms targeting and the next tap says where.
+Self-buffs are on the ring too, committing instantly, so the ring is the
+whole of "my moves" rather than most of it.
+
+### Verified with real touch, seed 4242
+
+```
+ring 1 on own tile        ["attack","command"]      (was ["command"])
+Attack ring               ["tackle"]
+tap Tackle from own tile  "Targeting with Tackle — tap a tile."
+tap partner in party ring commanding = machop-0     (was: ring closed, null)
+DRAG hub -> partner       commanding = machop-0     (was impossible)
+Attack an adjacent foe    HP 22 -> 17, "You strike Machop!"
+Release from command mode radial back to ["attack","command"]
+```
+
+Two failures in the first run of that harness were the harness, not the game,
+and are worth naming: a throwaway long-press left the Look **modal** over the
+canvas so the next press never reached the map, and the foe was placed at
+distance 2 where Tackle (range 1) correctly chases instead of landing.

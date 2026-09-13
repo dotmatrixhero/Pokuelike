@@ -12752,3 +12752,28 @@ rapport and all that for a unit."*
 - [ ] Nothing still discovers any `knownAtStart: false` recipe
       (axe, machete, knappedFlint, flintKnife, bedroll). Unchanged, and
       still the oldest open hole in crafting.
+
+### Radial input fixes (this round)
+
+- [x] **The second ring could not be tapped at all.** `window`'s pointerup
+      resolved any open menu, and nothing armed a wedge you touched (track()
+      only ran from the canvas listener), so every touch committed the hub =
+      Cancel. `TileMenu` now owns a gesture; a ring opened inside a commit
+      owns none, and arms on pointerdown so a discrete tap works.
+- [x] **Press-drag-release inside a second ring** now works — it was
+      impossible before.
+- [x] **Your own moves were unreachable from your own tile.** `attack` now
+      appears there when you know a usable move, and opens a RING of your
+      moves instead of the scrolling command menu.
+- [x] **Verification driven by real pointer events.** `screenPosOf` returns
+      client coords; `pickWedge` dispatches real pointerdown/up rather than
+      `el.click()`, which is why the old checks could not have caught this.
+
+### Still open
+
+- [ ] `openCommandMenu` (the scrolling list) is now only reachable by
+      keyboard. It still carries the per-partner standing-order rows
+      (Follow/Patrol/Hunt/Defend), which have no radial route yet.
+- [ ] Ring 1's hub commits Look on a release-without-drag, by design. With
+      rings nested two deep that means a fumbled release opens the Look modal
+      over the map — mildly annoying, not wrong. Worth a look in play.
