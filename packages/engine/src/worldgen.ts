@@ -463,6 +463,28 @@ const EDGE_BIAS_STRENGTH = 0.6;
 const RIVER_EDGE_TRENCH_STRENGTH = 1.4;
 /** Higher = the river-edge trench decays faster moving away from the marked edge, keeping it a narrow band rather than spanning the zone. */
 const RIVER_EDGE_TRENCH_EXPONENT = 2;
+/**
+ * The macro-driven path's own trench depth, and deliberately NOT
+ * `RIVER_EDGE_TRENCH_STRENGTH`. The two paths mean different things by the
+ * same subtraction, and reusing one constant across both was a real bug.
+ *
+ * In `generateMacroElevation` the field is renormalised afterwards and an
+ * `oceanFraction` PERCENTILE decides what floods, so the trench only has to
+ * reorder tiles — its absolute size barely matters.
+ *
+ * In `macroDrivenElevation` there is no percentile and no renormalisation:
+ * one global `macroSeaLevel` decides, so the subtraction is absolute. At
+ * 1.4 it removed up to 1.4 * LOCAL_DETAIL_WEIGHT = 0.42 of elevation, while
+ * a measured world (seed 11) had sea level 0.448 and land zones spanning
+ * 0.432-1.000 — leaving a typical zone only ~0.1-0.25 of headroom above
+ * water. The trench was roughly twice the headroom of even a high zone, so
+ * a river did not carve a channel, it sank the zone: measured, river zones
+ * promoted to 4-19% open ground against 84-96% for dry inland zones.
+ *
+ * Tuned by sweep (see validateRiverChannels.ts) for the thing a river should
+ * actually be: a visible channel of water with walkable banks either side.
+ */
+const MACRO_RIVER_TRENCH_STRENGTH = 0.35;
 
 /** How much of `.normalized()`'s reported value is pulled toward `MacroElevationBias.elevationShift` vs. this zone's own locally generated shape — kept well under 1 so a highland zone still has real local peaks/valleys, not a flat plateau at the target height. */
 const ELEVATION_SHIFT_WEIGHT = 0.35;
@@ -597,7 +619,7 @@ function macroDrivenElevation(
       // is recorded on BOTH zones that share it, so carving it stays
       // consistent across the boundary.
       for (const dir of bias.riverEdges) {
-        v -= edgeCloseness(dir, x, y, width, height) ** RIVER_EDGE_TRENCH_EXPONENT * RIVER_EDGE_TRENCH_STRENGTH * LOCAL_DETAIL_WEIGHT;
+        v -= edgeCloseness(dir, x, y, width, height) ** RIVER_EDGE_TRENCH_EXPONENT * MACRO_RIVER_TRENCH_STRENGTH * LOCAL_DETAIL_WEIGHT;
       }
       raw[y * width + x] = v;
     }

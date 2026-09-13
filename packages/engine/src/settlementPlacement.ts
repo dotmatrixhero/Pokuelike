@@ -69,25 +69,45 @@ function buildable(world: World, x: number, y: number): boolean {
 }
 
 /**
- * Pick a town centre: near the middle of the zone, but pulled toward fresh
- * water if there is any, since the whole founding rule is that people settle
- * on water. Falls back to the most central buildable tile.
+ * Pick a town centre: enough dry ground around it to actually build on, and
+ * water within reach but NOT underfoot.
+ *
+ * The first version scored `min(water, 8) * 1.5`, which maximised nearby
+ * water and therefore put towns on slivers of land surrounded by sea — the
+ * palisade ring landed entirely in water and no wall got built at all,
+ * which quietly cancelled the "build walls, keep lethal" decision. Water
+ * proximity is a REQUIREMENT, not something to maximise; buildable land is
+ * the thing to maximise.
  */
-function chooseCenter(world: World): Vec2 | undefined {
+function chooseCenter(world: World, radius: number): Vec2 | undefined {
   const mid = { x: Math.floor(world.width / 2), y: Math.floor(world.height / 2) };
   let best: Vec2 | undefined;
   let bestScore = -Infinity;
   for (let y = 2; y < world.height - 2; y++) {
     for (let x = 2; x < world.width - 2; x++) {
       if (!buildable(world, x, y)) continue;
-      // Count water within a short walk — a town wants to be beside it, not in it.
-      let water = 0;
-      for (let dy = -3; dy <= 3; dy++) {
-        for (let dx = -3; dx <= 3; dx++) {
-          if (tileAt(world, "surface", x + dx, y + dy)?.terrain === "water") water++;
+
+      // Water has to be reachable, but it is a gate rather than a score.
+      let waterNear = 0;
+      for (let dy = -4; dy <= 4 && waterNear === 0; dy++) {
+        for (let dx = -4; dx <= 4; dx++) {
+          if (tileAt(world, "surface", x + dx, y + dy)?.terrain === "water") { waterNear = 1; break; }
         }
       }
-      const score = Math.min(water, 8) * 1.5 - chebyshev({ x, y }, mid) * 0.35;
+      if (!waterNear) continue;
+
+      // What actually matters: buildable ground across the footprint, and a
+      // ring that can carry a palisade.
+      let ground = 0;
+      let ring = 0;
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          const ok = buildable(world, x + dx, y + dy);
+          if (ok) ground++;
+          if (ok && Math.max(Math.abs(dx), Math.abs(dy)) === radius) ring++;
+        }
+      }
+      const score = ground + ring * 2 - chebyshev({ x, y }, mid) * 0.4;
       if (score > bestScore) {
         bestScore = score;
         best = { x, y };
@@ -112,13 +132,15 @@ export function placeSettlement(
   rng: () => number,
   makeVillager?: (id: string, pos: Vec2, role: string) => Agent
 ): SettlementPresence | undefined {
-  const center = chooseCenter(world);
-  if (!center) return undefined;
-
   const ruined = settlement.status === "ruined";
   // A bigger town covers more ground, but stays well inside one zone — the
   // worked and gathered rings that spread further are a later phase.
+  // Computed BEFORE the centre, because the centre is chosen partly on
+  // whether a ring of this radius can actually carry a palisade.
   const radius = Math.max(3, Math.min(7, Math.round(2 + Math.sqrt(settlement.population) / 2.2)));
+
+  const center = chooseCenter(world, radius);
+  if (!center) return undefined;
 
   // --- Palisade: a ring of wall with gaps for gates. On a ruin, most of it
   // has fallen, so the ring is broken and the town is open.
