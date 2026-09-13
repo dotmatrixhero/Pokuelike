@@ -19,6 +19,26 @@ export interface SpeciesDef {
    * hunt just because it out-levels something).
    */
   isPredator?: boolean;
+  /**
+   * Stands with its own sooner than anything else does — lowers the ally
+   * headcount needed before this species commits to a mob fight instead of
+   * fleeing (engine predation.ts's `mobThreshold`, used by both the
+   * mob-fight trigger and the predator-side "don't walk into a mob" check).
+   *
+   * HUMANS_DESIGN.md's "individually weak and collectively formidable":
+   * humans have no claws and no bulk, and their first multiplier is numbers
+   * with coordination — "humans mob-defend far more effectively than herd
+   * animals do."
+   *
+   * The value is measured, not picked. `isProtectedByMob` tests
+   * `allies + 1 >= mobThreshold`, and a real run (measureHumanBaseline.ts,
+   * 3 seeds x 6000 ticks) put the mean living human herd at size **2.00**
+   * against a neutral-disposition threshold of 3 — so 2 >= 3 failed and the
+   * mob branch could essentially never fire for a human. A bonus of 1 makes
+   * it reachable at exactly the group size humans actually travel in. Same
+   * denormalized-at-spawn pattern as `isPredator`.
+   */
+  mobDefenseBonus?: number;
   /** Canon base stats (mainline games), fed through calculateStats(base, level) for real HP/Atk/etc. */
   baseStats: BaseStats;
   types: PokemonType[];
@@ -226,6 +246,16 @@ export const SPECIES: Record<string, SpeciesDef> = {
     types: ["normal"],
     moves: ["tackle"],
     activityPattern: "diurnal",
+    // Attack 28 and one move: a human cannot win a fight alone, by design.
+    // Numbers with coordination is the first of the three multipliers
+    // HUMANS_DESIGN.md gives them. See `mobDefenseBonus`'s own doc for why
+    // this is 1 and not a larger guess.
+    mobDefenseBonus: 1,
+    // Not a hunter. HUMANS_DESIGN.md decision 3 keeps humans hunting Pokemon
+    // in lore only, never in the live sim, and states the tonal reason:
+    // "humans as a species aren't the villain." Explicit rather than relying
+    // on the absent-means-false default, because it is a deliberate call.
+    isPredator: false,
   },
   bulbasaur: speciesFromDex("BULBASAUR", {
     spriteKey: "bulbasaur",

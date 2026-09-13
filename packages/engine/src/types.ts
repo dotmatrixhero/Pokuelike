@@ -1812,6 +1812,12 @@ export interface Agent {
    * fragility, not a change to how prey-role hunting itself works.
    */
   isPredator?: boolean;
+  /**
+   * Denormalized from `SpeciesDef.mobDefenseBonus` at spawn, same pattern as
+   * `isPredator` above. Subtracted from the ally headcount this agent needs
+   * before it commits to a mob fight (predation.ts's `mobThreshold`).
+   */
+  mobDefenseBonus?: number;
 
   /**
    * Denormalized from `SpeciesDef.obligateAquatic` at spawn time

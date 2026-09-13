@@ -452,6 +452,41 @@ describe("storm accuracy penalty composes into a real fight (Phase 3 weather)", 
 });
 
 describe("mob-fighting", () => {
+  it("mobDefenseBonus lets a PAIR mob, where an unbonused pair of the same size flees", () => {
+    // HUMANS_DESIGN.md: "humans mob-defend far more effectively than herd
+    // animals do." `isProtectedByMob` tests `allies + 1 >= mobThreshold`, and
+    // MOB_THRESHOLD is 3 at neutral disposition, so a pair (2) normally fails.
+    //
+    // The size-2 case is the one that matters: measureHumanBaseline.ts put the
+    // mean LIVING human herd at 2.00 in a real 3-seed run, so without the
+    // bonus the mob branch could essentially never fire for a human at all.
+    const withBonus = (pos: { x: number; y: number }, id: string, bonus?: number) => {
+      const a = prey(pos, { id, herdId: "herd-a" });
+      (a as unknown as { mobDefenseBonus?: number }).mobDefenseBonus = bonus;
+      return a;
+    };
+
+    const bonused = createWorld(10, 10, AB_COMPARISON_SEED);
+    bonused.agents.push(
+      withBonus({ x: 5, y: 5 }, "bulbasaur-0", 1),
+      withBonus({ x: 4, y: 5 }, "bulbasaur-1", 1),
+      predator({ x: 5, y: 6 })
+    );
+    tickWorld(bonused, new EventLog(), RULES, undefined, SAFE_RNG);
+    expect(bonused.agents.find((a) => a.id === "bulbasaur-0")!.behavior).toBe("fight");
+
+    // CONTROL: identical arrangement, no bonus. Without this the assertion
+    // above would pass just as happily if the pair always fought.
+    const control = createWorld(10, 10, AB_COMPARISON_SEED);
+    control.agents.push(
+      withBonus({ x: 5, y: 5 }, "bulbasaur-0", undefined),
+      withBonus({ x: 4, y: 5 }, "bulbasaur-1", undefined),
+      predator({ x: 5, y: 6 })
+    );
+    tickWorld(control, new EventLog(), RULES, undefined, SAFE_RNG);
+    expect(control.agents.find((a) => a.id === "bulbasaur-0")!.behavior).not.toBe("fight");
+  });
+
   it("a large enough, close enough herd mobs the predator instead of fleeing", () => {
     const world = createWorld(10, 10, AB_COMPARISON_SEED);
     const mobber1 = prey({ x: 5, y: 5 }, { id: "bulbasaur-0", herdId: "herd-a" });

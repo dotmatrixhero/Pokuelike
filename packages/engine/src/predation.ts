@@ -143,7 +143,10 @@ function mobThreshold(world: World, agent: Agent): number {
   const aggression = disposition.aggression;
   const courage = (boldness + aggression) / 2;
   const shift = Math.round((courage - 0.5) * 2 * MOB_THRESHOLD_SPREAD);
-  return Math.max(1, MOB_THRESHOLD - shift);
+  // `mobDefenseBonus` (species trait, denormalized at spawn) stacks on top of
+  // the disposition shift: a species that stands with its own sooner needs
+  // that many fewer bodies present. Humans carry it — see species.ts.
+  return Math.max(1, MOB_THRESHOLD - shift - (agent.mobDefenseBonus ?? 0));
 }
 
 /**

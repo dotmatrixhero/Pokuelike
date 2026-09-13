@@ -179,6 +179,7 @@ export function spawnAgent(speciesIdRequested: string, id: string, pos: Vec2, le
     buildsShelter: species.buildsShelter,
     preferredTerrain: species.preferredTerrain,
     isPredator: species.isPredator,
+    mobDefenseBonus: species.mobDefenseBonus,
     obligateAquatic: species.obligateAquatic,
   };
 
