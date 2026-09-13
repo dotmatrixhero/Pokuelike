@@ -141,16 +141,28 @@ function passable(zone: MacroZone | undefined): boolean {
  */
 function chokepointBonus(grid: MacroGrid, zone: MacroZone): number {
   let open = 0;
+  let inBounds = 0;
   for (let dr = -1; dr <= 1; dr++) {
     for (let dc = -1; dc <= 1; dc++) {
       if (dr === 0 && dc === 0) continue;
-      if (passable(zoneAt(grid, zone.row + dr, zone.col + dc))) open++;
+      // Count only neighbours that EXIST. Treating off-grid as impassable
+      // made the map border read as a natural neck: an edge zone is missing
+      // 3 of its 8 neighbours (a corner, 5), so it scored as a mountain pass
+      // purely for being on the edge of the world. Measured: 4 of 25
+      // settlements landed on the border against 5.3% of land zones being
+      // border zones — a 3x over-representation, and 3 of 7 on one seed.
+      const neighbor = zoneAt(grid, zone.row + dr, zone.col + dc);
+      if (!neighbor) continue;
+      inBounds++;
+      if (passable(neighbor)) open++;
     }
   }
-  // 8 open neighbours is open plain (no bonus); 2-4 is a genuine neck.
-  if (open <= 2) return 0; // too closed in — a dead end, not a thoroughfare
-  if (open <= 4) return 0.25;
-  if (open <= 5) return 0.12;
+  if (inBounds === 0) return 0;
+  // Judge the RATIO, so the test means the same thing wherever it is applied.
+  const openRatio = open / inBounds;
+  if (openRatio <= 0.25) return 0; // a dead end, not a thoroughfare
+  if (openRatio <= 0.5) return 0.25;
+  if (openRatio <= 0.65) return 0.12;
   return 0;
 }
 
