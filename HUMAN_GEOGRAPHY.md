@@ -141,3 +141,143 @@ still know its name and what killed it.
    but wilderness-dominant* target.
 4. Do farms need livestock/pasture, given decision 4's no-domesticated-Pokémon
    rule? (Pasture with no animals is odd; farms may be crops-only here.)
+
+---
+
+# Answers and revisions
+
+## Shrines: three kinds, not one
+
+The "place it where something happened" rule was too narrow. Direct
+correction: *"shrines can also in honor of sacred/legendary Pokémon too. So
+usually like shintoism kinda a place that honors a particular spirit."*
+
+The unifying rule is better stated as: **a shrine always honors a particular
+named something.** Never a generic "shrine" prop. Three sources:
+
+- **Event shrines** — sited where a recorded thing happened. A death, a first
+  bond, a disaster, a founding. Narratable by construction.
+- **Kami / nature shrines** — sited at a notable natural feature that is
+  itself the honored thing: the spring, the old tree, the mountain, the ford.
+  This is the Shinto reading and it fits a world whose terrain is already
+  generated with real causes — the spring is *actually* the only water for
+  three zones, and that is why it is sacred.
+- **Legendary shrines** — honoring a sacred/legendary Pokémon, sited where it
+  is, was, or was believed to have been.
+
+A shrine record should name its spirit, because that is what lets the
+settlement's attitude axis inherit from it. A town whose shrine honors a fire
+legendary beneath a volcano has *opinions* about fire, and its people should
+say so. See `MYTH_STRUCTURES.md` and `LORE_NOTES.md` for the register.
+
+## Graveyards and ghost Pokémon
+
+Direct ask: *"graveyards with ghost Pokémon is a must as well."*
+
+- A graveyard **accretes** — one marker per recorded death, growing with the
+  settlement's history. An old town has a big one; a fresh outpost has none.
+- **Ghost-types are drawn to it** as a habitat bias.
+
+The consequence is the good part: **ghost encounters become caused rather
+than random.** Ghosts are where the dead are, the dead are where people have
+lived and died for a long time, and all of that is already in the chronicle.
+A player learning "old settlements mean ghosts" is learning something true
+about the world — the *pattern over instances* this project keeps aiming for.
+
+And the dark version comes free: a settlement that **fell** leaves a graveyard
+with nobody left to tend it. A haunted ruin, generated honestly, with names
+on it and a recorded cause of death for every one.
+
+## Revision: the footprint is a gradient *plus satellites*
+
+Direct answer to how far the worked land reaches: *"Several zones. Plus
+outpost homes and stuff. More rural farms can live several zones away from a
+village."*
+
+This breaks the clean radial falloff above, and it should. Real settlement is
+a gradient **with detached outliers** — the lone farmstead, the outpost, the
+holding three zones out with one family on it. So the model is:
+
+- an intensity falloff around each settlement, several zones deep, **plus**
+- **detached satellites**: isolated farmsteads and outposts with their own
+  tiny footprints, linked back by a thin track rather than sitting inside the
+  main ring.
+
+This is better than the pure gradient for three reasons. It puts human things
+out in genuine wilderness, so you meet people before you reach a town. It
+makes those places **vulnerable** — an outlying farm is the natural site for
+a night raid, and that is a story the sim can generate rather than script.
+And it means "settled land" is not one blob per town, which keeps decision
+6's *populated but wilderness-dominant* target reachable at several zones of
+reach.
+
+## Offscreen terrain change — this needs new architecture
+
+Direct answer: *"it is live... but it doesn't have to happen WHILE you're in
+the zone. It can be offscreen."*
+
+**Checked: nothing like this exists.** The engine ticks everything every
+tick; there is no zone activity model, no dormancy, no catch-up. (The one
+"dormant" mention, in `herdMigration.ts`, is a rolling-window approximation
+for predator pressure, not deferred simulation.)
+
+The substrate is right, though: the macro grid already holds compact
+per-zone facts cheaply. Recommended shape:
+
+- **Lazy fast-forward as the default.** Each zone records the tick it was
+  last resolved. On entry — or on any query — advance it in a single step
+  from the elapsed time rather than replaying the gap. Deforestation, soil
+  depletion, regrowth and road decay are all accumulation-shaped and
+  fast-forward exactly.
+- **A coarse periodic pass for anything that crosses zone boundaries.**
+  Water, migration and trade affect neighbours, so they cannot wait to be
+  observed — those need a cheap sweep on a slow clock.
+
+The trap to avoid: lazy resolution must be **observation-independent**, or
+the world changes because you looked at it. Fast-forwarding on entry is fine;
+fast-forwarding *differently* depending on whether the player is watching is
+the bug that makes a simulation feel fake. Any validation harness for this
+should compare a lazily-resolved zone against a fully-ticked control — and
+that control is what makes the measurement mean anything.
+
+## Bridges
+
+Confirmed as real buildable structures, not just shallow-water fords. That
+makes a river a genuine barrier until someone invests in crossing it, which
+is what turns a ford or a bridge into a chokepoint worth siting a town on —
+and gives a raid or a flood something specific to destroy.
+
+## Domestication: amending decision 4
+
+Direct answer: *"Crops only is fine. I think domestic can be fine, just not
+like captured in poke balls and trained. Idk."*
+
+`HUMANS_DESIGN.md` decision 4 currently reads **no domesticated Pokémon at
+all** in this region. The amendment worth making is a distinction rather than
+a reversal:
+
+> **Domestication without partnership.** A penned Miltank is livestock. It is
+> used, not befriended; it does not fight beside anyone; nobody asks it
+> anything.
+
+That is a *different relationship* from a bonded partner, and keeping them
+separate is what protects the premise. The player's innovation is not "a
+human using a Pokémon" — it is **a Pokémon that chooses to stand beside
+you**. A village that keeps animals in pens is then the perfect foil: the
+contrast is what makes the bond legible, rather than undermining it.
+
+Two honest risks, since this is being changed rather than decided fresh:
+
+- **It softens "you're the first."** Even framed as livestock, a village that
+  already handles Pokémon daily makes the player's arrival less singular. The
+  mitigation is to keep domesticates few, dull and clearly un-partnered —
+  nothing anyone would call a companion.
+- **It cuts against decision 3's tonal intent.** Hunting was kept lore-only
+  specifically *"to keep humans sympathetic in the present."* Penned livestock
+  is a milder version of the same exploitation, on screen this time. That is a
+  tone call, not a mechanics call, and it is worth making deliberately rather
+  than inheriting it from a yes.
+
+**Recommendation: allow it, narrowly** — a small number of dull domesticates
+(wool, milk, eggs), no working animals in combat, no named ones. If it reads
+badly in a real run, it is cheap to pull back out.
