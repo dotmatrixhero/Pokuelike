@@ -4,6 +4,7 @@ import { generateMacroElevation, makeNoise2D, mulberry32, biomeFoodWaterDensity,
 import { DIRECTIONS, DIRECTION_DELTA, OPPOSITE_DIRECTION, type ZoneDirection } from "./directions.js";
 import { placeLandmarks, type LandmarkType } from "./landmarks.js";
 import { nameTerritories } from "./territories.js";
+import { generateSettlementHistory } from "./settlementHistory.js";
 
 /**
  * The macro-scale zone grid — DESIGN.md's "Correction: overworld and zone are
@@ -64,6 +65,14 @@ export interface MacroGrid {
   zones: MacroZone[];
   /** Named contiguous biome regions — see territories.ts's `nameTerritories`, which populates this. */
   territories?: import("./territories.js").Territory[];
+  /**
+   * Where people took hold and what became of them — see
+   * settlementHistory.ts's `generateSettlementHistory`, which populates this.
+   * Generated last, after the geography is final, because every siting rule
+   * it applies (fresh water, chokepoints, walkable corridors) reads finished
+   * rivers, coasts and elevation.
+   */
+  history?: import("./settlementHistory.js").SettlementHistory;
 }
 
 export function zoneIndex(grid: Pick<MacroGrid, "cols">, row: number, col: number): number {
@@ -464,6 +473,10 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
   // Last — territories are named after the geography is final, and a
   // territory containing a landmark takes its name (see territories.ts).
   nameTerritories(grid);
+  // Last of all: people. The history pass reads finished geography — it sites
+  // on real rivers and lakes, routes corridors around real mountains, and can
+  // name-drop a territory that already exists.
+  grid.history = generateSettlementHistory(grid, mulberry32(seed ^ 0x1b873593));
   return grid;
 }
 
