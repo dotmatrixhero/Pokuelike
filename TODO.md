@@ -12779,3 +12779,20 @@ rapport and all that for a unit."*
 - [ ] Ring 1's hub commits Look on a release-without-drag, by design. With
       rings nested two deep that means a fumbled release opens the Look modal
       over the map — mildly annoying, not wrong. Worth a look in play.
+
+### Mobile sheet (this round)
+
+- [x] **The log no longer forces the sheet to full.** `focusPlayerPanel("log")`
+      switched the tab AND ran `setSheetDetent("full")` on every attack
+      involving the player or a partner. Now it only switches the tab.
+      Verified by layout: 74px through five consecutive attacks, and a sheet
+      the player opened stays at 731px rather than being shrunk.
+- [x] No middle detent added — an earlier ask deliberately removed one
+      ("just be low to full").
+
+### Still open
+
+- [ ] At `peek` the sheet shows only the vitals bars, so combat text is now
+      invisible on mobile until the player raises it. A small on-map toast
+      for notable events is the obvious fix if the loss of glanceable
+      feedback matters in play. Not built — not asked for.

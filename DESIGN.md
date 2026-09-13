@@ -16593,3 +16593,43 @@ does not dismiss a ring (the outside-dismiss listens for a **pointerdown on
 the map area**), so the ring stayed open and the next long-press was swallowed
 by `if (tileMenu.isOpen) return`; and `__cancel` is the hub, not a wedge, so
 there was no element to tap.
+
+## The log stops throwing itself over the map
+
+Direct call: *"incessantly opening the logs full screen on mobile is not okay.
+Just keep it compact."*
+
+`focusPlayerPanel("log")` ran `setSheetDetent("full")` on every notable event
+— and "notable" is every attack involving the player or a partner. So routine
+combat repeatedly threw an 85%-of-screen panel over the map, which is where
+the fight is. The auto-switch now changes the **tab** and never the sheet
+height.
+
+**Deliberately not a new middle detent.** The obvious fix is a half-height
+stop, but an earlier direct ask already removed one: *"I think it should just
+be low to full and the handle should be bigger or something to easily
+toggle"* — on the grounds that a middle detent covered the verb pad without
+being big enough to be worth it. Reintroducing it here would undo a decision
+already made. The sheet stays exactly where the player put it, and the log is
+just the tab they find when they choose to open it.
+
+**Live, 430x860, measuring real layout** (`getBoundingClientRect`, not the
+class we just set — the `el.hidden` lesson):
+
+| | sheet height | tab |
+|---|---|---|
+| before combat | 74px (9%) | you |
+| after 5 consecutive attacks | **74px (9%)** each time | log |
+| player taps the grip | 731px (85%) | log |
+| combat while open | **731px (85%)** — not shrunk either | log |
+
+The last row is the control that matters: the fix must not fight the player
+in the other direction either. A sheet the player opened stays open.
+
+**Known consequence, stated rather than hidden:** at `peek` the sheet shows
+the four vitals bars and nothing else — `#panel-tabs`, `#panel-body` content
+and `#hud-message` are all hidden by the `sheet-peek` rules. So combat text
+is now invisible on mobile until the player raises the sheet. That is what
+"keep it compact" asks for, but it does mean there is currently no glanceable
+combat feedback on a phone. A small on-map toast is the obvious answer if
+that turns out to matter; not built, since it was not asked for.

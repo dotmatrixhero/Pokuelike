@@ -2406,8 +2406,18 @@ function focusPlayerPanel(part: "log" | "vitals"): void {
     // from what they were reading to show them something they can already
     // see. Mobile has no room to split, so it gets the tab.
     if (!isMobileLayout()) return;
+    // Switch the TAB, never the sheet height. Direct call: "incessantly
+    // opening the logs full screen on mobile is not okay. Just keep it
+    // compact." Every attack involving you or a partner fired
+    // `setSheetDetent("full")`, so routine combat repeatedly threw an 85%-tall
+    // panel over the map — and the map is where the fight is.
+    //
+    // Deliberately NOT a new middle detent: an earlier direct ask already
+    // removed one ("I think it should just be low to full"), on the grounds
+    // that it covered the verb pad without being big enough to be worth it.
+    // So the sheet stays exactly where the player put it, and the log is
+    // simply the tab they find when they choose to open it.
     if (activeTab !== "log") selectTab("log", false);
-    if (sheetDetent !== "full") setSheetDetent("full");
     return;
   }
   if (activeTab !== "you") selectTab("you", false);
