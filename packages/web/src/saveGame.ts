@@ -87,9 +87,14 @@ function toPayload(level: World): Record<string, unknown> {
   return { ...rest, __rngState: rng?.state?.() ?? level.rngSeed };
 }
 
-function fromPayload(payload: Record<string, unknown>): World {
+function fromPayload(payload: Record<string, unknown>, index: number): World {
   const { __rngState, ...rest } = payload;
   const level = rest as unknown as World;
+  // A save written before `World.id` existed has none, and without one every
+  // level in the chain would share one fog map again (see engine `Vision`).
+  // Index within the chain is stable across reloads, which is what the key
+  // needs to be.
+  level.id ??= `restored-${index}`;
   // Resuming from `rngSeed` rather than the captured state would rewind the
   // generator to worldgen time and hand the player the same "random" numbers
   // a second time — deterministic, but wrong. See rng.test.ts.

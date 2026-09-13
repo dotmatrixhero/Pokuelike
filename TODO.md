@@ -12244,3 +12244,720 @@ Process note: 7 sweeps were run where 3 would have done — *"i feel like you
 might be running too much sims. 3 runs should be plenty."* The window-size
 sweep was wasted effort: the headline metric is window-independent by
 construction, so it returned an identical 88/170 four times.
+
+## Fixed: stairs — the party comes with you, and each level has its own fog
+
+Direct report: *"Okay. Stairs do not work. Units in party do not follow past
+stairs, and it like just resets to the same zone. Does not generate a new zone
+or anything..."* Then, mid-investigation: *"is the level 2 exactly the same as
+level 1? i feel like the fog of war doesn't reset so all the places ive been
+looked the same or something, and it spawns me someqwhere random."*
+
+Three separate defects under one symptom. The second intuition was the one
+that cracked it.
+
+### 1. Descent itself was never broken — measured, not assumed
+
+A live descent probe pressed `>` five times against the real dev server:
+
+| step | depth | terrain fingerprint | agents | below? |
+| --- | --- | --- | --- | --- |
+| 0 | 1 | 1290090526 | 5 | yes |
+| 1 | 2 | 1096515179 | 7 | yes |
+| 2 | 3 | -366254502 | 7 | yes |
+| 3 | 4 | -1903320629 | 6 | yes |
+| 4 | 5 | -121382462 | 3 | **no** |
+| 5 | 5 | -121382462 | 3 | no |
+
+Five distinct levels, all really generated. Step 4→5 is unchanged because
+depth 5 is the bottom — it has the exit, not more stairs — so `>` there is a
+legitimate no-op, and `useStairs` returning `undefined` prints "There are no
+stairs here."
+
+### 2. The party did not cross — and the bond was destroyed, not just stretched
+
+- [x] `crossLevel` filtered exactly ONE agent out of `from.agents` and pushed
+      exactly that one into `to.agents`. Followers stayed upstairs.
+- [x] The worse half: `needs.ts`'s `applyFollowing` clears `followingId` the
+      moment the leader is not in the same `world.agents` array. So a
+      staircase did not merely separate the party — it dissolved it, silently,
+      permanently. A bond you spent the run earning should not be deletable by
+      a flight of stairs.
+- [x] Now every living, non-egg, bonded follower crosses, placed on distinct
+      walkable tiles near the landing by a local ring search that dodges
+      occupants. Deliberately NOT distance-gated: gating reads more diegetic,
+      but its failure mode is silent permanent party loss for the follower who
+      happened to be four tiles back.
+- [x] One `crossedCaveLevel` event per crosser, so the log can narrate it.
+- [x] 5 new tests in `climb.test.ts`. Proved they fail without the fix: 4
+      failed / 8 passed with the change stashed, 12/12 with it.
+
+### 3. "The same zone" — fog of war was shared across every level
+
+- [x] **Root cause.** `Vision.explored` was keyed by `Layer` alone, and every
+      cave level is a separate `World` that calls its one populated layer
+      `"underground"`. Same dimensions, so tile index N on level 2 was
+      "explored" if index N had been explored on level 1.
+- [x] Measured on seed 7 before the fix: **96 tiles arrived pre-explored** on a
+      level the player had never set foot on, **65 of them with matching
+      terrain** — which is exactly why it read as walking back into the same
+      room.
+- [x] Same bug applied to every overworld zone (`crossZoneEdge`), all of which
+      share the layer `"surface"`.
+- [x] Fix: `World.id` (assigned by `createWorld`, derived from the seed plus a
+      process counter — never drawn from `world.rng`, which would shift every
+      subsequent roll in the run), and `explored` now keyed by
+      `visionScope(world, layer)`. Saves round-trip the id; a save written
+      before it existed gets `restored-<index>` on load so old runs still get
+      per-level fog.
+- [x] Measured after: arriving on level 2, `explored` has two separate keys and
+      the level-2 one is **0** before the first look. Level 1 keeps its own
+      memory, so climbing back up is not re-fogged.
+
+### 4. A regression I introduced, caught by the live check and reported here
+
+- [x] With the stale fog gone, level 2 rendered **100% dark** — the player
+      could not see their own feet. `tryUseStairs` never recomputed vision:
+      `advancePlayerTurn` is the only other thing that does, and a world swap
+      spends no turn. The old shared-fog bug had been hiding this the whole
+      time. `resetUiForNewWorld` now recomputes the arriving player's vision,
+      which covers stairs, zone edges and save restores alike.
+- [x] **The first darkness measurement was worthless and the control caught
+      it.** `document.querySelector("canvas")` picked a 300×150 element that
+      is not the scene; it read 100% dark on level 1 too. Sampling level 1 as
+      a control is the only reason that did not ship as a "finding."
+
+### 5. Also: the sidebar flipped to World overview on every crossing
+
+- [x] `resetUiForNewWorld` unconditionally selected the Inspector tab, so
+      crossing a staircase replaced "Human · Lv 5" with "World overview · Tick
+      0 · Population 9". Pre-existing, not from this round, but it is a real
+      part of why a level change read as the whole game resetting. Play mode
+      now stays on the You panel.
+
+- [x] Full suite green at that commit: engine **1653**, data **476**, web build clean.
+      Live-verified through the real UI: both Venonat cross and are standing
+      beside the player on level 2, still bonded, on a freshly dark map.
+
+## Round: cooked meals feed the party, gifts fade, the ticker reads downward
+
+Three of the eight asks in one message, each small and each verified through
+the real UI rather than only by unit test.
+
+### Cooked food is three servings
+
+Direct ask: *"For cooked food can you have them be like you get 3x units of
+the item when cooking? That way you could feasibly share a meal."*
+
+- [x] `COOKED_SERVINGS = 3` is the `outputCount` on all five cooked recipes
+      (roasted apple, berry stew, potato mash, vegetable stew, roasted meat).
+      Non-cooked recipes are untouched — torch and poultice still yield 1.
+- [x] Three servings weigh three, so it is a real pack cost rather than free
+      value, and that is what makes cooking worth the fire and the turns over
+      eating the crop raw.
+- [x] Live through the app, not just the data table: 2 apples in, craft
+      Roasted Apple, pack comes out `apple ×1, roastedApple ×3`.
+
+### An offering is one gift
+
+Direct report: *"Also when I offer a crop it gets eaten but never fades away.
+That's weird."*
+
+- [x] **Not a rendering bug.** `OFFERED_FOOD_STOCK` was
+      `CONSUME_STOCK_AMOUNT * 2`, so one feeding ate half the offering and left
+      the other half on the ground as an ordinary food tile — which
+      `growFlora` will even let SPREAD into neighbours. The gift outlived the
+      moment it was given for.
+- [x] The revert-to-floor machinery was already fine on both layers; I checked
+      that before touching it, and both of those probes passed on the
+      unmodified code.
+- [x] `flora.ts`'s `takeWholeOffering` now clears the tile outright the instant
+      an offering is eaten — terrain, stock, flavor, offeredBy, all of it —
+      rather than decrementing. Immediate, not "next tick": the player is
+      watching the tile they just gave away.
+- [x] Wired into both eat paths (`applyTreatSeeking` and `seekFood`'s own
+      offered-berry branch). Ordinary wild food is still grazed a bite at a
+      time — the guard is `offeredBy`.
+- [x] The giver's rapport is read BEFORE the clear, so feeding still pays. A
+      test covers exactly that ordering, because getting it backwards would
+      silently delete the whole point of the verb.
+- [x] 5 tests; proved they fail without the fix (2 failed / 3 passed with the
+      change stashed).
+
+### The event ticker reads top to bottom
+
+Direct ask: *"I want the excerpt of log to be top to bottom for the one at top
+of screen."*
+
+- [x] Dropped the `.reverse()`. Oldest at the top, newest at the bottom, so
+      the newest line sits closest to the map.
+- [x] The opacity ramp had to flip with it, and is indexed from the BOTTOM
+      rather than the top — a short log is missing its OLDEST entries, so
+      with two rows the newer one is still fully opaque instead of the ramp
+      starting in the wrong place.
+- [x] Live: five markers pushed in order render as `marker 3` (0.5) / `marker
+      4` (0.75) / `marker 5` (1.0), reading down the screen.
+
+### Also
+
+- [x] The dev-only `window.__pokuelike` debug surface gained `playerAct` and
+      `say`, so a check can drive a real turn instead of poking engine state.
+      Dev build only, same as the rest of that object.
+- [x] Corrected a test-count line I got wrong in the stairs entry above
+      (engine 1653 / data 476 at that commit, not 1658 / 477).
+- [x] Full suite green: engine **1658**, data **476**, web build clean.
+
+## Round: petting, and eating off the ground
+
+### Pet a Pokémon
+
+Direct ask: *"And finally I want the ability to pet a Pokémon to try and gain
+rapport. Need to be in 1unit range, Pokémon can react poorly, walk away, or
+even clash. But if you have high rapport it tends to work better."*
+
+New engine module `pet.ts`, a new `PlayerAction`, a new `RapportReason`, a new
+`SimEvent`, and a `Pet` wedge on the radial's targeted hemisphere.
+
+- [x] **Deliberately the risky counterpart to `offer`.** Offering is safe and
+      indirect: you set a berry down and step back, and the creature decides
+      in its own time. Petting costs nothing from the pack, resolves
+      immediately, and can go wrong — because you are inside the distance a
+      wary animal keeps for a reason. The cheap verb is the dangerous one.
+- [x] Trust picks the odds table, not a flat roll. Measured over 2000 attempts
+      per stage (seed 7):
+
+      | trust | accepted | tolerated | pulled away | clashed |
+      | --- | --- | --- | --- | --- |
+      | wary | 8% | 12% | 57% | 23% |
+      | tolerant | 30% | 26% | 35% | 10% |
+      | curious | 55% | 27% | 16% | 2% |
+      | bonded | 82% | 16% | 2% | 0% |
+
+      **These are sim-original starting numbers, not a balance ruling.** The
+      shape is what the ask specifies; the values are for the user to judge
+      against a real run. Same for `PET_COOLDOWN_TICKS` = 30.
+- [x] A bonded creature can never bite. At that point it is following you
+      through cave levels, and a bite out of nowhere would read as the sim
+      forgetting the relationship rather than as a risk you took.
+- [x] **Pestering is a real mechanic, not a refusal.** Petting again inside
+      the cooldown rolls on the stage BELOW the creature's real one. Refusing
+      outright would be a wasted turn with nothing learned; the same act
+      landing worse is what being pawed at repeatedly actually feels like.
+      Waking something by touching it costs another stage, and the two stack.
+- [x] A clash is a real hit through `resolveHit`, not a special-cased
+      scratch — getting bitten costs what being bitten costs.
+- [x] **The `"petted"` memory is only written on an accepted touch.** The
+      score still moves on the souring outcomes, but a memory reading "He has
+      petted me four times" on an edge where three were flinches would be the
+      prose lying. Prose: *"He petted me."* / *"He has petted me three
+      times."*
+- [x] `lastPetTick` lives on the CREATURE, not the player, so petting two
+      different party members in a row is two fresh gestures.
+- [x] Live through the real UI — the lines, read cold:
+      - `Machop leans into your hand.`
+      - `Machop holds still and lets you.`
+      - `Machop pulls away from your hand.`
+      - `Machop bites you.` → `Machop's Body Slam hits you for 9.`
+
+      The clash reads as cause then effect in the log, which is the point:
+      the damage line alone would look like an ambush.
+- [x] Failure says which failure it is — "Nothing within reach to pet." vs
+      "Two are in reach. Say which one." The engine refuses to guess between
+      two neighbours, because guessing wrong here gets you bitten.
+- [x] 17 tests, including a monotonic-gradient check across all four stages
+      (a single lucky roll would prove nothing) with a fresh scene per
+      attempt so a cooldown from the previous one cannot contaminate the next.
+
+### Eat off the ground
+
+Direct ask: *"I want to have a radial eat option to eat off the ground."*
+
+- [x] `selfVerbsFor` now offers `eat` when you are standing on a food tile
+      with stock left. `player.ts`'s `eat` already read the tile underfoot —
+      there was simply no way to ask for it from the radial, so standing on a
+      berry patch meant opening the pack.
+- [x] Verified with controls, not just a success: `eat` appears standing on
+      food (`["gather","eat"]`), and is absent both off food and on a patch
+      picked clean (`[]` both times). Live: hunger 0.40 → 0.80, "You eat."
+
+### Also
+
+- [x] `verbsForTile` with controls: `pet` appears for an adjacent creature
+      (`["examine","moveHere","pet","attack"]`), and is absent for the same
+      creature three tiles away and for empty adjacent ground.
+- [x] Radial renders with the hemisphere split intact: Go / Pet / Attack on
+      the targeted half, Eat / Gather on the self half.
+- [x] **A check that proved nothing, caught and replaced.** The first radial
+      verification long-pressed a screen position computed from tile
+      coordinates without accounting for the camera, opened the menu on empty
+      ground, and reported "the menu has no Pet wedge" — true, and
+      meaningless. Replaced with a debug hook that opens the menu on a named
+      tile. Same family as the fog-darkness measurement that read the wrong
+      canvas.
+- [x] The new `SimEvent` broke exactly the switches CLAUDE.md says it will:
+      web `eventText.ts` and the engine's own `RAPPORT_REASON_SIGNIFICANCE`
+      and `rapportProse.ts` tables. All updated. (The runner's `format.ts`
+      has a `default`, so it did not error — worth knowing.)
+- [x] Full suite green: engine **1675**, data 476, web build clean.
+
+## Round: Look is a modal
+
+Direct ask: *"When I look at a unit I want the little bar at the bottom. To
+temporarily show me their stats and stuff. Or tbh, a modal is appropriate for
+look - just to see in bigger box what materials are there, what the unit is
+doing, stats etc."*
+
+- [x] Reuses the pack menu's own `.pack-card` chrome rather than a third
+      visual language for the same job — only the stat grid and the need bars
+      are new CSS.
+- [x] **Still free.** Looking costs no turn, and the curated one-line
+      `describeTile` sentence still goes to the action log, so the record of
+      what you looked at survives closing the modal. The sentence also leads
+      the modal, so the two can never disagree about what is there.
+- [x] Ordering is deliberate: what the ground is → what it offers → who is
+      standing on it and everything about them. A creature is the reason you
+      looked.
+- [x] Real output, read cold, on a Machop standing beside the player:
+
+      ```
+      Machop · Lv 5
+      Bare floor. Machop stands here.
+      GROUND     Terrain: Bare floor · Passable: yes · Standing here: nothing happens
+      MATERIALS  Here: nothing to take
+      WHO IS HERE
+        Doing: The Machop is standing still. He has seen you.
+        Sex: male · Type: fighting · Herd: the Machops of Bramblemire
+        HP 22/22 · Hunger 60/100 · Thirst 45/100 · Energy 80/100
+      STATS      ATK 13 · DEF 9 · SPEED 8 · SP.ATK 8 · SP.DEF 8 · MAX HP 22
+      MOVES      Tackle · 40 | Body Slam · 85 | Low Kick
+      ```
+
+      and on a berry patch: `MATERIALS  Oran Berry / Takes left: 3`.
+- [x] "Doing" is `tells.ts`'s `examine` with the player as observer, so it
+      carries whether it has noticed you and how it feels about you — the
+      same sentence the inspector uses, not a second parallel description.
+- [x] **Two defects caught by reading the real output rather than the code.**
+      `Spd` (speed) and `SpD` (sp. defense) both rendered as `SPD` once the
+      grid uppercased them — two different stats under one label. And
+      `Low Kick · -1` printed a sentinel: `power <= 0` means "no fixed power"
+      (Low Kick scales with weight), and `move.power ? …` treats -1 as
+      truthy. Both fixed; neither would have shown up in a typecheck.
+- [x] Closes on Escape, on `l`, on the ✕, and on a backdrop tap — getting out
+      has to be as cheap as getting in, since looking is constant.
+- [x] Open/closed measured by computed style and bounding rect, never by
+      reading back the `hidden` flag — index.html's own documented scar.
+      Control: `display: none` before looking, `flex` after, `none` again
+      after the backdrop tap.
+- [x] Full suite green: engine 1675, data 476, web build clean.
+
+## Fixed: recipes lost on the stairs, and stairs you cannot see
+
+Direct report: *"I'm losing all my recipes when going up and down stairs. Also
+stairs a are really hard to see. Make em have a light radius like sunbeams"*
+
+### Recipes were never on the player — the catalog was on the world
+
+- [x] **Root cause.** `World.recipes`, `World.items` and
+      `World.playerBaseMoves` are per-world catalogs, and only level 1
+      (`createCaveScenario`) ever set them. `buildDeeperLevel` calls
+      `generateWorld`, which does not. So the instant you took the stairs,
+      `player.ts`'s `craft` looked up `world.recipes?.[id]` on a world with no
+      catalog at all and every recipe became unmakeable.
+- [x] The player's own `knownRecipes` travelled with them the whole time and
+      was never the thing that was lost — which is why it looked like the
+      recipes were "gone" rather than the menu being empty.
+- [x] Measured before the fix, on a real generated run: **depth 2 had 0
+      recipes** (`expected 0 to be greater than 5`). Depth 1 had the full set.
+- [x] Fixed in `linkLevels`, not in each level's construction: a level can be
+      built a dozen ways, but it cannot become part of a run without passing
+      through that function. Assigned by reference, not cloned, so the levels
+      cannot drift apart — there is a test asserting object identity.
+- [x] Live through the real Pack menu, down-down-up: **14 craftable rows on
+      every level** (1 → 2 → 3 → 2), and a Torch actually crafted on level 2.
+- [x] 3 tests in `packages/data/test/caveCatalog.test.ts`, written to fail
+      first (3/3 failed before the fix).
+- [x] **Same family as the fog bug.** Both were "state that belongs to the run
+      is stored per-World, and only the first World ever got it." Worth
+      watching for a third: anything set inside `createCaveScenario` and not
+      in `linkLevels` has this shape.
+
+### Stairs are a light source now
+
+- [x] `vision.ts` grew a named `LIGHT_TERRAIN` set — sunbeam, stairsDown,
+      stairsUp, exit. Stairs were the one thing in a cave you HAVE to find and
+      the only landmark with no light of its own, so they were invisible until
+      you walked onto them.
+- [x] The right lever precisely because `isLitTile` is one choke point feeding
+      three things: `LIT_TILE_SIGHT_RADIUS` (visible 14 tiles off through the
+      dark with clear line of sight), `ambientLightAt` (standing beside them
+      is full light, so your own radius opens up), and `drawFog` (rendered
+      undimmed). A palette tweak would have bought none of that.
+- [x] Deliberately NOT extended to `flora.ts`'s `isNearSunbeam` (germination)
+      or `harvest.ts`'s deadwood-near-sunbeam check: those ask "is there real
+      sunlight here", which is a different question from "can you see this".
+      Stairs should not grow plants.
+- [x] `examineTile`'s `lit` field now uses the same predicate, so Look and the
+      renderer cannot disagree.
+- [x] **Measured with its control**: the same tile, at the same distance, in
+      the same dark — `beforeFloor: false, afterStairs: true`. Live in the
+      app, not just a unit test. Screenshots before/after show solid black
+      turning into a lit pocket with the staircase at its centre.
+- [x] 7 tests, including the range cap (past `LIT_TILE_SIGHT_RADIUS` it is
+      still invisible) and line of sight (a wall still blocks it) — a light
+      you can see through walls would be a different bug.
+- [x] Proved they fail without the change: 6 failed / 1 passed.
+- [x] Full suite green: engine **1682**, data **479**, web build clean.
+
+### Open, not fixed
+
+- [ ] The stairs tile's own ART still reads as a flat dark square against the
+      lit floor around it — visible now, but as a hole rather than as steps.
+      Flagging rather than changing it: that is a look-and-feel call.
+
+## Fixed: flora that isn't food no longer looks like berries
+
+Direct ask: *"Can you make flora that does not have berries just be plain
+green?"* Then, on seeing it: *"i think its fine ship it"*.
+
+- [x] **The map was saying the opposite of the truth.** `flora` is decorative
+      ground cover that yields NOTHING — `harvest.ts`'s `harvestableAt` has no
+      flora branch at all; only `"food"` terrain gives a crop. But all three
+      flora sprites are drawn with prominent fruit: `flora_moss` pink berries,
+      `flora_fern` red ones, `flora_bloom` blue-grey pods. Meanwhile the
+      actually-gatherable `food_oran` is a muted grey-yellow pod that reads as
+      LESS berry-like than the decoration. The "mechanics should be visible on
+      the map" pillar, inverted.
+- [x] `renderer.ts`'s `greenedSprite` repaints flora art by mapping each
+      pixel's Rec. 601 luma onto a foliage ramp (34,62,32 → 148,196,116).
+      Alpha untouched, so the transparent corners stay transparent. Cached per
+      flavour, so it runs once per sprite ever.
+- [x] **Recolour rather than new art**, so each flavour keeps its own
+      silhouette — moss, fern and bloom still differ in form, and the ground
+      cover stays varied without any of it claiming to be food. The berry
+      shapes now read as leaves and buds.
+- [x] **Not `tintedSprite`**: that helper fills at 0.4 alpha with
+      `source-atop`, which turns a saturated pink berry into a muted pink
+      berry. A hue that must not survive cannot be handled by a wash.
+- [x] `FLAVOR_FG.bloom` went from a saturated pink [205, 125, 195] to green —
+      that's the ASCII mode's glyph colour and the tile mode's fallback before
+      the sprite loads, and pink is the register a real crop uses to say
+      "something worth picking grew here". Moss and fern were already green.
+- [x] Verified by looking at the real frame with its control in it: the three
+      flora tiles and two real food crops (Oran, Cheri) planted side by side
+      in one row under the same lighting. Flora renders plain green; **the
+      food controls keep their berry colours**, which is the half that makes
+      the result mean anything.
+- [x] No unit test — the web package has no test runner at all, and this is a
+      colour transform on canvas. The evidence is the screenshot, said plainly
+      rather than dressed up as a proven invariant.
+- [x] Full suite unaffected: engine 1682, data 479, web build clean.
+
+### Open, for the user to rule on
+
+- [ ] `bloom` presumably meant "a flowering plant", and greening it removes
+      the flowers along with the fake berries. Flowers are not food, so it
+      could keep a floral colour and still not lie about being gatherable.
+      One line in `greenedFlora` to exempt it — not taken unilaterally, since
+      it is a look-and-feel call.
+
+## Round: bodies, panel auto-swap, and the energy economy
+
+### Gathering from bodies — two different defects under one report
+
+Direct report: *"still can't gather from dead bodies or fainted ones."*
+
+- [x] Reproduced first, both states, through the real UI:
+
+      | target | radial offered | loot | butcher |
+      | --- | --- | --- | --- |
+      | truly dead | examine, moveHere, attack, **loot, butcher** | **failed** | worked |
+      | fainted | examine, moveHere, pet, attack | failed | failed |
+
+- [x] **Loot was a button that could never work.** Measured on a real cave
+      run: **0 of 4 wild agents carried a single item**, and `applyLooting`
+      requires a non-empty inventory. So Loot appeared on every corpse and
+      failed on all of them. It is now offered only when the body actually
+      has something — `TileReport.lootable`.
+- [x] **Fainted creatures were unreachable content.** `applyLooting` has
+      always accepted "fainted OR truly dead" (`isFainted`'s own doc comment:
+      "can be looted (not eaten) or carried"), but `examineTile` only ever
+      reported `corpseId`, so the tile menu never offered Loot on a downed
+      creature and the engine's own allowance could not be reached. Added
+      `TileReport.faintedId` and split the verbs: **loot** needs something to
+      take and accepts either state; **butcher** still needs a true corpse.
+- [x] Live, with controls: fainted+empty offers no loot (control); fainted+
+      carrying offers loot and taking it moves the item across ("You loot the
+      body."); dead+empty offers butcher and no loot, and butchering yields
+      meat.
+- [x] **A fixture bug that looked like an engine bug, worth recording.** The
+      first attempt set `fainted: true` on a full-HP agent;
+      `maybeRecoverFromFaint` woke it on the very next tick, so by the time
+      `loot` ran the target was neither fainted nor dead. The failure looked
+      exactly like the reported bug. A downed fixture needs real low HP.
+
+### The panel follows what just happened
+
+Direct asks: *"when any attack is used on or by a player or on or by a pokemon
+follwing, i want the panel to swapt to event logs, auto swap on the ui to show
+what is happening"* and *"similarly when eating or drinking i want to auto swap
+to your own hp/hunger/thirst"*.
+
+- [x] `focusPlayerPanel("log" | "vitals")`. Both live on the You tab, so what
+      differs is which part is brought into view and, on mobile, how far the
+      sheet opens: the vitals strip IS the peek row, so a meal needs peek,
+      while a fight opens the sheet to full and forces the Log section open
+      (a collapsed section would make the swap show nothing new).
+- [x] Combat detection counts **both directions and both outcomes** — the ask
+      says "on or by", and a swing that MISSED you is as worth looking at as
+      one that landed. `fought`, `missed`, `killed`, `defeated`, matched
+      against the player plus every current follower.
+- [x] Read off `displayEvents`, not the raw batch, so the finishing-blow
+      repeats already filtered for the log cannot re-trigger the swap every
+      tick a mob keeps hitting a body that is already down.
+- [x] Never fires while a modal is up (pack, command picker, Look) — those
+      cover the panel anyway, and yanking the tab mid-interaction is worse
+      than a beat of missed narration.
+- [x] Eating/drinking swaps only on a turn that actually **landed**: swapping
+      the panel to announce "No water within reach." would be noise.
+- [x] Live: World tab + closed Log → a real strike → You tab, Log open, sheet
+      at full. Eat → You tab. Control: a FAILED drink stays on World.
+- [x] **A contaminated control, caught and redone.** The first failed-drink
+      control reported a swap, which looked like the guard was broken. It was
+      a real wild attack landing on the player during the same turn — a
+      legitimate swap. Re-run with the neighbourhood cleared, it stays on
+      World. An uncontrolled control is not a control.
+
+### Energy
+
+Direct ask: *"i want waiting to restore a lot more energy - non linear though.
+like quadratic, so you have to rest multiple turns in a row to recharge, and
+generaly energy drains too quick. should be 1/3 the speed. being near a
+campfire should auto restore energy."*
+
+- [x] `ENERGY_DRAIN_DIVISOR = 3`. Full to empty: **200 → 600 ticks**.
+- [x] Rest ramps: per-tick restore is `REST_RESTORE_STEP * restTicks`, which
+      makes the TOTAL over n consecutive ticks `step * n(n+1)/2` — quadratic
+      in turns rested, which is the shape asked for. Written as a ramping
+      linear rate rather than a literal `n²` per tick, because `n²` per tick
+      is quartic in total and runs away inside a dozen turns.
+
+      | consecutive rest ticks | this tick | total |
+      | --- | --- | --- |
+      | 1 | 0.004 | 0.004 |
+      | 5 | 0.020 | 0.060 |
+      | 10 | 0.040 | 0.220 |
+      | 20 | 0.080 | 0.840 |
+
+      Empty to full in **22 ticks**, against the old flat rate's 50 — while a
+      SINGLE rest tick now gives a fifth of what it used to. That asymmetry
+      is the ask: resting has to be something you commit to.
+- [x] Capped at `REST_RAMP_MAX_TICKS` (25), so a very long rest cannot reach
+      an absurd per-tick rate.
+- [x] An interruption clears `restTicks` — the next rest starts the ramp over
+      rather than resuming. That restart IS the cost of being interrupted.
+- [x] `CAMPFIRE_ENERGY_RESTORE_RATE` (0.01/tick) within `nearFire`'s existing
+      reach, awake or asleep, additive with the rest ramp — a fire helps
+      whether or not you sit down, and sitting down BY one is the best rest
+      available. Same "both bonuses stack" shape `decayNeeds` already used
+      for asleep-and-sheltered.
+- [x] `nearFire`/`NEAR_FIRE_RADIUS` moved from player.ts to fire.ts and
+      re-exported: needs.ts has to ask the same question, and player.ts
+      imports needs.ts, so the reverse edge would have been a real runtime
+      cycle.
+- [x] Measured live, in PLAYER TURNS (what the user actually feels — one turn
+      is several world ticks): energy 0.20 → **1.00 in 12 waits**. Campfire
+      while awake and moving: 0.50 → **0.808**, against a no-fire control of
+      **0.433** over the same turns.
+- [x] **Sim-wide knock-on, flagged not buried:** `ENERGY_SLEEP_THRESHOLD`'s
+      own doc comment says a rested agent hits the sleep threshold in ~140
+      ticks. At a third the drain that is now ~420, so WILD agents sleep
+      about a third as often too. That is a real ecology change riding along
+      with a player-facing one.
+- [x] 12 new tests (10 energy + 2 tile-query). Three existing tests encoded
+      the old behaviour and were updated, with the reason written into them.
+- [x] Full suite: engine **1694**, data 479, web build clean.
+
+### Not a bug: cooking already yields 3
+
+Reported as *"cooking should grant 3x of a cooked recipe"*, then *"like potato
+stew? i don't see it as 3 potato stews i can only eat one"*.
+
+- [x] Shipped in `c14db2f`, and re-verified on master three ways: the live
+      recipe table reads `{roastedApple:3, berryStew:3, potatoMash:3,
+      vegetableStew:3, roastedMeat:3}`; crafting Potato Mash from 4 potatoes
+      leaves `potato ×2, potatoMash ×3`; the pack row renders **"Potato Mash
+      ×3"**; and eating goes 3 → 2 → 1 → 0, one per turn, hunger rising each
+      time. Nothing changed — the build being played predates that commit.
+
+### Open, for the user to rule on
+
+- [ ] **Butchering a FAINTED creature.** Looting one now works. Butchering one
+      does not, because DESIGN.md rules "only true death is consumable" — and
+      a fainted animal wakes up, so butchering it is really killing it. Left
+      as-is rather than decided unilaterally.
+- [ ] **Wild agents carry nothing**, so Loot will almost never appear even
+      now. If corpses should be worth searching, someone has to put something
+      in them.
+
+## Round: ally targeting — why orders didn't land, and the option-3 rebuild
+
+Direct reports, in order: *"I think the targeting is wack still."* → *"Like when
+you command a ally to target enemy. It just doesn't really land unless they're
+positioned properly."* → asked what it looked like: **"stands still, never
+swings"**, both melee and ranged, player a few tiles back → *"I think the
+positioning aspect is hard. It feels hard to get a unit to the right spot."*
+
+### 1. The silent refusal — the "stands still" answer
+
+`applyCommandedAction` bails on `hasUrgentNeed` (hunger < 0.3 || thirst < 0.3)
+and on a 10-tile leash. Both returned with **no feedback of any kind**, and the
+order stayed queued looking perfectly healthy. Reproduced:
+
+| ally state | ticks it acted | foe HP | order still queued? |
+| --- | --- | --- | --- |
+| well fed (control) | 20/20 | 40 → 23 | yes |
+| hunger 0.29 | **0/20** | 40 → 40 | yes, forever |
+| thirst 0.29 | **0/20** | 40 → 40 | yes, forever |
+| hunger 0.31 (control) | 20/20 | 40 → 23 | yes |
+| player 11 tiles away | 0/20 | 40 → 40 | cancelled |
+| player 9 tiles away (control) | 20/20 | 40 → 23 | yes |
+
+- [x] **The refusal itself stays** — an order should wait rather than march a
+      starving partner past water. What was wrong is that nothing said so.
+- [x] `OrderStall` (`"hungry" | "thirsty" | "unreachable"`) is recorded on the
+      order and shown in the party panel, outranking the ordinary behaviour
+      line. State rather than an event: it persists as long as the need does,
+      and an event would either spam every tick or need its own edge detection.
+- [x] `"unreachable"` is new and covers the third case — out of range AND
+      unable to step closer. Without it a blocked partner looked identical to
+      one that was simply walking.
+- [x] Live, one ally through the whole loop:
+      `The Machop is standing still.` → **`too hungry to fight`** → (fed)
+      `The Machop is fighting.` The stall clears on its own; no re-issuing.
+
+### 2. Manhattan vs Chebyshev — and the case that never self-corrected
+
+- [x] `applyCommandedAction` measured range with `manhattan` while
+      `player.ts`'s own targeted swing uses Chebyshev. Everything here moves
+      8-directionally, so a diagonally-adjacent partner is ONE step from its
+      target and manhattan called it two.
+- [x] The old code comment justified this as "self-correcting — it just walks
+      the partner one step closer next tick." **In open ground that is true and
+      cheap** (measured: 26 hits vs 25 over 30 ticks, orthogonal vs diagonal),
+      which is why my first diagonal test did NOT reproduce the report and I
+      said so rather than shipping the theory.
+- [x] **Boxed in, it never self-corrects at all.** A partner walled on every
+      side except the diagonal its target occupies lands **zero** hits under
+      manhattan and lands them immediately under Chebyshev. That is the
+      corridor case, and it is the one that matches "doesn't land unless
+      they're positioned properly."
+- [x] 3 tests; proved 2 of 3 fail under manhattan.
+
+### 3. Targeting, option 3 (the user's pick)
+
+*"Tap a creature to say what you want done, long-press to say exactly where."*
+
+- [x] **Tap = intent.** `PlayerAction`'s `command` gained `targetId`. A tap
+      resolves to a creature and the partner owns all the footwork.
+      `creatureNear` snaps within 1 tile, because on a phone an exact tile hit
+      is not realistic and the whole point was to stop making the player do the
+      positioning.
+- [x] A creature standing exactly on the tapped tile always wins outright — the
+      snap is a tiebreak for near misses, never a way to steal an exact tap.
+- [x] **Long-press = precision.** Aims at the pressed square with no snapping,
+      for terrain moves and deliberate "stand exactly there" orders. Committed
+      in the press handler itself, so the press IS the gesture.
+- [x] **No snapping for a terrain move**, ever: an axe swung at a tree is aimed
+      at the ground, and snapping to the Sandshrew beside it would swing at the
+      Sandshrew. Same rule `commitMove` already applied to the player's swing.
+- [x] An explicitly named target beats whoever is standing on the tile at
+      resolution time — the creature may have moved between the tap and the
+      order resolving, and falling back to the tile would order a swing at
+      empty ground.
+- [x] Live, through the real commit path: a tap one tile OFF the foe produces
+      `targetAgentId: machop-1` aimed at the foe's real tile; the same tile
+      long-pressed produces a bare tile order with no `targetAgentId`.
+- [x] Full suite: engine **1699**, data 479, web build clean.
+
+### Still open
+
+- [ ] The leash (10 tiles) cancels an order silently. The stall vocabulary
+      covers the three *waiting* cases; a cancelled order still just vanishes.
+- [ ] `hasUrgentNeed` at 0.3 may simply be too aggressive now that it is
+      visible — a partner spends a lot of a cave run under it. Left alone
+      rather than retuned unilaterally.
+
+## Round: the UI, four asks
+
+Direct asks, one message: *"Events log, filtered to player should be a tab that
+is auto switched to when something of note happens. I think status of player
+needs to be shown when hp goes down or thirst, hunger, energy changes or gets
+under a threshold. So I guess on desktop we need to show logs and player status
+at same time. Also the examine modal needs to show everything. Like moves and
+rapport and all that for a unit."*
+
+### The Log is its own thing now
+
+- [x] It used to be a collapsible `<details>` INSIDE the You page, so it
+      competed with vitals/party/pack for one column and could be scrolled out
+      of sight exactly when it mattered.
+- [x] **Mobile:** a real tab — You | Log | World — and the auto-switch targets
+      it directly.
+- [x] **Desktop:** pinned as a permanent lower pane (42%) so logs and player
+      status are on screen together and no tab switch is needed. Measured
+      across a tab switch: You 440px + Log 323px, then World 389px + **Log
+      286px, still shown**.
+- [x] The desktop pane works by beating the `hidden` attribute with a
+      `display: flex !important` rule. That inversion is index.html's own
+      documented scar used deliberately — so any check of this pane must
+      measure computed style, never the flag, which is what the verification
+      does.
+- [x] `focusPlayerPanel("log")` now does nothing on desktop: switching tabs
+      there would move the player AWAY from what they were reading to show
+      them something already on screen.
+- [x] **A specificity trap, caught by measuring rather than by reading.** The
+      rule hiding the redundant Log tab on desktop was
+      `body.player-mode #tab-log` (one id), which loses to the existing
+      `body.player-mode #panel-tabs .play-tab { display: flex }` (one id, two
+      classes). The tab stayed visible. Scoped through `#panel-tabs` to win on
+      id count. Same family as the `.play-tab` scar already recorded here.
+
+### Vitals react to change
+
+- [x] Two separate signals, deliberately not merged: any real drop **pulses**
+      the bar, and crossing DOWN through 50% / 25% / 10% **says so in words**.
+      A pulse is "that cost you"; a threshold is "do something about this".
+- [x] **`VITAL_PULSE_MIN` is load-bearing, and measured.** Hunger, thirst and
+      energy all decay every tick, so pulsing on *any* drop made all four bars
+      flash on **every single turn** — constant noise that trains you to
+      ignore the signal. Gated at 2%: measured 0 pulses on an ordinary turn, 1
+      on a real hit.
+- [x] Live lines: `You are thirsty. (50% thirst)`, `You are hungry. (50%
+      hunger)`, `You are hurt. (50% health)`.
+- [x] **A fixture fighting the sim, not a bug.** HP set to 40% read back at
+      55.9% by the time the HUD drew — heal-over-time outran the drop, and the
+      crossing fired a turn later at 36.2%. Stated rather than tidied away.
+- [x] Thresholds and the pulse floor are sim-original; judge against a real
+      run.
+
+### The Look modal shows everything
+
+- [x] Moves went from a chip reading `Tackle` to a row per move with what a
+      player can actually act on: `Tackle: normal · power 40 · melee · cd 3`,
+      plus "not ready (n)" when on cooldown. `accuracy: -1` is a never-misses
+      sentinel and is suppressed, same family as the `power -1` bug caught
+      last round.
+- [x] **Rapport, both directions**, using the engine's own prose: trust stage,
+      `They remember: She has petted me three times.`, and what you remember of
+      them. Labelled, because one unattributed block of "She has defended me."
+      is ambiguous about who is speaking.
+- [x] Also nature, age, standing order, a stalled order, and what it is
+      carrying.
+- [x] Full suite: engine 1699, data 479, web build clean.
+
+### Still open
+
+- [ ] "Auto switched to when something of note happens" currently means combat
+      and threshold crossings. Level-ups, a follower bonding or leaving, and
+      finding a landmark are arguably also notable and do not switch.
+- [ ] The desktop split is a fixed 42%. Not draggable.

@@ -8,6 +8,7 @@ import {
   LONG_SLEEP_EXP_BONUS,
   LONG_SLEEP_EXP_TICKS,
   SLEEP_ENERGY_RESTORE_RATE,
+  REST_RESTORE_STEP,
   SLEEP_HEAL_MULTIPLIER,
 } from "../src/needs.js";
 import { tickCooldowns } from "../src/combat.js";
@@ -234,7 +235,22 @@ describe("needs-decay/heal/cooldown effects while asleep", () => {
 
     tickAgentNeeds(agent, world);
 
-    expect(agent.needs.energy).toBeCloseTo(0.5 + SLEEP_ENERGY_RESTORE_RATE, 5);
+    // Direction is what this test is about, and that is unchanged. The
+    // AMOUNT now ramps with consecutive rest (`REST_RESTORE_STEP`, direct
+    // ask: "quadratic, so you have to rest multiple turns in a row"), so the
+    // first tick deliberately gives much less than the old flat rate —
+    // see energyRest.test.ts for the ramp itself.
+    expect(agent.needs.energy).toBeGreaterThan(0.5);
+    expect(agent.needs.energy).toBeCloseTo(0.5 + REST_RESTORE_STEP, 5);
+    expect(agent.needs.energy).toBeLessThan(0.5 + SLEEP_ENERGY_RESTORE_RATE);
+  });
+
+  it("a long rest overtakes the old flat rate — the ramp is the point", () => {
+    const world = createWorld(5, 5);
+    const agent = bulbasaur({ x: 0, y: 0 }, { asleep: true, needs: createNeeds({ energy: 0 }) });
+    for (let i = 0; i < 10; i++) tickAgentNeeds(agent, world);
+    // Flat would be 10 * 0.02 = 0.20 after ten ticks; the ramp gives more.
+    expect(agent.needs.energy).toBeGreaterThan(10 * SLEEP_ENERGY_RESTORE_RATE);
   });
 
   it("applyHealOverTime heals faster with the sleep multiplier", () => {

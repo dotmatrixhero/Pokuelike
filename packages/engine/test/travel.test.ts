@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createWorld, setTile } from "../src/world.js";
 import { createNeeds } from "../src/needs.js";
 import { advancePlayerTurn } from "../src/simulation.js";
-import { updatePlayerVision, tileIndex } from "../src/vision.js";
+import { updatePlayerVision, tileIndex, visionScope } from "../src/vision.js";
 import { nextTravelStep, visibleAgentIds } from "../src/travel.js";
 import type { Agent } from "../src/types.js";
 
@@ -53,7 +53,7 @@ describe("nextTravelStep (tap to walk)", () => {
     world.agents.push(me);
     updatePlayerVision(world, me);
     // Pretend the player has seen this whole area.
-    const explored = (me.vision!.explored.surface ??= new Set());
+    const explored = (me.vision!.explored[visionScope(world, "surface")] ??= new Set());
     for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) explored.add(tileIndex(world, x, y));
     const first = nextTravelStep(world, me, { x: 9, y: 5 })!;
     expect(first.kind).toBe("move");
@@ -74,7 +74,7 @@ describe("nextTravelStep (tap to walk)", () => {
     const me = human(5, 5);
     world.agents.push(me);
     updatePlayerVision(world, me);
-    const explored = (me.vision!.explored.surface ??= new Set());
+    const explored = (me.vision!.explored[visionScope(world, "surface")] ??= new Set());
     for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) explored.add(tileIndex(world, x, y));
     let guard = 0;
     while (guard++ < 10) {

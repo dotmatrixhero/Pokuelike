@@ -57,6 +57,8 @@ const VERB_UI: Record<TileVerb, { label: string; icon: string; hint: string }> =
   command: { label: "Command", icon: "🐾", hint: "Send an ally here" },
   moveHere: { label: "Go", icon: "👣", hint: "Walk to this tile" },
   drink: { label: "Drink", icon: "💧", hint: "Drink from here" },
+  eat: { label: "Eat", icon: "🍓", hint: "Eat from the ground" },
+  pet: { label: "Pet", icon: "🤚", hint: "Reach out and touch it" },
   loot: { label: "Loot", icon: "🎒", hint: "Take what it carried" },
   butcher: { label: "Butcher", icon: "🔪", hint: "Cut meat and hide" },
   useStairs: { label: "Stairs", icon: "🪜", hint: "Use the stairs" },

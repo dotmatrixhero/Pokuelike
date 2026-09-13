@@ -124,6 +124,9 @@ const SENTENCE: Record<RapportReason, (c: Clause) => string> = {
   receivedFood: ({ n, sex }) =>
     n <= 1 ? `${subject(sex)} brought me food.` : `${subject(sex)} ${toHave(sex)} brought me food ${times(n)}.`,
   socialized: ({ n }) => (n <= 1 ? `We have sat together.` : `We have kept each other company for seasons.`),
+  // Only ever written on an accepted touch — see pet.ts's `applyPet` for why
+  // the souring outcomes move the score without claiming this.
+  petted: ({ n, sex }) => (n <= 1 ? `${subject(sex)} petted me.` : `${subject(sex)} ${toHave(sex)} petted me ${times(n)}.`),
   witnessedKindness: ({ n, sex, label, standing, again }) =>
     n <= 1
       ? `I watched ${object(sex)} feed ${again ? "another" : named(label, standing, "creature")}.`

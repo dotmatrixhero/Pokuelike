@@ -27,19 +27,77 @@ export function useStairs(world: World, agent: Agent, log?: EventLog): World | u
   return undefined;
 }
 
+/**
+ * Direct report: "Units in party do not follow past stairs." They didn't —
+ * `crossLevel` used to move exactly one agent, so the party was left standing
+ * on the level above. Worse than merely being left behind: `needs.ts`'s
+ * `applyFollowing` drops `followingId` the moment the leader isn't in the same
+ * `world.agents` array, so the bond itself was quietly destroyed by the
+ * crossing. A bond you spent the run earning should not be deletable by a
+ * staircase.
+ *
+ * Every living bonded follower crosses, regardless of how far behind it was
+ * standing. Distance-gating reads more diegetic, but its failure mode is
+ * silent permanent party loss — the follower that happened to be four tiles
+ * back when you pressed `>` is gone and nothing tells you why.
+ */
+function followersOf(world: World, agent: Agent): Agent[] {
+  return world.agents.filter((a) => a !== agent && a.followingId === agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer);
+}
+
+/**
+ * Nearest walkable tile to `landAt` with nobody living already on it, so a
+ * party of three doesn't stack onto the stairs tile. Local rather than
+ * worldgen.ts's `findWalkableNear` because this one also has to dodge
+ * occupants, and because climb.ts deliberately depends on world.ts alone.
+ */
+function freeTileNear(world: World, layer: Agent["layer"], landAt: { x: number; y: number }, taken: Set<string>): { x: number; y: number } {
+  const maxRadius = Math.max(world.width, world.height);
+  for (let r = 0; r <= maxRadius; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = landAt.x + dx;
+        const y = landAt.y + dy;
+        if (x < 0 || y < 0 || x >= world.width || y >= world.height) continue;
+        if (taken.has(`${x},${y}`)) continue;
+        if (tileAt(world, layer, x, y)?.walkable !== true) continue;
+        if (world.agents.some((a) => a.alive !== false && a.layer === layer && a.pos.x === x && a.pos.y === y)) continue;
+        return { x, y };
+      }
+    }
+  }
+  return { ...landAt };
+}
+
 function crossLevel(from: World, to: World, agent: Agent, landAt: { x: number; y: number }, direction: "down" | "up", log?: EventLog): World {
-  from.agents = from.agents.filter((a) => a !== agent);
+  const party = followersOf(from, agent);
+  const crossing = new Set<Agent>([agent, ...party]);
+  from.agents = from.agents.filter((a) => !crossing.has(a));
+
   agent.pos = { ...landAt };
   to.agents.push(agent);
-  log?.record({
-    kind: "crossedCaveLevel",
-    tick: to.tick,
-    agentId: agent.id,
-    species: agent.species,
-    fromDepth: from.depth ?? 0,
-    toDepth: to.depth ?? 0,
-    direction,
-  });
+
+  const taken = new Set<string>([`${landAt.x},${landAt.y}`]);
+  for (const follower of party) {
+    const spot = freeTileNear(to, agent.layer, landAt, taken);
+    taken.add(`${spot.x},${spot.y}`);
+    follower.pos = spot;
+    follower.layer = agent.layer;
+    to.agents.push(follower);
+  }
+
+  for (const who of [agent, ...party]) {
+    log?.record({
+      kind: "crossedCaveLevel",
+      tick: to.tick,
+      agentId: who.id,
+      species: who.species,
+      fromDepth: from.depth ?? 0,
+      toDepth: to.depth ?? 0,
+      direction,
+    });
+  }
   return to;
 }
 

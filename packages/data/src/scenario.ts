@@ -561,7 +561,25 @@ function attachExit(world: World): void {
   if (world.stairsUpAt) litTrailToward(world, dist, dist.get(`${pos.x},${pos.y}`) ?? 0, world.rng);
 }
 
-/** Links `below` under `above`: sets `depth`, `below`/`above` pointers, and `below`'s own `"stairsUp"` landing tile. */
+/**
+ * Links `below` under `above`: sets `depth`, `below`/`above` pointers,
+ * `below`'s own `"stairsUp"` landing tile, and — see below — the item and
+ * recipe catalogs.
+ *
+ * Direct report: **"I'm losing all my recipes when going up and down
+ * stairs."** `World.recipes`, `World.items` and `World.playerBaseMoves` are
+ * per-world catalogs, and only level 1 (`createCaveScenario`) ever set them.
+ * `buildDeeperLevel` calls `generateWorld`, which does not. So stepping onto
+ * level 2 handed `player.ts`'s `craft` a world with no catalog at all:
+ * `world.recipes?.[id]` was undefined for every recipe, and the whole craft
+ * list went dead. The player's own `knownRecipes` travelled with them the
+ * entire time and was never the thing that was lost.
+ *
+ * Copied here, at the one place levels are chained together, rather than at
+ * each level's construction — a new level can be built a dozen ways, but it
+ * cannot become part of a run without passing through this function.
+ * Assigned by reference, not cloned, so the levels cannot drift apart.
+ */
 function linkLevels(above: World, below: World): void {
   below.depth = (above.depth ?? 1) + 1;
   const landing = findWalkableNear(below, "underground", below.width / 2, below.height / 2);
@@ -569,6 +587,9 @@ function linkLevels(above: World, below: World): void {
   below.stairsUpAt = landing;
   above.below = below;
   below.above = above;
+  below.recipes = above.recipes;
+  below.items = above.items;
+  below.playerBaseMoves = above.playerBaseMoves;
 }
 
 /**

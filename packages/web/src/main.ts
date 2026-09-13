@@ -2,9 +2,10 @@ import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocu
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
+import { herdDisplayName } from "./notableTitles.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
-import { examineTile, selfVerbsFor, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { describeRapport, examineTile, selfVerbsFor, trustStage, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
 import { TileMenu, menuItemsFor } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
@@ -127,7 +128,18 @@ const tabBattleScreenBtn = document.getElementById("tab-battle-screen") as HTMLB
 const tabEventsBtn = document.getElementById("tab-events") as HTMLButtonElement;
 const tabYouBtn = document.getElementById("tab-you") as HTMLButtonElement;
 const tabWorldBtn = document.getElementById("tab-world") as HTMLButtonElement;
+const tabLogBtn = document.getElementById("tab-log") as HTMLButtonElement;
+const logPageEl = document.getElementById("log-page") as HTMLElement;
 const youPageEl = document.getElementById("you-page") as HTMLElement;
+/**
+ * Whether the sidebar is the mobile bottom sheet rather than a desktop
+ * column. Matches the one breakpoint index.html's own `@media (max-width:
+ * 768px)` rules use, read live rather than cached — a phone rotating, or a
+ * desktop window dragged narrow, changes the answer.
+ */
+function isMobileLayout(): boolean {
+  return window.matchMedia("(max-width: 768px)").matches;
+}
 const youTitleEl = document.getElementById("you-title") as HTMLElement;
 const partyBodyEl = document.getElementById("party-body") as HTMLElement;
 const partyCountEl = document.getElementById("party-count") as HTMLElement;
@@ -169,6 +181,10 @@ const packMenuCloseBtn = document.getElementById("pack-menu-close") as HTMLButto
 const commandMenuEl = document.getElementById("command-menu") as HTMLElement;
 const commandMenuBodyEl = document.getElementById("command-menu-body") as HTMLElement;
 const commandMenuCloseBtn = document.getElementById("command-menu-close") as HTMLButtonElement;
+const lookMenuEl = document.getElementById("look-menu") as HTMLElement;
+const lookMenuTitleEl = document.getElementById("look-menu-title") as HTMLElement;
+const lookMenuBodyEl = document.getElementById("look-menu-body") as HTMLElement;
+const lookMenuCloseBtn = document.getElementById("look-menu-close") as HTMLButtonElement;
 // Direct ask: "have herd hp and status bars like easy to pin so you can
 // see all; at once."
 
@@ -250,7 +266,12 @@ let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
  * allies moves": the same pick-a-move-then-tap-a-tile flow, just firing
  * `{kind: "attack", target, moveId}` instead of `{kind: "command", ...}`.
  */
-let targeting: { agentId?: string; moveId: string } | undefined;
+/**
+ * `exactTile` is set by a long-press: the next commit aims at the pressed
+ * SQUARE with no creature snapping. A plain tap aims at whoever is there —
+ * see `creatureNear`.
+ */
+let targeting: { agentId?: string; moveId: string; exactTile?: boolean } | undefined;
 /**
  * Direct ask: "Even the targeting for allies should like show the cone or
  * the aoe of a target." The real resolved tiles (`resolveShape`) a move
@@ -488,8 +509,23 @@ function resetUiForNewWorld(): void {
   renderInspector(inspectorEl, undefined, world);
   tabManualOverrideForBattleSeq = undefined;
   lastAutoSwitchedBattleSeq = undefined;
-  selectTab("inspector", false);
+  // In play mode the sidebar belongs to the player, not the world. Crossing a
+  // staircase used to kick it to "World overview · Tick 0 · Population 9",
+  // which is a large part of why a level change read as the whole game having
+  // reset — the panel you were reading was replaced by a different one.
+  selectTab(playerMode ? "you" : "inspector", false);
   updateStatusLabels();
+
+  // The player has just been moved into a world nothing has ticked for them
+  // yet — down the stairs, across a zone edge, out of a save file — so
+  // `vision.visible` still describes the world they left. `advancePlayerTurn`
+  // is the only other thing that recomputes it, and no turn is spent on a
+  // world swap. Missed until fog became per-world: the player used to arrive
+  // carrying the previous level's explored set, which hid the fact that
+  // nothing here was actually being looked at. Measured: without this the
+  // canvas renders 100% dark on arrival at level 2.
+  const arriving = findPlayer(world);
+  if (arriving) updatePlayerVision(world, arriving);
 }
 
 /**
@@ -720,9 +756,45 @@ function stepStrike(): void {
 }
 
 /** Issuing an order is the player's own turn to spend, same as every other verb — `agentId` undefined means the player's own swing. */
-function commitMove(agentId: string | undefined, moveId: string, target: Vec2): void {
+/**
+ * The creature a targeting tap MEANT, given the tile it actually landed on.
+ *
+ * Direct steer: *"I think the positioning aspect is hard. It feels hard to get
+ * a unit to the right spot."* The answer picked was to separate intent from
+ * footwork — tap a creature and the partner owns the positioning — which only
+ * works if tapping a creature is easy. On a phone, at this tile size, an exact
+ * hit is not easy, so a tap that lands one tile off a living creature still
+ * counts as meaning that creature.
+ *
+ * Deliberately does NOT snap for a terrain move: an axe swung at a tree is
+ * aimed at the ground by definition, and snapping to the Sandshrew standing
+ * next to it would swing at the Sandshrew instead. Same reasoning
+ * `commitMove` already applies to the player's own swing.
+ *
+ * Returns undefined when the tap was not near anything alive — that is a real
+ * tile order, not a failed creature order.
+ */
+const TARGET_SNAP_TILES = 1;
+function creatureNear(tile: Vec2, actorId: string, move: { terrainEffect?: unknown } | undefined): Agent | undefined {
+  if (move?.terrainEffect) return undefined;
+  const layer = viewLayer();
+  let best: Agent | undefined;
+  let bestDistance = Infinity;
+  for (const a of world.agents) {
+    if (a.id === actorId || a.alive === false || a.isEgg || a.layer !== layer) continue;
+    const d = reachBetween(a.pos, tile);
+    // A creature standing exactly on the tapped tile always wins outright; the
+    // snap is a tiebreak for near misses, never a way to steal an exact tap.
+    if (d > TARGET_SNAP_TILES || d >= bestDistance) continue;
+    best = a;
+    bestDistance = d;
+  }
+  return best;
+}
+
+function commitMove(agentId: string | undefined, moveId: string, target: Vec2, targetId?: string): void {
   if (agentId !== undefined) {
-    playerAct({ kind: "command", agentId, moveId, target });
+    playerAct({ kind: "command", agentId, moveId, target, targetId });
     return;
   }
   const me = findPlayer(world);
@@ -827,6 +899,212 @@ function describeTile(report: TileReport): string {
   return `${first} Nothing to take.`;
 }
 
+/**
+ * Look, as a real modal.
+ *
+ * Direct ask: "When I look at a unit I want the little bar at the bottom. To
+ * temporarily show me their stats and stuff. Or tbh, a modal is appropriate
+ * for look - just to see in bigger box what materials are there, what the
+ * unit is doing, stats etc."
+ *
+ * Still free — looking costs no turn, which is what makes checking before you
+ * commit a real option rather than a tax on not already knowing.
+ *
+ * The one-line `describeTile` sentence stays and leads the modal, because the
+ * sentence is the curated read and the fields under it are the detail. The
+ * ordering is deliberate: what the ground is, what it offers, then who is
+ * standing on it and everything about them. A creature is the reason you
+ * looked.
+ */
+function lookRow(label: string, value: string): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "look-line";
+  const key = document.createElement("span");
+  key.className = "look-dim";
+  key.textContent = `${label}: `;
+  row.append(key, document.createTextNode(value));
+  return row;
+}
+
+function lookHeading(text: string): HTMLElement {
+  const h = document.createElement("div");
+  h.className = "pack-heading";
+  h.textContent = text;
+  return h;
+}
+
+function lookBar(label: string, value: number, max: number, colour: string): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.append(lookRow(label, `${Math.max(0, Math.round(value))} / ${Math.round(max)}`));
+  const bar = document.createElement("div");
+  bar.className = "look-bar";
+  const fill = document.createElement("i");
+  fill.style.width = `${Math.max(0, Math.min(100, (value / (max || 1)) * 100))}%`;
+  fill.style.background = colour;
+  bar.append(fill);
+  wrap.append(bar);
+  return wrap;
+}
+
+function renderLookModal(tile: Vec2, report: TileReport): void {
+  const me = findPlayer(world);
+  lookMenuBodyEl.replaceChildren();
+
+  // The curated sentence first — same text the log gets, so the two never
+  // disagree about what is here.
+  const lead = document.createElement("div");
+  lead.className = "look-line";
+  lead.textContent = describeTile(report);
+  lookMenuBodyEl.append(lead);
+
+  lookMenuBodyEl.append(lookHeading("Ground"));
+  lookMenuBodyEl.append(lookRow("Terrain", TERRAIN_WORDS[report.terrain] ?? report.terrain));
+  lookMenuBodyEl.append(lookRow("Passable", report.walkable ? "yes" : "no"));
+  if (report.elevation) lookMenuBodyEl.append(lookRow("Elevation", String(report.elevation)));
+  const effects = [
+    report.conceals ? "hides you" : undefined,
+    report.poisons ? "poisons you" : undefined,
+    report.drinkable ? "drinkable" : undefined,
+    report.lit ? "lit" : undefined,
+    report.stairs ? `stairs ${report.stairs}` : undefined,
+  ].filter((e): e is string => e !== undefined);
+  lookMenuBodyEl.append(lookRow("Standing here", effects.length ? effects.join(", ") : "nothing happens"));
+
+  lookMenuBodyEl.append(lookHeading("Materials"));
+  if (report.harvestable.length > 0 && report.harvestsLeft > 0) {
+    const chips = document.createElement("div");
+    chips.className = "look-chips";
+    for (const material of report.harvestable) {
+      const chip = document.createElement("span");
+      chip.className = "look-chip";
+      chip.textContent = itemName(material);
+      chips.append(chip);
+    }
+    lookMenuBodyEl.append(chips);
+    lookMenuBodyEl.append(lookRow("Takes left", String(report.harvestsLeft)));
+  } else {
+    lookMenuBodyEl.append(lookRow("Here", report.harvestable.length > 0 ? "picked clean" : "nothing to take"));
+  }
+
+  const occupant = report.occupantId ? world.agents.find((a) => a.id === report.occupantId) : undefined;
+  const corpse = report.corpseId ? world.agents.find((a) => a.id === report.corpseId) : undefined;
+  const who = occupant ?? corpse;
+  if (who) {
+    const name = SPECIES[who.species]?.name ?? who.species;
+    lookMenuTitleEl.textContent = `${name}${who.level ? ` · Lv ${who.level}` : ""}${corpse && !occupant ? " · dead" : ""}`;
+    lookMenuBodyEl.append(lookHeading(occupant ? "Who is here" : "What is left here"));
+
+    if (occupant) {
+      // What it is doing, in the game's own voice — `examine` is the tells
+      // module, the same sentence the inspector uses, including whether it
+      // has noticed you and how it feels about you.
+      lookMenuBodyEl.append(lookRow("Doing", examine(world, occupant, { observer: me })));
+      if (who.sex) lookMenuBodyEl.append(lookRow("Sex", who.sex));
+      if (who.types?.length) lookMenuBodyEl.append(lookRow("Type", who.types.join(" / ")));
+      if (who.herdId) lookMenuBodyEl.append(lookRow("Herd", herdDisplayName(world, who.herdId)));
+      lookMenuBodyEl.append(lookBar("HP", who.hp ?? 0, who.maxHp ?? 1, "var(--good, #4ac97e)"));
+      if (who.needs) {
+        lookMenuBodyEl.append(lookBar("Hunger", who.needs.hunger * 100, 100, "#e0b341"));
+        lookMenuBodyEl.append(lookBar("Thirst", who.needs.thirst * 100, 100, "#49a7e0"));
+        lookMenuBodyEl.append(lookBar("Energy", who.needs.energy * 100, 100, "#c7a3e8"));
+      }
+      if (who.status) lookMenuBodyEl.append(lookRow("Status", who.status.kind));
+      if (who.nature) lookMenuBodyEl.append(lookRow("Nature", who.nature));
+      if (who.age !== undefined) lookMenuBodyEl.append(lookRow("Age", String(who.age)));
+      if (who.standingOrder) lookMenuBodyEl.append(lookRow("Order", who.standingOrder));
+      if (who.commandedAction?.stalled) lookMenuBodyEl.append(lookRow("Order stalled", who.commandedAction.stalled));
+      if ((who.inventory?.length ?? 0) > 0) {
+        lookMenuBodyEl.append(lookRow("Carrying", who.inventory!.map((i) => `${itemName(i.itemKey)}${i.count > 1 ? ` ×${i.count}` : ""}`).join(", ")));
+      }
+      if (who.stats) {
+        lookMenuBodyEl.append(lookHeading("Stats"));
+        const grid = document.createElement("div");
+        grid.className = "look-stats";
+        // "Spd" and "SpD" both render as SPD once the grid uppercases them,
+        // which is two different stats showing the same label. Spelled out
+        // instead.
+        const entries: [string, number][] = [
+          ["Atk", who.stats.attack],
+          ["Def", who.stats.defense],
+          ["Speed", who.stats.speed],
+          ["Sp.Atk", who.stats.spAttack],
+          ["Sp.Def", who.stats.spDefense],
+          ["Max HP", who.stats.maxHp],
+        ];
+        for (const [label, value] of entries) {
+          const cell = document.createElement("div");
+          cell.className = "look-stat";
+          const k = document.createElement("span");
+          k.textContent = label;
+          const v = document.createElement("span");
+          v.textContent = String(value);
+          cell.append(k, v);
+          grid.append(cell);
+        }
+        lookMenuBodyEl.append(grid);
+      }
+      if (who.moves?.length) {
+        lookMenuBodyEl.append(lookHeading("Moves"));
+        // Direct ask: "the examine modal needs to show everything. Like moves
+        // and rapport and all that for a unit." A chip reading just "Tackle"
+        // told the player nothing they could act on — what decides whether to
+        // stand next to this thing is how hard it hits, from how far, and how
+        // often. One row per move instead of a chip cloud, since that is four
+        // facts and a cloud only fits one.
+        for (const move of who.moves) {
+          const cd = who.moveCooldowns?.[move.id] ?? 0;
+          const facts: string[] = [];
+          facts.push(move.type);
+          if ((move.power ?? 0) > 0) facts.push(`power ${move.power}`);
+          // `accuracy: -1` is the "never misses" sentinel, same family as the
+          // power one that printed "Low Kick · -1" before it was caught.
+          if ((move.accuracy ?? -1) >= 0 && move.accuracy !== 100) facts.push(`${move.accuracy}% acc`);
+          const reach = move.range ? (move.range.max <= 1 ? "melee" : `reach ${move.range.min}–${move.range.max}`) : undefined;
+          if (reach) facts.push(reach);
+          if (move.cooldownTicks) facts.push(`cd ${move.cooldownTicks}`);
+          const row = lookRow(move.name, facts.join(" · "));
+          if (cd > 0) {
+            const wait = document.createElement("span");
+            wait.className = "look-dim";
+            wait.textContent = `  — not ready (${cd})`;
+            row.append(wait);
+          }
+          lookMenuBodyEl.append(row);
+        }
+      }
+
+      // Rapport, both directions. The engine already writes the prose
+      // (`describeRapport`); this only has to ask for it and say whose view it
+      // is. Without the labels a single block of "She has defended me." is
+      // ambiguous about who is speaking.
+      if (me && who.id !== me.id) {
+        lookMenuBodyEl.append(lookHeading("Between you"));
+        lookMenuBodyEl.append(lookRow("Trust", trustStage(world, who, me.id)));
+        const theirView = describeRapport(who, me, me.id);
+        const myView = describeRapport(me, who, who.id);
+        lookMenuBodyEl.append(lookRow("They remember", theirView || "nothing about you yet"));
+        if (myView) lookMenuBodyEl.append(lookRow("You remember", myView));
+      }
+    } else if (corpse) {
+      lookMenuBodyEl.append(lookRow("Body", `${SPECIES[corpse.species]?.name ?? corpse.species}, not yet butchered`));
+    }
+  } else {
+    lookMenuTitleEl.textContent = `${TERRAIN_WORDS[report.terrain] ?? report.terrain} · ${tile.x},${tile.y}`;
+  }
+
+  lookMenuEl.hidden = false;
+}
+
+function closeLookModal(): void {
+  lookMenuEl.hidden = true;
+}
+lookMenuCloseBtn.addEventListener("click", closeLookModal);
+lookMenuEl.addEventListener("click", (e) => {
+  // Tapping the dimmed backdrop closes it. Looking is free and constant, so
+  // getting out of it has to be as cheap as getting in.
+  if (e.target === lookMenuEl) closeLookModal();
+});
+
 /** Where a tile currently sits inside #map-area, accounting for zoom and the wrap's scroll. */
 function tileScreenPos(tile: Vec2): { x: number; y: number } {
   const wrapRect = canvasWrap.getBoundingClientRect();
@@ -850,7 +1128,11 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
       // Free: costs no turn, which is what makes looking before you commit a
       // real option rather than a tax on not already knowing.
       const report = examineTile(world, viewLayer(), tile);
-      if (report) say(describeTile(report));
+      if (!report) return;
+      // The sentence still goes to the log, so the record of what you looked
+      // at survives closing the modal.
+      say(describeTile(report));
+      renderLookModal(tile, report);
       return;
     }
     case "moveHere":
@@ -863,6 +1145,18 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
     case "drink":
       playerAct({ kind: "drink" });
       return;
+    case "eat":
+      playerAct({ kind: "eat" });
+      return;
+    case "pet": {
+      // Names the creature explicitly rather than letting the engine's
+      // single-neighbour fallback guess: the tile was already chosen, and
+      // with two animals beside you a guess can get you bitten by the wrong
+      // one.
+      const occupant = world.agents.find((a) => a.alive !== false && !a.isEgg && a.layer === viewLayer() && a.pos.x === tile.x && a.pos.y === tile.y && a.id !== me.id);
+      playerAct({ kind: "pet", targetId: occupant?.id });
+      return;
+    }
     case "loot":
       playerAct({ kind: "loot" });
       return;
@@ -896,7 +1190,7 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
  * Everything else aims at the pressed tile. `examine` is in neither: it is the
  * centre, and giving it a wedge too would be a second way to do the default.
  */
-const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", "loot", "butcher", "useStairs"]);
+const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", "eat", "loot", "butcher", "useStairs"]);
 
 function openTileMenu(tile: Vec2): void {
   const me = findPlayer(world);
@@ -952,6 +1246,18 @@ canvas.addEventListener("pointerdown", (event) => {
   pressTimer = window.setTimeout(() => {
     pressTimer = undefined;
     suppressNextClick = true;
+    // While aiming, a long-press is not "open the radial" — it is the precise
+    // half of option 3: aim at this exact SQUARE, no creature snapping. Direct
+    // steer: "tap a creature to say what you want done, long-press to say
+    // exactly where." Committed right here rather than arming a flag and
+    // waiting for the release, so the press itself is the whole gesture.
+    if (targeting) {
+      const { agentId, moveId } = targeting;
+      targeting = undefined;
+      targetPreviewTiles = [];
+      commitMove(agentId, moveId, tile);
+      return;
+    }
     openTileMenu(tile);
     // Capture, or the drag half of press-drag-release simply does not work:
     // the radial's wedges sit above the canvas, so once the menu is open every
@@ -1081,7 +1387,11 @@ function renderEventTicker(): void {
     eventTickerEl.hidden = true;
     return;
   }
-  const recent = actionLogPanel.snapshot().slice(-3).reverse(); // newest first
+  // Direct ask: "I want the excerpt of log to be top to bottom for the one at
+  // top of screen." Oldest at the top, newest at the bottom — you read down
+  // the strip the way you read anything else, and the newest line sits
+  // closest to the map you are looking at.
+  const recent = actionLogPanel.snapshot().slice(-3);
   // Rebuilding three rows every frame is wasteful; only touch the DOM when the
   // text actually changed.
   const signature = recent.map((e) => `${e.tick}:${e.count}:${e.text}`).join("|");
@@ -1093,8 +1403,12 @@ function renderEventTicker(): void {
   recent.forEach((entry, i) => {
     const row = document.createElement("div");
     row.className = `ticker-row${entry.kind === "you" ? " you" : ""}`;
-    // Newest solid, oldest at half — exactly as asked.
-    row.style.opacity = String([1, 0.75, 0.5][i] ?? 0.5);
+    // Newest solid, oldest at half. The strip now reads oldest-first, so the
+    // fade runs the other way: index 0 is the OLDEST row. Sliced from the end,
+    // a short log is missing its oldest entries, so the ramp is indexed from
+    // the bottom rather than the top — with two entries the newer one is still
+    // fully opaque.
+    row.style.opacity = String([1, 0.75, 0.5][recent.length - 1 - i] ?? 0.5);
     row.textContent = entry.count > 1 ? `${entry.text} \u00d7${entry.count}` : entry.text;
     eventTickerEl.appendChild(row);
   });
@@ -1280,15 +1594,78 @@ modePlayBtn.addEventListener("click", () => {
  * bars for whichever agent is selected; this one is the player's and does
  * not go away when you click a Sandshrew.
  */
+/**
+ * The vitals as they were last drawn, so a CHANGE can be noticed.
+ *
+ * Direct ask: "I think status of player needs to be shown when hp goes down or
+ * thirst, hunger, energy changes or gets under a threshold."
+ *
+ * Two different signals, deliberately not merged: any drop pulses the bar so
+ * the eye catches it, and crossing DOWN through a threshold says so in words,
+ * once. A bar that pulsed and a bar that crossed 25% are different events —
+ * one is "that cost you", the other is "you need to do something about this".
+ */
+let lastVitals: Record<string, number> | undefined;
+/**
+ * Sim-original. Three steps rather than one: a single "low" line arriving at
+ * 25% is the only warning you would ever get, which is too late to act on for
+ * hunger and thirst at their current decay. Judge against a real run.
+ */
+const VITAL_THRESHOLDS = [0.5, 0.25, 0.1] as const;
+/** A drop has to beat ordinary per-tick decay to be worth flashing — see the call site. */
+const VITAL_PULSE_MIN = 0.02;
+const VITAL_WORDS: Record<string, { noun: string; low: string }> = {
+  hp: { noun: "health", low: "hurt" },
+  hunger: { noun: "hunger", low: "hungry" },
+  thirst: { noun: "thirst", low: "thirsty" },
+  energy: { noun: "energy", low: "tired" },
+};
+
+/** The lowest threshold `value` has crossed down through since `was`, if any. */
+function crossedDown(was: number, value: number): number | undefined {
+  for (const t of VITAL_THRESHOLDS) {
+    if (was > t && value <= t) return t;
+  }
+  return undefined;
+}
+
 function renderPlayerHud(): void {
   const player = findPlayer(world);
   if (!player) return;
+  const next: Record<string, number> = {};
   const bar = (id: string, value: number, text: string) => {
     const fill = document.getElementById(`hud-${id}`) as HTMLElement;
     const num = document.getElementById(`hud-${id}-text`) as HTMLElement;
     fill.style.width = `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
     fill.classList.toggle("low", value < 0.25);
     num.textContent = text;
+    next[id] = value;
+
+    const was = lastVitals?.[id];
+    if (was === undefined) return;
+    // Restart the animation rather than just adding the class: an identical
+    // class already present does not re-run, so a second hit in a row would
+    // flash nothing.
+    //
+    // `VITAL_PULSE_MIN` is load-bearing, and measured: hunger, thirst and
+    // energy all decay a little EVERY tick, so a pulse on any drop at all made
+    // all four bars flash on every single turn — constant noise that would
+    // train the player to ignore exactly the signal this is for. Ordinary
+    // per-turn decay is well under 1%; a real hit or a real gulp is far above.
+    if (value < was - VITAL_PULSE_MIN) {
+      const row = fill.closest(".hud-row") as HTMLElement | null;
+      row?.classList.remove("vital-hit");
+      void row?.offsetWidth;
+      row?.classList.add("vital-hit");
+    }
+    const crossed = crossedDown(was, value);
+    if (crossed !== undefined) {
+      const words = VITAL_WORDS[id]!;
+      say(crossed <= 0.1 ? `You are critically ${words.low}.` : `You are ${words.low}. (${Math.round(crossed * 100)}% ${words.noun})`);
+      // A threshold crossing is exactly the "something of note" the panel
+      // should be showing — same treatment a hit gets.
+      focusPlayerPanel("vitals");
+    }
   };
   const maxHp = player.maxHp ?? 1;
   const hp = player.hp ?? maxHp;
@@ -1296,6 +1673,7 @@ function renderPlayerHud(): void {
   bar("hunger", player.needs.hunger, `${Math.round(player.needs.hunger * 100)}%`);
   bar("thirst", player.needs.thirst, `${Math.round(player.needs.thirst * 100)}%`);
   bar("energy", player.needs.energy, `${Math.round(player.needs.energy * 100)}%`);
+  lastVitals = next;
   // Who you are, at the top of your own panel. The row under it is depth,
   // which reads as "Level 1 of 5" and is emphatically not your level.
   const speciesName = SPECIES[player.species]?.name ?? player.species;
@@ -1431,6 +1809,32 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       if (move?.fertilityBoost || move?.fertilityCeilingBoost) return `You use ${name}. The ground here is richer.`;
       if (move?.statusImmunityAura) return `You use ${name}. Your herd shrugs off what ails it.`;
       return `You use ${name}.`;
+    }
+    case "pet": {
+      // Failure is either nothing in reach or too many things in reach, and
+      // those want different answers: one is "go closer", the other is "say
+      // which one". Collapsing them into one line is the mistake the attack
+      // case above already has a scar from.
+      if (!ok) {
+        const reachable = world.agents.filter((a) => a.id !== player.id && a.alive !== false && !a.isEgg && a.layer === player.layer && Math.max(Math.abs(a.pos.x - player.pos.x), Math.abs(a.pos.y - player.pos.y)) <= 1);
+        return reachable.length > 1 ? "Two are in reach. Say which one." : "Nothing within reach to pet.";
+      }
+      const petted = outcome.petted;
+      const target = world.agents.find((a) => a.id === petted?.targetId);
+      const name = target ? (SPECIES[target.species]?.name ?? target.species) : "it";
+      const startled = petted?.woke ? ` You woke ${name}.` : "";
+      switch (petted?.outcome) {
+        case "accepted":
+          return `${name} leans into your hand.${startled}`;
+        case "tolerated":
+          return `${name} holds still and lets you.${startled}`;
+        case "pulledAway":
+          return `${name} pulls away from your hand.${startled}`;
+        case "clashed":
+          return `${name} bites you.${startled}`;
+        default:
+          return "";
+      }
     }
     case "usePoultice": {
       if (!ok) return countOf(player, "poultice") < 1 ? "You don't have a poultice." : "Nobody hurt nearby.";
@@ -1635,6 +2039,64 @@ function bondedPartnersInZone(me: Agent): Agent[] {
 }
 
 /**
+ * Pull the sidebar to the part of it that just became the story.
+ *
+ * Direct asks, one message: *"when any attack is used on or by a player or on
+ * or by a pokemon follwing, i want the panel to swapt to event logs, auto swap
+ * on the ui to show what is happening"* and *"similarly when eating or
+ * drinking i want to auto swap to your own hp/hunger/thirst"*.
+ *
+ * Both land on the You tab — vitals and the Log live on the same page — so
+ * the difference is which part of it is brought into view, and on mobile how
+ * far the bottom sheet is opened. The vitals strip IS the peek row, so a meal
+ * needs no more than peek; a fight needs the sheet open to read the log.
+ *
+ * Skipped entirely while a modal is up (pack, command picker, Look): those
+ * cover the panel anyway, and yanking the tab out from under someone
+ * mid-interaction is worse than a beat of missed narration. Also skipped in
+ * watch mode, which has no You tab at all.
+ */
+function focusPlayerPanel(part: "log" | "vitals"): void {
+  if (!playerMode) return;
+  if (!packMenuEl.hidden || !commandMenuEl.hidden || !lookMenuEl.hidden) return;
+
+  if (part === "log") {
+    // On desktop the log is a permanent pane, already on screen beside
+    // whatever tab is up — switching tabs there would take the player AWAY
+    // from what they were reading to show them something they can already
+    // see. Mobile has no room to split, so it gets the tab.
+    if (!isMobileLayout()) return;
+    if (activeTab !== "log") selectTab("log", false);
+    if (sheetDetent !== "full") setSheetDetent("full");
+    return;
+  }
+  if (activeTab !== "you") selectTab("you", false);
+  // Peek is exactly the vitals row, so "show me my own bars" is peek, not
+  // full — opening the sheet all the way would bury the map instead.
+  if (isMobileLayout()) youPageEl.scrollTop = 0;
+}
+
+/**
+ * Did this batch of events contain a swing involving the player or one of
+ * their followers, in either direction? "on or by" in the ask, so both the
+ * attacker and the defender side count, and a miss counts too — a swing that
+ * missed you is exactly as worth looking at as one that landed.
+ */
+function combatTouchesParty(events: readonly SimEvent[], me: Agent): boolean {
+  const mine = new Set<string>([me.id, ...bondedPartnersInZone(me).map((a) => a.id)]);
+  for (const event of events) {
+    if (event.kind === "fought" || event.kind === "missed") {
+      if (mine.has(event.attackerId) || mine.has(event.defenderId)) return true;
+    } else if (event.kind === "killed") {
+      if (mine.has(event.predatorId) || mine.has(event.preyId)) return true;
+    } else if (event.kind === "defeated") {
+      if (mine.has(event.winnerId) || mine.has(event.loserId)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Every bonded follower's HP, order and current behaviour, rendered into the
  * You panel. Direct ask: "I want one sidebar with my player status, and my
  * party members at a glance."
@@ -1679,7 +2141,20 @@ function renderPartySection(): void {
     nameSpan.textContent = `${name}${orderLabel}`;
     const statusSpan = document.createElement("span");
     statusSpan.className = "herd-status-status";
-    statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    // A STALLED order outranks the ordinary behaviour line. Direct report,
+    // asked what a non-working order looked like: "stands still, never
+    // swings." It stalls on an urgent need — deliberately, so an order does
+    // not march a starving partner past water — but it used to say nothing at
+    // all, so a partner refusing its order and a partner idling looked
+    // identical. Measured: at hunger 0.29 it acted on 0 of 20 ticks.
+    const stall = a.commandedAction?.stalled;
+    if (stall) {
+      statusSpan.classList.add("stalled");
+      statusSpan.textContent =
+        stall === "hungry" ? "too hungry to fight" : stall === "thirsty" ? "too thirsty to fight" : "can't reach it";
+    } else {
+      statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    }
     nameRow.append(nameSpan, statusSpan);
     const bar = document.createElement("span");
     bar.className = "herd-status-bar";
@@ -2018,6 +2493,14 @@ function playerAct(action: PlayerAction): void {
   // missed one — outranks the routine "You move."/"You wait." outcome
   // message `renderPlayerHud` just set, so it applies last.
   if (pendingCombatNotice) say(pendingCombatNotice);
+  // Direct ask: "when eating or drinking i want to auto swap to your own
+  // hp/hunger/thirst." Only on a turn that actually landed — swapping the
+  // panel to celebrate "No water within reach." would be noise. After the
+  // combat notice above, so a meal interrupted by a bite still ends up on
+  // the log where the bite is.
+  if ((action.kind === "eat" || action.kind === "drink") && player.lastActionOutcome?.ok) {
+    focusPlayerPanel("vitals");
+  }
   if (!findPlayer(world)) showGameOver(player.id);
   else checkWinCondition(player);
 }
@@ -2076,6 +2559,10 @@ window.addEventListener("keydown", (e) => {
       e.preventDefault();
       enterOverworldFromCaveWin();
     }
+    return;
+  }
+  if (!lookMenuEl.hidden) {
+    if (e.key === "Escape" || e.key === "l") closeLookModal();
     return;
   }
   if (!commandMenuEl.hidden) {
@@ -2268,6 +2755,11 @@ function afterTick(): void {
   // if they were following you at the time.
   if (noticePlayer) {
     actionLogPanel.ingest(displayEvents, world, new Set(bondedPartnersInZone(noticePlayer).map((a) => a.id)));
+    // Direct ask: any attack on or by you or a follower pulls the panel to
+    // the log. Checked against `displayEvents`, not `newEvents`, so the
+    // finishing-blow repeats filtered above cannot re-trigger it every tick
+    // a mob keeps hitting a body that is already down.
+    if (combatTouchesParty(displayEvents, noticePlayer)) focusPlayerPanel("log");
   }
   eventPopups.ingest(displayEvents, world);
   moveEffects.ingest(displayEvents);
@@ -2552,7 +3044,7 @@ function examineNext(): void {
 // gone; Events moved from third to last in both the tab bar (index.html)
 // and this file's own tab order.
 
-type PanelTab = "you" | "inspector" | "battle-screen" | "chronicle" | "events";
+type PanelTab = "you" | "log" | "inspector" | "battle-screen" | "chronicle" | "events";
 let activeTab: PanelTab = "inspector";
 /**
  * The `seq` of the battle engagement the viewer last manually switched away
@@ -2568,6 +3060,7 @@ let lastAutoSwitchedBattleSeq: number | undefined;
 
 const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
   you: tabYouBtn,
+  log: tabLogBtn,
   inspector: tabInspectorBtn,
   "battle-screen": tabBattleScreenBtn,
   chronicle: tabChronicleBtn,
@@ -2575,6 +3068,7 @@ const TAB_BUTTONS: Record<PanelTab, HTMLButtonElement> = {
 };
 const TAB_PAGES: Record<PanelTab, HTMLElement> = {
   you: youPageEl,
+  log: logPageEl,
   inspector: inspectorEl,
   "battle-screen": battleScreenEl,
   chronicle: chronicleEl,
@@ -2603,6 +3097,7 @@ function selectTab(tab: PanelTab, manual: boolean): void {
   }
 }
 
+tabLogBtn.addEventListener("click", () => selectTab("log", true));
 tabYouBtn.addEventListener("click", () => {
   document.body.classList.remove("world-tabs-open");
   selectTab("you", true);
@@ -2730,9 +3225,20 @@ canvas.addEventListener("click", (event) => {
   // same way a real target-a-tile UI would consume the next click outright.
   if (targeting) {
     const target = tileAtPointer(event);
-    const { agentId, moveId } = targeting;
+    const { agentId, moveId, exactTile } = targeting;
     targeting = undefined;
     targetPreviewTiles = [];
+    // Option 3, the user's pick: a TAP means "do this to that creature" and
+    // the actor owns the footwork; a LONG-PRESS means "exactly this square".
+    // `exactTile` is set by the long-press handler, so this branch is the
+    // ordinary tap.
+    const actor = agentId ? world.agents.find((a) => a.id === agentId) : findPlayer(world);
+    const move = actor?.moves?.find((m) => m.id === moveId);
+    const snapped = exactTile ? undefined : creatureNear(target, actor?.id ?? "", move);
+    if (snapped) {
+      commitMove(agentId, moveId, { ...snapped.pos }, snapped.id);
+      return;
+    }
     // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
     // the player's own turn to spend, same as every other verb; the HUD
     // message comes from `outcomeText`'s own "command"/"attack" case.
@@ -3282,6 +3788,65 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
   (window as unknown as { __pokuelike: unknown }).__pokuelike = {
     get world() {
       return world;
+    },
+    /**
+     * Drive a real player turn from a check, so a verification exercises the
+     * same path a tap does instead of poking engine state directly. CLAUDE.md's
+     * standing rule: run the real thing, don't reason from the source.
+     */
+    playerAct(action: PlayerAction): void {
+      playerAct(action);
+    },
+    /** Push a line into the action log, for checks that need a known sequence of entries. */
+    say(text: string): void {
+      say(text);
+    },
+    /**
+     * The verbs the radial would actually offer for a tile, and for where the
+     * player stands. Screen-space tile math is camera-dependent and easy to
+     * get wrong in a check — an earlier one long-pressed empty ground and
+     * reported "the menu has no Pet wedge," which was true and meaningless.
+     */
+    verbsAt(x: number, y: number): string[] {
+      const me = findPlayer(world);
+      return me ? verbsForTile(world, me, viewLayer(), { x, y }) : [];
+    },
+    selfVerbs(): string[] {
+      const me = findPlayer(world);
+      return me ? selfVerbsFor(world, me, viewLayer()) : [];
+    },
+    /** Rows currently in the action log, oldest first. */
+    actionLog(): string[] {
+      return actionLogPanel.snapshot().map((e) => e.text);
+    },
+    /** Open the radial on a named tile, skipping the screen-space pointer math a check cannot reliably reproduce. */
+    openTileMenu(x: number, y: number): void {
+      openTileMenu({ x, y });
+    },
+    /** Run one radial verb against a named tile — the same entry point a wedge release uses. */
+    runTileVerb(verb: TileVerb, x: number, y: number): void {
+      runTileVerb(verb, { x, y });
+    },
+    /** Arm ally targeting exactly as picking a move row in the command menu does. */
+    beginAllyTargeting(agentId: string, moveId: string): void {
+      targeting = { agentId, moveId };
+    },
+    /**
+     * Resolve an armed target at a named tile, through the same creature-snap
+     * the real tap goes through. `exact` is the long-press path. Screen-space
+     * tile math is camera-dependent and has produced two worthless checks in
+     * this project already, so the hook takes tile coordinates.
+     */
+    commitTargetAt(x: number, y: number, exact = false): void {
+      if (!targeting) return;
+      const { agentId, moveId } = targeting;
+      targeting = undefined;
+      targetPreviewTiles = [];
+      const actor = agentId ? world.agents.find((a) => a.id === agentId) : findPlayer(world);
+      const move = actor?.moves?.find((m) => m.id === moveId);
+      const snapped = exact ? undefined : creatureNear({ x, y }, actor?.id ?? "", move);
+      if (snapped) commitMove(agentId, moveId, { ...snapped.pos }, snapped.id);
+      else commitMove(agentId, moveId, { x, y });
     },
     /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
     biomeAt(x: number, y: number): string | undefined {

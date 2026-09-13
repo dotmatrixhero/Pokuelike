@@ -21,6 +21,23 @@ export type SimEvent =
       toDepth: number;
       direction: "down" | "up";
     }
+  /**
+   * The player reached out and touched a creature, and it went however it
+   * went — `pet.ts`'s `applyPet`. Recorded on every outcome, good and bad:
+   * a relationship built partly out of gestures that were not welcome is
+   * still the relationship, and the log should say so.
+   */
+  | {
+      kind: "petted";
+      tick: number;
+      agentId: string;
+      species: string;
+      targetId: string;
+      targetSpecies: string;
+      outcome: "accepted" | "tolerated" | "pulledAway" | "clashed";
+      /** The trust stage the odds were actually rolled on — one below the real one when pestering or startled. */
+      stage: "wary" | "tolerant" | "curious" | "bonded";
+    }
   /** ROADMAP.md M7 — "Done when: you emerge." The player reached the exit tile on the deepest level. See climb.ts's `isAtExit`. */
   | {
       kind: "emerged";

@@ -340,6 +340,10 @@ export const RAPPORT_REASON_SIGNIFICANCE: Record<RapportReason, number> = {
   socialized: 3,
   gaveFood: 2,
   receivedFood: 2,
+  // Being handled by the strange upright thing. Above a secondhand
+  // impression — it happened directly, and it happened at touching distance
+  // — but below an act that cost either of them anything.
+  petted: 2,
   // A secondhand impression, not a direct transaction — real, but the
   // lightest thing on this list.
   witnessedKindness: 1,

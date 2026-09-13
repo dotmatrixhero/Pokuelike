@@ -8,6 +8,8 @@ export function formatEvent(event: SimEvent): string {
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) went ${event.direction} from cave level ${event.fromDepth} to ${event.toDepth}`;
     case "emerged":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) emerged from the cave at depth ${event.depth}`;
+    case "petted":
+      return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) petted ${speciesDisplayName(event.targetSpecies)} (${event.targetId}) at ${event.stage}: ${event.outcome}`;
     case "consumed":
       return `[tick ${event.tick}] ${speciesDisplayName(event.species)} (${event.agentId}) ${event.need === "thirst" ? "drank" : "ate"} at (${event.pos.x},${event.pos.y}) on ${event.layer}`;
     case "behaviorChanged":

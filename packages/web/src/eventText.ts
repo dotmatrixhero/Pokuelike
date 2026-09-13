@@ -69,6 +69,19 @@ export function formatEvent(event: SimEvent, world?: World): string {
       return `${idLabel(world, event.agentId, event.species)} went ${event.direction} to level ${event.toDepth}`;
     case "emerged":
       return `${idLabel(world, event.agentId, event.species)} emerged from the cave`;
+    case "petted": {
+      const who = idLabel(world, event.agentId, event.species);
+      const target = idLabel(world, event.targetId, event.targetSpecies);
+      const took =
+        event.outcome === "accepted"
+          ? "and it was welcome"
+          : event.outcome === "tolerated"
+            ? "and it was tolerated"
+            : event.outcome === "pulledAway"
+              ? "and it pulled away"
+              : "and it bit back";
+      return `${who} touched ${target}, ${took}`;
+    }
     case "consumed":
       return `${idLabel(world, event.agentId, event.species)} ${event.need === "thirst" ? "drank" : "ate"} on ${event.layer}`;
     case "behaviorChanged":

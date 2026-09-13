@@ -2,7 +2,7 @@ import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js
 import { canStepTo } from "./movement.js";
 import { consume } from "./needs.js";
 import { setTile, tileAt } from "./world.js";
-import { FIRE_BURN_TICKS } from "./fire.js";
+import { FIRE_BURN_TICKS, nearFire } from "./fire.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, thirstReliefFactor } from "./flora.js";
 import { EXP_ON_CONSUME, grantExp, type LevelingContext } from "./leveling.js";
 import type { EventLog } from "./events.js";
@@ -14,6 +14,7 @@ import { GIFT_GRACE_TICKS } from "./threat.js";
 import { applyTerrainEffectAt, FALLBACK_MAX_HP, resolveHit } from "./predation.js";
 import { useUtilityMove } from "./utilityMoves.js";
 import { pickBestMove, withinMoveRange } from "./combat.js";
+import { applyPet, canPet } from "./pet.js";
 
 /**
  * The player-controlled agent — ROADMAP.md's M0.
@@ -319,8 +320,17 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // target `needs.ts`'s `applyCommandedAction` chases and keeps
       // fighting until it dies, rather than one swing at a tile that goes
       // stale the instant the target takes a step.
-      const targetAgent = world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
-      partner.commandedAction = { moveId: action.moveId, target: action.target, targetAgentId: targetAgent?.id };
+      // An explicitly named target wins over whoever happens to be standing on
+      // the tile: the player tapped a CREATURE, and between that tap and this
+      // resolution the creature may already have moved. Falling back to the
+      // tile would then order the partner to swing at empty ground.
+      const named = action.targetId
+        ? world.agents.find((a) => a.id === action.targetId && a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer)
+        : undefined;
+      const targetAgent =
+        named ??
+        world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
+      partner.commandedAction = { moveId: action.moveId, target: targetAgent?.pos ?? action.target, targetAgentId: targetAgent?.id };
       return true;
     }
     case "setStandingOrder": {
@@ -340,6 +350,27 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
     case "crouch": {
       agent.posture = agent.posture === "crouch" ? undefined : "crouch";
       return agent.posture === "crouch";
+    }
+    case "pet": {
+      // Direct ask: "I want the ability to pet a Pokémon to try and gain
+      // rapport. Need to be in 1unit range, Pokémon can react poorly, walk
+      // away, or even clash." The odds table and the reasoning live in
+      // pet.ts; this case is only about finding who is meant.
+      //
+      // A named target is exact. Without one, this picks the single
+      // adjacent creature — the common case, and the one a tap on "pet"
+      // with one animal beside you obviously means. With two or more in
+      // reach it refuses rather than guessing, because guessing wrong here
+      // can get you bitten.
+      const reachable = world.agents.filter((a) => canPet(world, agent, a));
+      const target = action.targetId ? reachable.find((a) => a.id === action.targetId) : reachable.length === 1 ? reachable[0] : undefined;
+      if (!target) return false;
+      const result = applyPet(world, agent, target, log, ctx, rng, (x, y) => tileAt(world, agent.layer, x, y)?.walkable === true);
+      if (!result) return false;
+      out.petted = { targetId: target.id, outcome: result.outcome, stage: result.stageUsed, tooSoon: result.tooSoon, woke: result.woke };
+      // Every outcome spent the turn — including being bitten. "ok" here
+      // means the gesture happened, not that it was welcome.
+      return true;
     }
     case "offer": {
       const offered = resolveFoodItem(world, agent, action.itemKey);
@@ -654,17 +685,12 @@ export function waterWithinReach(world: World, agent: Agent): boolean {
   return false;
 }
 
-/** A deployed campfire's real cooking range — `RecipeDef.requiresNearFire`'s own precondition. A little wider than "adjacent" (`waterWithinReach`'s radius 1): you cook AROUND a fire, not standing in the one tile it occupies. */
-const NEAR_FIRE_RADIUS = 2;
-
-export function nearFire(world: World, agent: Agent): boolean {
-  for (let dy = -NEAR_FIRE_RADIUS; dy <= NEAR_FIRE_RADIUS; dy++) {
-    for (let dx = -NEAR_FIRE_RADIUS; dx <= NEAR_FIRE_RADIUS; dx++) {
-      if (tileAt(world, agent.layer, agent.pos.x + dx, agent.pos.y + dy)?.terrain === "fire") return true;
-    }
-  }
-  return false;
-}
+// `nearFire` moved to fire.ts so `needs.ts` can ask the same question for the
+// campfire energy restore without importing this module — player.ts imports
+// needs.ts, so the reverse edge would be a real runtime cycle. Re-exported
+// here because every existing caller reaches for it through player.ts.
+export { NEAR_FIRE_RADIUS } from "./fire.js";
+export { nearFire };
 
 /** Whether the tile under the player is food with anything left on it. */
 export function foodUnderfoot(world: World, agent: Agent): boolean {

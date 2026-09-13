@@ -5,6 +5,10 @@ import type { Disposition, StatKey } from "./nature.js";
 import type { MaterialId } from "./harvest.js";
 import type { DecalId } from "./decals.js";
 import type { SeededRng } from "./rng.js";
+// Type-only, so no runtime cycle — same shape as `MoveSpec` above, whose own
+// module imports this one.
+import type { PetOutcome } from "./pet.js";
+import type { TrustStage } from "./trust.js";
 
 export interface Vec2 {
   x: number;
@@ -628,6 +632,30 @@ export type BehaviorKind =
  * world that keeps moving. Everything in PLAYER_ACTIONS.md (examine, search,
  * craft, the time-spends) lands in later milestones as further variants.
  */
+/**
+ * Why a standing order is not being carried out this tick.
+ *
+ * Direct report: *"when you command an ally to target enemy. It just doesn't
+ * really land"* — and, asked what it looked like: *"stands still, never
+ * swings."* `applyCommandedAction` bails on an urgent need, silently, and the
+ * order stays queued looking perfectly healthy. Measured: an ally at hunger
+ * 0.29 acted on **0 of 20** ticks and the target took zero damage, while the
+ * same ally at 0.31 acted on 20 of 20.
+ *
+ * The refusal itself is deliberate and stays — an order should wait rather
+ * than march a starving partner past water. What was wrong is that nothing
+ * said so. Recorded on the order rather than fired as an event because it is
+ * a *state* that persists for as long as the need does; an event would either
+ * spam every tick or need its own edge-detection.
+ */
+export type OrderStall =
+  /** Below `hasUrgentNeed`'s hunger floor — it needs to eat before it will fight. */
+  | "hungry"
+  /** Below `hasUrgentNeed`'s thirst floor. */
+  | "thirsty"
+  /** No path to anywhere the move would reach — walled off, or the way is blocked. */
+  | "unreachable";
+
 export type PlayerAction =
   | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   | { kind: "wait" }
@@ -663,6 +691,15 @@ export type PlayerAction =
    * `eat`'s own `itemKey`; omitted keeps the old "first one found" pick.
    */
   | { kind: "offer"; itemKey?: string }
+  /**
+   * Direct ask: "I want the ability to pet a Pokémon to try and gain rapport.
+   * Need to be in 1unit range, Pokémon can react poorly, walk away, or even
+   * clash. But if you have high rapport it tends to work better." See
+   * `pet.ts` for the odds table and why this is deliberately the risky
+   * counterpart to `offer`. `targetId` names who; omitted picks the single
+   * adjacent creature when there is exactly one, which is the common case.
+   */
+  | { kind: "pet"; targetId?: string }
   /**
    * MOVES_AND_TOOLS.md: "the player's loadout is their moveset." Swings at
    * the adjacent tile in the given direction — a living agent there takes
@@ -730,7 +767,19 @@ export type PlayerAction =
    * `applyCommandedAction`. Fails if there is no such follower, or it
    * doesn't know that move.
    */
-  | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /**
+   * `targetId`, when given, names WHO the order is about and the partner owns
+   * all the footwork — walking to wherever its move actually reaches, and
+   * following the quarry if it moves. Without it the order is about the
+   * `target` TILE, which is what a terrain move (Fell, Rock Throw at a wall)
+   * or a deliberate "stand exactly there" order wants.
+   *
+   * Direct steer, after "it feels hard to get a unit to the right spot": tap a
+   * creature to say what you want done, long-press to say exactly where. The
+   * tile is still the fallback — `player.ts` derives a target from whoever is
+   * standing on it — so an order issued without `targetId` behaves as before.
+   */
+  | { kind: "command"; agentId: string; moveId: string; target: Vec2; targetId?: string }
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;
@@ -839,6 +888,12 @@ export interface PlayerActionOutcome {
   butchered?: { itemKey: string; count: number }[];
   /** `usePoultice` succeeding: who got healed (the player's own id, or a bonded follower's) and by how much (post-clamp-to-maxHp, so the UI can say a real number). */
   healed?: { targetId: string; amount: number };
+  /**
+   * `pet` resolving: who was touched and how they took it. Present on every
+   * outcome including the bad ones — `ok` says a turn was spent, this says
+   * what the turn bought. See `pet.ts`.
+   */
+  petted?: { targetId: string; outcome: PetOutcome; stage: TrustStage; tooSoon: boolean; woke: boolean };
 }
 
 /** One held/carried item stack. See DESIGN.md's "Faint/finish-off, heal over time, and herd support" section. */
@@ -946,12 +1001,24 @@ export interface Activity {
 /**
  * The player's field of view and map memory. Tile indices
  * (`y * world.width + x`) rather than `Vec2`s so the renderer can test
- * membership per tile per frame without allocating. `explored` is per layer
- * and only grows; `visible` is replaced whole each turn.
+ * membership per tile per frame without allocating. `explored` only grows;
+ * `visible` is replaced whole each turn.
+ *
+ * `explored` is keyed by `vision.ts`'s `visionScope` — **world id plus
+ * layer**, not layer alone. Direct report: "is the level 2 exactly the same
+ * as level 1? i feel like the fog of war doesn't reset so all the places ive
+ * been looked the same or something." It was keyed by `Layer` alone, and
+ * every cave level is a separate `World` sharing the layer `"underground"`
+ * (see `World.below`) — so walking down the stairs carried level 1's map
+ * memory onto level 2 wholesale. Measured on seed 7: 96 tiles arrived
+ * pre-explored on a level the player had never set foot on, 65 of them with
+ * matching terrain, which is exactly why it read as the same room again.
+ * The same bug applied to every overworld zone (`crossZoneEdge`), all of
+ * which share the layer `"surface"`.
  */
 export interface Vision {
   visible: Set<number>;
-  explored: Partial<Record<Layer, Set<number>>>;
+  explored: Record<string, Set<number>>;
 }
 
 export interface Agent {
@@ -1044,7 +1111,7 @@ export interface Agent {
    * living agent — a terrain-effect order like felling a tree), behavior
    * is unchanged: one resolution and done.
    */
-  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
+  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string; stalled?: OrderStall };
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;
@@ -1093,6 +1160,22 @@ export interface Agent {
    * visit) is worth more. See `TREAT_VISIT_MULTIPLIER`.
    */
   lastTreatTick?: number;
+  /**
+   * Tick this agent was last petted by anyone — `pet.ts`'s
+   * `PET_COOLDOWN_TICKS`. Petting again inside that window is read as
+   * pestering and rolls on the weights of one trust stage lower. Kept on
+   * the creature rather than the player so petting two different party
+   * members in a row is two fresh gestures, which is what it is.
+   */
+  lastPetTick?: number;
+  /**
+   * Consecutive ticks spent resting — `needs.ts`'s `REST_RESTORE_STEP` ramp.
+   * Direct ask: "you have to rest multiple turns in a row to recharge."
+   * Cleared the moment the agent stops resting, so an interrupted rest starts
+   * the ramp over rather than resuming where it left off: that restart IS the
+   * cost of being interrupted.
+   */
+  restTicks?: number;
   /**
    * ROADMAP.md M6, lever 3 (habituation): how many times THIS individual
    * has ever taken a berry from the player. Never decremented, never
@@ -2378,7 +2461,17 @@ export type RapportReason =
    * toward the herd-mate does not move, since nothing real happened on
    * that side. See needs.ts's `applyPlayerFeedingBonus`.
    */
-  | "witnessedKindness";
+  | "witnessedKindness"
+  /**
+   * The player reached out and touched them, and it went well —
+   * `pet.ts`'s `applyPet`. One-directional, like `witnessedKindness`: this
+   * is how the creature feels about being handled, and the player's own
+   * edge does not move for it.
+   *
+   * Recorded on the souring outcomes too, so the memory is honest about a
+   * relationship built partly out of gestures that were not welcome.
+   */
+  | "petted";
 
 /**
  * What a `RapportMemory` was *about*, when it was about something — the
@@ -2847,6 +2940,16 @@ export interface World {
   below?: World;
   /** See `below`'s doc comment. */
   above?: World;
+  /**
+   * Stable per-world identity, assigned by `world.ts`'s `createWorld`. Not a
+   * simulation input — nothing rolls off it — it exists so per-world state
+   * held on an agent that MOVES between worlds (a cave level, an overworld
+   * zone) can be filed under the world it belongs to. Today that means
+   * `Vision.explored`; see its doc comment for the bug that motivated it.
+   * Optional so a hand-built literal `World` in a test still type-checks;
+   * `visionScope` falls back to the bare layer when it is absent.
+   */
+  id?: string;
   /** 1 = the surface-adjacent chamber (`createCaveScenario`'s own layer 1); increases with depth. Absent means this world isn't part of a chained cave run at all. */
   depth?: number;
   /** Where a player arriving from `above` lands — the `"stairsUp"` tile on this level. Absent on level 1 (nothing above it). */
