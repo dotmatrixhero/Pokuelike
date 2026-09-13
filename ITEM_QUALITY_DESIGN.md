@@ -127,3 +127,88 @@ fraction of the work.
 3. Can a player re-invest an item's points by reworking it at a forge, or is
    an item's build fixed once made?
 4. Does item quality show on the map/sprite, or only in the inventory?
+
+---
+
+# Decisions (given directly)
+
+1. **Points are tied to the moves the item grants, and stay as points on the
+   item.** *"The points are tied to the moves the item gives and stay as
+   points on the item."* So an item's pool is **per-granted-move**, not one
+   shared pool: a machete granting `clear` and `slash` carries a separate
+   allocation for each. Confirms the item-local model and sharpens it.
+2. **Do not implement `cut` yet.** Design only for now.
+3. **Forges allow respec.** An item's build is re-spendable at a forge, not
+   fixed at creation. Another reason the town pass and this system belong
+   together — a forge is a reason to walk to a smithing town.
+4. **Loot tiers are colour-coded white / green / blue / purple / gold, and
+   blue-and-above shimmer.**
+5. **Balance is explicitly not a concern here.** *"Yeah not worried about any
+   balance issues."* The gear-outpaces-growth and weak-human risks recorded
+   above are noted and waived; do not re-raise them as blockers.
+
+## Finding: `fell` and `clear` are real moves, but not combat moves
+
+Asked directly — *"Fell and clear are not real moves?"* — so, checked rather
+than assumed. They **are** real `MoveSpec` objects, built by `terrainMove()`
+in `crafting.ts`:
+
+```
+{ shape: point, type: "normal", category: "status", power: 0, accuracy: -1,
+  pp: 1, range: {min:0,max:1}, utilityMove: true, terrainEffect: {...} }
+```
+
+Real entries the engine treats as moves, but **utility/status** ones that
+transform terrain — sim-original, not mainline dex moves, zero power. The
+instinct behind the question is right: they are not combat moves.
+
+The genuinely combat-capable tool grants are `ember` (torch), `scratch`
+(flint knife), `pound` (club) and `slash` (machete).
+
+### Real gap found: the axe cannot fight
+
+| tool | grants | fights? |
+|---|---|---|
+| torch | `ember` | yes |
+| flint knife | `scratch` | yes |
+| club | `pound` | yes |
+| machete | `clear` + `slash` | yes |
+| **axe** | **`fell` only** | **no** |
+
+The axe is the only weapon-shaped tool with no combat move at all — a flint
+knife arms you, an axe does not. Machete's pairing (`clear` + `slash`) is the
+pattern the axe is missing: a terrain move *and* a combat move. `slash` is the
+existing "cut"-shaped move if the axe should have one.
+
+Recorded as a gap rather than fixed, since implementation is not in scope yet.
+
+## Tier colours and the quality ladder
+
+Five colours against the tier table above — the natural mapping, for
+adjustment:
+
+| colour | points | tier |
+|---|---|---|
+| white | 0 | crude — flint and deadwood, made anywhere |
+| green | 1 | sound |
+| blue | 2-3 | fine — good material *and* a real crafter |
+| purple | 4-5 | masterwork — usually a named town |
+| gold | 6+ and a pre-allocated signature node | the town's signature work, or a unique |
+
+Blue and above shimmer, per the ask. Two implementation notes worth recording
+now, because both are the kind of thing that surfaces late:
+
+- **A shimmer cannot be baked into a cached layer.** The renderer caches
+  ground and other static layers to offscreen canvases; anything animating
+  per-frame has to draw in the dynamic pass instead, or the cache has to be
+  invalidated every frame (which would undo the caching entirely). Shimmering
+  items on the ground therefore belong with agents in the dynamic pass.
+- **Keep the shimmer subtle at this scale.** Tiles are 20px with
+  `imageSmoothingEnabled` off; a strong animated highlight on a 20px sprite
+  reads as flicker, not shine. A slow, low-amplitude sweep or a soft rim
+  pulse will read better than a bright specular pass.
+
+A secondary, non-colour cue (a small rarity pip or a border on the inventory
+slot) is worth considering so rarity is not carried by hue alone — it also
+survives the map's darker biomes, where purple and blue lose contrast against
+cave and badlands ground.
