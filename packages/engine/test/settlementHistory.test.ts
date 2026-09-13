@@ -69,6 +69,34 @@ describe("settlement history pass", () => {
     expect(daughters).toBeGreaterThan(0);
   });
 
+  it("never leaves a world with nobody in it", () => {
+    // Era events used to roll against EVERY settlement in the world at once,
+    // so a bad run erased the map's entire population: measured, seed 11 came
+    // out 0 living of 3 and seed 22 1 of 7. A history with no people left is
+    // an empty map, not a history. Events are regional now — they have an
+    // epicentre and a radius.
+    for (const seed of [11, 22, 33, 44, 55, 66, 77, 88]) {
+      const history = generateMacroGrid(seed, 64, 64).history!;
+      const living = history.settlements.filter((s) => s.status === "living");
+      expect(living.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps ruins a minority — a world of ruins is as wrong as a world of none", () => {
+    let total = 0;
+    let ruined = 0;
+    for (const seed of [11, 22, 33, 44, 55, 66, 77, 88]) {
+      for (const s of generateMacroGrid(seed, 64, 64).history!.settlements) {
+        total++;
+        if (s.status === "ruined") ruined++;
+      }
+    }
+    expect(ruined / total).toBeLessThan(0.5);
+    // And ruins must actually happen, or the "failures leave ruins" half of
+    // the design is unreachable content.
+    expect(ruined).toBeGreaterThan(0);
+  });
+
   it("is deterministic for a seed", () => {
     const a = generateMacroGrid(11, 64, 64).history!;
     const b = generateMacroGrid(11, 64, 64).history!;

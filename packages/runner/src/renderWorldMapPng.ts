@@ -23,6 +23,7 @@ const BIOME: Record<string, [number, number, number]> = {
   mangrove: [76, 112, 92], swamp: [88, 108, 84], desert: [222, 196, 136],
   tundra: [196, 204, 206], snow: [228, 234, 238], highland: [136, 130, 120],
   badlands: [168, 118, 86], cave: [92, 84, 80], jungle: [40, 96, 48],
+  cliff: [122, 132, 134],
   taiga: [72, 104, 84], steppe: [176, 172, 112], volcanic: [104, 68, 62],
 };
 

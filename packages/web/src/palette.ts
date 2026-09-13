@@ -190,6 +190,10 @@ export const BIOME_TINT: Partial<Record<string, Rgb>> = {
   // A cool, frost-touched blue-gray — cold open steppe, distinct from
   // Highland's warm gray stone and Snow's pure white.
   tundra: [138, 158, 168],
+  // Wet, sea-washed grey with a green-blue cast — shares Highland's stone
+  // art, so this is what keeps a coastal cliff visually distinct from a warm
+  // inland peak.
+  cliff: [118, 136, 140],
 };
 
 /**

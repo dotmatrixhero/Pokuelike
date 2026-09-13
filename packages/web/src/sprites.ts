@@ -266,6 +266,11 @@ const BIOME_GROUND: Record<string, string> = {
   // with crop rows, which is what "dry plains" is supposed to look like.
   savanna: "wheat",
   highland: "stone",         // warm grey rock
+  // A sea cliff is rock, so it reuses Highland's real stone art rather than
+  // needing its own rip; BIOME_TINT pulls it cooler so a coastal cliff does
+  // not read as a displaced inland peak. Without an entry here it would fall
+  // through to GROUND_DEFAULT and render as a CAVE floor.
+  cliff: "stone",
   tundra: "frost",           // cool grey, plus its own blue tint
   snow: "snow",
 };

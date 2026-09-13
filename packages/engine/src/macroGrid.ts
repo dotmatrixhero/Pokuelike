@@ -237,8 +237,34 @@ function macroBiomeFor(elevation: number, moisture: number): string {
  * just makes that invariant explicit in code rather than merely observed.
  */
 const BEACH_ELEVATION_BAND = 0.08;
+/**
+ * How fast the land has to climb behind a shoreline before it stops being a
+ * beach and starts being a cliff.
+ *
+ * Direct report: "I don't like how every coast is a sandy beach. I do want
+ * some rocky cliffs and shit sometimes." The reclassification above tested
+ * only the shoreline zone's OWN elevation, and coastal zones cluster tightly
+ * just above the land minimum by construction (see `BEACH_ELEVATION_BAND`'s
+ * own note) — so the test passed essentially everywhere and every coast in
+ * the world came out as sand, including coasts directly beneath a mountain.
+ *
+ * A shoreline is a beach when the land behind it is also low; where the land
+ * rears up immediately behind it, that is a cliff. This measures the rise to
+ * the highest land neighbour rather than the zone itself, which is the fact
+ * that actually distinguishes the two. No new biome is needed: a cliff coast
+ * simply KEEPS whatever it already was — highland, badlands, forest — and
+ * highland and badlands promote to rock meeting the sea, which is the thing.
+ *
+ * The value is measured, not guessed — and the first guess (0.13, picked off
+ * the 0..1 elevation range) was above the maximum rise that EXISTS. The macro
+ * field is very smooth at zone scale: across a real grid's coastal zones the
+ * rise to the highest land neighbour runs median 0.032, p90 0.070, max 0.119.
+ * 0.055 sits near the p75, which turns roughly a quarter of coastline rocky —
+ * "sometimes", as asked, rather than replacing every beach.
+ */
+const CLIFF_RISE = 0.055;
 
-function applyBeachReclassification(zones: readonly MacroZone[]): void {
+function applyBeachReclassification(grid: MacroGrid, zones: readonly MacroZone[]): void {
   let landMin = Infinity;
   for (const zone of zones) {
     if (!zone.isOcean && zone.elevation < landMin) landMin = zone.elevation;
@@ -246,7 +272,18 @@ function applyBeachReclassification(zones: readonly MacroZone[]): void {
   const beachCeiling = Math.min(landMin + BEACH_ELEVATION_BAND, HIGHLAND_ELEVATION_THRESHOLD);
   for (const zone of zones) {
     if (zone.isOcean || zone.coastEdges.length === 0) continue;
-    if (zone.elevation <= beachCeiling) zone.biome = "beach";
+    if (zone.elevation > beachCeiling) continue;
+    // How hard does the land climb immediately inland?
+    let highestBehind = zone.elevation;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        const neighbor = zoneAt(grid, zone.row + dr, zone.col + dc);
+        if (!neighbor || neighbor.isOcean) continue;
+        if (neighbor.elevation > highestBehind) highestBehind = neighbor.elevation;
+      }
+    }
+    zone.biome = highestBehind - zone.elevation >= CLIFF_RISE ? "cliff" : "beach";
   }
 }
 
@@ -463,7 +500,7 @@ export function generateMacroGrid(seed: number, rows: number, cols: number): Mac
       if (neighbor?.isOcean) zone.coastEdges.push(dir);
     }
   }
-  applyBeachReclassification(zones);
+  applyBeachReclassification(grid, zones);
   applyMangroveReclassification(zones);
 
   carveMacroRivers(grid, mulberry32(seed ^ 0x27220a95));

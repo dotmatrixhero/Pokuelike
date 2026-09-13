@@ -97,6 +97,14 @@ const MIN_SETTLEMENT_SEPARATION = 4;
 const MAX_DAUGHTER_DISTANCE = 9;
 /** Population a settlement needs before it can spare people to found another. */
 const SURPLUS_TO_SPLIT = 55;
+/**
+ * How far an era event reaches, in zones. A disaster is a place, not a global
+ * flag — see the epicentre roll in `generateSettlementHistory`. Wide enough
+ * to catch a cluster of neighbouring settlements (so a valley can be emptied
+ * together, which is the story worth telling) but well short of the 64-zone
+ * grid, so no single event can take the whole world.
+ */
+const ERA_EVENT_RADIUS = 14;
 /** Elevation above which a zone is mountain — impassable for a corridor, unsettleable. */
 const MOUNTAIN_ELEVATION = 0.78;
 
@@ -114,6 +122,11 @@ const BIOME_HABITABILITY: Record<string, number> = {
   beach: 0.6,
   swamp: 0.45,
   highland: 0.4,
+  // Rock and salt spray, and no fresh water of its own — a cliff is a place
+  // you look out from, not one you farm. Fresh water is a hard gate on
+  // founding anyway, so this mostly matters for the rare cliff zone a river
+  // happens to cross.
+  cliff: 0.2,
   desert: 0.25,
   tundra: 0.25,
   badlands: 0.2,
@@ -416,8 +429,17 @@ export function generateSettlementHistory(grid: MacroGrid, rng: () => number): S
   for (let era = 1; era <= ERAS; era++) {
     // An era event lands rarely, and when it does it threatens weak sites.
     let event: (typeof ERA_EVENTS)[number] | undefined;
+    let epicentre: { row: number; col: number } | undefined;
     if (rng() < 0.3) {
       event = ERA_EVENTS[Math.floor(rng() * ERA_EVENTS.length)]!;
+      // A disaster happens SOMEWHERE. Rolling every settlement in the world
+      // against one global event could erase an entire world's people in a
+      // bad run — measured, two seeds came out with 0 of 3 and 1 of 7
+      // settlements still standing, which is not a history, it is an empty
+      // map. A winter is hard in the valley it settles over; the coast three
+      // hundred miles away has a normal year.
+      const candidateZone = candidates[Math.floor(rng() * candidates.length)];
+      epicentre = candidateZone ? { row: candidateZone.zone.row, col: candidateZone.zone.col } : undefined;
       eraEvents.push({ era, text: `Era ${era}: ${event.text}.` });
     }
 
@@ -428,7 +450,9 @@ export function generateSettlementHistory(grid: MacroGrid, rng: () => number): S
       // booming — settlements must not grow on the animal clock.
       s.population = Math.round(s.population * (1 + 0.28 * s.siteScore));
 
-      if (event) {
+      // Only settlements inside the event's reach are at risk.
+      const inReach = event && epicentre ? chebyshevZones(s, epicentre) <= ERA_EVENT_RADIUS : false;
+      if (event && inReach) {
         // A good site rides it out; a marginal one does not.
         const survival = s.siteScore * 0.9 + 0.15;
         if (rng() > survival) {

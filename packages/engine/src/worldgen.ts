@@ -1073,6 +1073,49 @@ const BIOMES: readonly BiomeDef[] = [
     terrainWeights: { tree: 0.05, boulder: 0.1, bush: 0.1, sand: 8, mud: 0.05 },
   },
   {
+    /**
+     * A rocky shore: land that stands above the sea instead of sloping into
+     * it. Direct report: "I don't like how every coast is a sandy beach. I do
+     * want some rocky cliffs and shit sometimes."
+     *
+     * Deliberately the inverse of "beach" on every axis that matters —
+     * beach is `elevationBase` 0.08 with `obstacleDensity` 0.03 and a sand
+     * weight of 8 (flat, open, soft); this stands well above the water on
+     * broken ground, and what is scattered on it is rock. It is NOT another
+     * badlands: badlands is an inland canyon biome whose `terrainWeights`
+     * still lean sand 5, and `carveBadlandsChambers` keys off that name to
+     * BSP-carve chambers, which a sea cliff should not get.
+     */
+    name: "cliff",
+    /**
+     * Zero, unlike every other biome here, and deliberately.
+     *
+     * A sea cliff is a COASTAL classification the macro grid assigns
+     * (macroGrid.ts's `applyBeachReclassification`), never something that
+     * should scatter at random inland — and `placeBiomeSeeds` consumes two
+     * rng() calls per seed, so any non-zero count here would shift every
+     * subsequent random value and silently re-roll the terrain of every world
+     * in the project. It did: adding this at seedCount 2 broke the cave
+     * scenario's spawn/lighting tests and crafting's "lichen and deadwood are
+     * reachable within 60 steps on every seed" reachability check.
+     *
+     * At zero it consumes no rng and nothing else moves, while a promoted
+     * cliff zone still gets real cliff terrain through
+     * `addDominantBiomeSeeds`, which looks this up by name from
+     * BIOME_BY_NAME on its own separate rng stream.
+     */
+    seedCount: 0,
+    foodDensity: 0.012,
+    // Beside the sea, but the sea is salt — fresh water is scarce on a
+    // headland, which is also what keeps cliffs from being good settlement
+    // sites (settlementHistory.ts gates founding on fresh water).
+    waterDensity: 0.02,
+    obstacleDensity: 0.22,
+    elevationBase: 0.55,
+    elevationVariance: 0.45,
+    terrainWeights: { tree: 0.05, boulder: 6, bush: 0.5, sand: 0.4, mud: 0.05 },
+  },
+  {
     name: "badlands",
     seedCount: 2,
     foodDensity: 0.015,
