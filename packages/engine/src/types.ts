@@ -528,6 +528,18 @@ export interface Tile {
    * regen rate, how low a harvest knocks it down, and (needs.ts's
    * `cropDigThreshold`) how long a mismatched-layer dig takes.
    */
+  /**
+   * Worked land: this tile is part of a settlement's field, not wild growth
+   * that happened to germinate here (settlementPlacement.ts's `layOutFields`).
+   *
+   * Needed because "a field is orderly and wild flora scatters" does not
+   * survive contact with a real map — wild food germinates at a similar
+   * density, so a farm is genuinely hard to pick out by eye, and nothing
+   * downstream could tell the two apart at all. This is the flag that lets a
+   * renderer draw furrows, a raid target something worth trampling, and an
+   * abandoned field revert to wild rather than staying a farm forever.
+   */
+  farmed?: boolean;
   groundType?: GroundType;
   /**
    * Permanent fertility damage, 0-1, currently only ever set on "peat"

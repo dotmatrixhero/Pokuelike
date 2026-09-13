@@ -49,11 +49,39 @@ describe("settlement placement", () => {
     expect(world.agents.filter((a) => a.settlementRole).length).toBe(0);
   });
 
+  it("works fields outside the wall, and a ruin has none", () => {
+    const world = promote(living.row, living.col);
+    expect(world.settlement?.fieldTiles).toBeGreaterThan(0);
+
+    // Fields are the WORKED ring: outside the palisade, where they are
+    // reachable and raidable, not tucked safely inside the town.
+    const center = world.settlement!.center;
+    let outside = 0;
+    for (let y = 0; y < world.height; y++) {
+      for (let x = 0; x < world.width; x++) {
+        const tile = tileAt(world, "surface", x, y);
+        if (!tile?.flavor) continue;
+        if (tile.terrain !== "food" && tile.terrain !== "seedling") continue;
+        if (Math.max(Math.abs(x - center.x), Math.abs(y - center.y)) > 7) outside++;
+      }
+    }
+    expect(outside).toBeGreaterThan(0);
+
+    if (ruined) {
+      // A ruin's fields went back to the wild generations ago; the absence is
+      // part of what makes it read as a ruin.
+      expect(promote(ruined.row, ruined.col).settlement?.fieldTiles).toBe(0);
+    }
+  });
+
   it("leaves wilderness alone — the control", () => {
     const occupied = new Set(grid.history!.settlements.map((s) => `${s.row},${s.col}`));
     const wild = grid.zones.find((z) => !z.isOcean && !occupied.has(`${z.row},${z.col}`))!;
     const world = promote(wild.row, wild.col);
     expect(world.settlement).toBeUndefined();
     expect(world.agents.filter((a) => a.settlementRole).length).toBe(0);
+    // Wild flora still germinates out here — the control is that no
+    // settlement record exists to have laid fields, not that food is absent.
+    expect(world.settlement?.fieldTiles ?? 0).toBe(0);
   });
 });

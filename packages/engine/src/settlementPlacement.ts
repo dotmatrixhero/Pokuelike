@@ -18,6 +18,8 @@
  *    the wall is the thing that makes them survivable, so it is structural
  *    rather than decorative.
  */
+import { pickCrop } from "./crops.js";
+import { dominantBiomeAt, effectiveWaterDensityAt } from "./worldgen.js";
 import type { Settlement } from "./settlementHistory.js";
 import type { Agent, Vec2, World } from "./types.js";
 import { isWalkableTerrain, setTile, tileAt } from "./world.js";
@@ -34,6 +36,8 @@ export interface SettlementPresence {
   center: Vec2;
   /** Only set on a ruin: why it fell, already phrased for a chronicle. */
   ruinedCause?: string;
+  /** How many tiles of worked field this town laid out around itself. 0 for a ruin. */
+  fieldTiles: number;
 }
 
 /**
@@ -118,6 +122,113 @@ function chooseCenter(world: World, radius: number): Vec2 | undefined {
 }
 
 /**
+ * How many field plots a town lays out, before the farming-town bonus. Scales
+ * with population, because fields are what feed it.
+ */
+function plotCountFor(population: number, specialty: Settlement["specialty"]): number {
+  const base = Math.max(1, Math.min(5, Math.round(population / 22)));
+  return specialty === "farming" ? base + 2 : base;
+}
+
+/**
+ * Fields: the "worked ring" — terrain REPLACED rather than thinned, sitting
+ * outside the palisade between the town and the wild.
+ *
+ * The tell is ORDER. Wild flora scatters (flora.ts germinates it against a
+ * noise field); a field is a rectangle of a single crop in rows, with bare
+ * furrows between them. That contrast is the whole visual point, and it is
+ * why a plot grows one crop rather than a mix — a field of one thing reads as
+ * planted, a field of five reads as undergrowth.
+ *
+ * Crops come from `pickCrop`, so a field grows what this biome and season
+ * could really support, and the tiles are ordinary "seedling"/"food" terrain
+ * carrying a `flavor` — meaning flora.ts's existing growth, harvest, drought
+ * and winter rules all apply to a farm for free, and so does being eaten.
+ */
+function layOutFields(
+  world: World,
+  center: Vec2,
+  radius: number,
+  settlement: Settlement,
+  rng: () => number,
+  occupied: (pos: Vec2) => boolean
+): number {
+  const plots = plotCountFor(settlement.population, settlement.specialty);
+  let placed = 0;
+  for (let plot = 0; plot < plots; plot++) {
+    const w = 4 + Math.floor(rng() * 3);
+    const h = 3 + Math.floor(rng() * 2);
+
+    // Somewhere just beyond the wall, in a ring around the town — but try a
+    // few spots in that arc and keep the most workable one. Taking the first
+    // roll put plots straight into the sea around a coastal town and left
+    // them as two or three surviving tiles, which reads as scrub rather than
+    // as a field. Nobody ploughs open water.
+    let ox = 0;
+    let oy = 0;
+    let bestWorkable = -1;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const angle = (plot / plots) * Math.PI * 2 + (rng() - 0.5) * 1.1;
+      const distance = radius + 2 + Math.floor(rng() * 3);
+      const cx = center.x + Math.round(Math.cos(angle) * distance);
+      const cy = center.y + Math.round(Math.sin(angle) * distance);
+      let workable = 0;
+      for (let dy = 0; dy < h; dy++) {
+        for (let dx = 0; dx < w; dx++) {
+          if (buildable(world, cx + dx, cy + dy) && !occupied({ x: cx + dx, y: cy + dy })) workable++;
+        }
+      }
+      if (workable > bestWorkable) {
+        bestWorkable = workable;
+        ox = cx;
+        oy = cy;
+      }
+      if (workable === w * h) break; // nothing to improve on
+    }
+    // A plot that is still mostly unusable is not a field; skip it rather
+    // than scattering a handful of orphan crop tiles.
+    if (bestWorkable < Math.ceil((w * h) * 0.5)) continue;
+
+    // One crop per plot, chosen for this spot rather than picked at random —
+    // same biome-blend and moisture-proxy lookups flora.ts's own germination
+    // uses, so a field grows what this ground could really support.
+    const biome = dominantBiomeAt(world.biomeSeeds, ox, oy);
+    const moisture = effectiveWaterDensityAt(world.biomeSeeds, world.biomeSeedDrift, ox, oy);
+    // Surface fields only: Potato/Pumpkin are underground-native and Apple is
+    // canopy-native, and a ploughed field is none of those.
+    const crop = pickCrop(biome, moisture, world.tick, false, rng, ["underground", "canopy"]);
+
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        const x = ox + dx;
+        const y = oy + dy;
+        if (!buildable(world, x, y)) continue;
+        if (occupied({ x, y })) continue;
+        // Every third column stays bare: the furrow you walk down. Without
+        // it a plot is a solid block of food and reads as a thicket.
+        if (dx % 3 === 2) {
+          setTile(world, "surface", x, y, "floor");
+          const furrow = tileAt(world, "surface", x, y);
+          // The furrow is worked land too — it is the path between the rows,
+          // not a gap in the field.
+          if (furrow) furrow.farmed = true;
+          continue;
+        }
+        // A real field is not uniformly ripe. Most of it is still growing.
+        setTile(world, "surface", x, y, rng() < 0.35 ? "food" : "seedling");
+        const tile = tileAt(world, "surface", x, y);
+        if (tile) {
+          tile.flavor = crop;
+          tile.farmed = true;
+        }
+        placed++;
+      }
+    }
+  }
+  return placed;
+}
+
+/**
  * Lay the town out and return its presence record, or undefined if the zone
  * had nowhere to put one (all water, say).
  *
@@ -174,6 +285,17 @@ export function placeSettlement(
     homes.push({ x, y });
   }
 
+  // Fields, outside the wall. A ruin gets none: its fields went back to the
+  // wild generations ago, and that absence is part of what makes a ruin read
+  // as one. (HUMAN_GEOGRAPHY.md's reversibility point — the land forgets the
+  // work, not the fact that people were here.)
+  const fieldTiles = ruined
+    ? 0
+    : layOutFields(world, center, radius, settlement, rng, (pos) =>
+        // Never pave over the town itself: homes, the palisade, or the square.
+        chebyshev(pos, center) <= radius || homes.some((h) => chebyshev(h, pos) === 0)
+      );
+
   const presence: SettlementPresence = {
     id: settlement.id,
     name: settlement.name,
@@ -182,6 +304,7 @@ export function placeSettlement(
     population: ruined ? 0 : settlement.population,
     center,
     ruinedCause: settlement.ruinedCause,
+    fieldTiles,
   };
 
   // --- People. A ruin has none, and that absence is the point.
