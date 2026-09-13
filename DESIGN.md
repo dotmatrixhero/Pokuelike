@@ -16128,3 +16128,110 @@ disappears if the view never scales down — e.g. defaulting to 100% zoom, or
 snapping zoom to whole ratios (1x, 2x) and letting the viewport show less of
 the map. That trades how much world fits on screen for perfect crispness,
 which is a game-feel call.
+
+## Melee "range 0" was the targeting overlay lying, not the move data
+
+Direct report: *"Also. Like it seems like melee moves all have range 0? Like I
+cannot tackle as a human it would only target my own square?"*
+
+**Reproduced first, then diagnosed.** Against a real dev server with a Machop
+placed one tile east, the player's Tackle read `range {min: 0, max: 1}` and:
+
+| | before | after |
+|---|---|---|
+| preview tiles (relative to player) | `["0,0"]` | `["1,0"]` |
+| highlights your own square | **yes** | no |
+| highlights the foe you aimed at | **no** | yes |
+| the swing itself | lands (22 → 16 HP) | lands (22 → 16 HP) |
+
+The swing was never broken. `updateTargetPreview` (web `main.ts`) called
+`resolveShape(move.shape, actor.pos, ...)`, whose `point` case returns the
+**origin** — correct for the engine's `resolveAreaHit`, which only ever runs
+when `hitsArea` is set, and completely wrong as a cast preview. So every
+single-target move lit up the player's own tile no matter where the cursor
+was. Single-target moves now preview the aimed tile; area moves still go
+through `resolveShape`. **Control:** a `burst` radius-1 move still previews
+its five-tile footprint `["-1,0","0,-1","0,0","0,1","1,0"]`.
+
+### `range.min` is now 1 for everything that picks a tile
+
+Follow-up in the same round: *"No move except like self buffs should have
+range 0."* All 23 curated moves with an explicit range shipped `min: 0`,
+which made the user's own tile a legal target. The split the command menu
+already draws decided it:
+
+- `utilityMove && !terrainEffect` — Growth, Harden, Agility and 10 others.
+  Instant, no tile is ever picked. They carry **no `range` at all**, so the
+  floor does not touch them.
+- everything else — attacks and ground-aimed terrain moves (Fell, Clear) —
+  goes through pick-a-move-then-pick-a-tile, so `min: 1`.
+
+Live: tapping your own square with Tackle now answers *"Tackle does not reach
+that far."* and costs nothing.
+
+**No balance impact.** Two agents can never share a tile, so `withinMoveRange`
+never saw distance 0 from a real target — the floor only closes the
+self-target hole. `applyMoveTree` composes `min` as an overwrite
+(`delta.range?.min ?? result.range?.min ?? 0`), not additively, so the
+`+1 Range` nodes did not inflate. 8 data tests carried the old literal and
+were updated; `moveRange.test.ts` now asserts the invariant, including on
+move-tree deltas and item-granted moves.
+
+## Party pace: a movement-only second clock
+
+Direct ask: *"Can you normalize the movement speed of the entire party? As in
+bring slower Pokémon up to your party speed? Using moves, gathering, eating
+etc. For them can still be slow, and their movement should be kinda still
+reflective of overall speed but waiting for them is quite painful."*
+
+A bonded follower now accumulates a **second** budget, `Agent.partyStepEnergy`,
+at `partyPaceBonusOf` = how far short of its leader's action rate it falls. It
+runs every tick regardless of whether the follower's own action came round,
+and when it crosses `ACTION_THRESHOLD` it buys **one step and nothing else** —
+`applyPartyCatchUpStep` walks the standing order it is closing on, or the
+leader when past `FOLLOW_KEEP_DISTANCE`, and returns false in every other
+case. The follower's own `actionEnergy` — what pays for attacks, gathering and
+meals — is untouched. That split is the whole point: two accumulators, because
+folding the bonus into `actionEnergy` would have sped their attacks up too.
+
+**Live, in the browser, slow partner (speed 6) beside a speed-14 player,
+20 steps east:**
+
+| | gap per step | max |
+|---|---|---|
+| control (`PARTY_PACE_FRACTION = 0`) | 1,2,3,3,3,4,4,4,5,5,6,6,7,7,7,8,8,9,9,9 | **9, still climbing** |
+| with the pace clock | 1,2,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,3 | **4, plateaued** |
+
+**Headless, 5 seeds through `createCaveRun` + `advancePlayerTurn`**, counting
+turns where the partner *wanted* to close (it was past its keep-distance) and
+still did not move:
+
+| seed | partner | pace bonus | stuck before | stuck after | mean gap before → after |
+|---|---|---|---|---|---|
+| 7 | oddish (11.0 vs 15.3) | +4.2 | 44% | **23%** | 3.53 (max 5) → 2.97 (max 4) |
+| 23 | krabby (13.2 vs 14.4) | +1.3 | 21% | **11%** | 2.90 → 2.80 |
+| 11 | abra (17.3, faster) | 0.0 | 11% | 12% | 2.92 → 2.85 |
+| 42 | ponyta (14.4, same) | 0.0 | 0% | 0% | 2.72 → 2.72 |
+| 99 | poliwag (17.3, faster) | 0.0 | 12% | 12% | 2.83 → 2.83 |
+
+The three zero-bonus rows are the built-in control: a partner already at or
+above the player's rate gets nothing, which is the *"still reflective of
+overall speed"* half of the ask holding. The residual 23% on seed 7 is partly
+the metric — "wanted" is sampled before the turn, and a partner that closes to
+heel mid-turn then correctly declines its bonus step is counted as stuck.
+
+**A hungry or thirsty partner deliberately does not get the catch-up step.**
+It is supposed to fall behind and be *seen* falling behind (the party panel's
+`OrderStall`); sprinting it back to heel would hide the one thing meant to be
+legible.
+
+### Two fixture bugs caught on the way, both worth recording
+
+- **The first lag measurement read a 20-tile gap and meant nothing.** The
+  harness set `followingId` without any rapport, and `tickFollowers`
+  (trust.ts) drops a bond outright at `wary` trust — the partner was
+  un-bonded on turn 1 and simply walked off. Real rapport, plus an explicit
+  bond-dropped guard in the loop, before any number was believed.
+- **"Catch-up after you stop: 40 turns" on all five seeds was my loop cap.**
+  It waited for distance ≤ 1 while `FOLLOW_KEEP_DISTANCE` is 2, so it could
+  never terminate. A flat identical number across five seeds is the tell.

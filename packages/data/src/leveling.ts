@@ -397,7 +397,7 @@ function resolveMove(moveKey: string): MoveSpec | undefined {
     shape: { kind: "point" },
     ...moveCanon(moveKey),
     cooldownTicks: 1,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
   };
 }
 

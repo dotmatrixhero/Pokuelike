@@ -1605,6 +1605,58 @@ export function applyFollowing(world: World, agent: Agent, log?: EventLog): bool
 }
 
 /**
+ * The movement half of the party-pace clock (`Agent.partyStepEnergy`,
+ * `partyPaceBonusOf` in simulation.ts). One step, and only a step — this is
+ * spent from a budget the follower did not earn on its own action clock, so
+ * it must never buy an attack, a meal, a gather or anything else the ask
+ * explicitly left slow: *"Using moves, gathering, eating etc. For them can
+ * still be slow."*
+ *
+ * It walks whichever intent the follower already has, in the same priority
+ * `tickAgentAction` uses, so a caught-up partner does not wander:
+ *
+ *  1. A standing order it is still closing on — the march to the target
+ *     happens at party pace, so ordering a slow partner onto something
+ *     across the room no longer means watching it trudge.
+ *  2. Otherwise, closing on its leader when past `FOLLOW_KEEP_DISTANCE`.
+ *
+ * In range of its order, or already at heel, it spends nothing and banks the
+ * energy — there is nowhere to be.
+ *
+ * The gates mirror `applyFollowing`'s exactly: asleep, fainted, and urgent
+ * need all stop it. A hungry partner is meant to fall behind and be SEEN
+ * falling behind (the party panel's `OrderStall`); silently sprinting it
+ * back to heel would hide the one thing that is supposed to be legible.
+ */
+export function applyPartyCatchUpStep(world: World, agent: Agent): boolean {
+  if (agent.asleep || agent.fainted || agent.alive === false) return false;
+  if (hasUrgentNeed(agent.needs)) return false;
+
+  const cmd = agent.commandedAction;
+  if (cmd) {
+    const move = agent.moves?.find((m) => m.id === cmd.moveId);
+    if (!move) return false;
+    const defender = cmd.targetAgentId ? world.agents.find((a) => a.id === cmd.targetAgentId && a.alive !== false) : undefined;
+    if (cmd.targetAgentId && !defender) return false; // target gone; the order clears on its own clock
+    const targetPos = defender?.pos ?? cmd.target;
+    const distance = Math.max(Math.abs(agent.pos.x - targetPos.x), Math.abs(agent.pos.y - targetPos.y));
+    if (withinMoveRange(move, distance)) return false; // in position — the swing itself is its own clock's to pay for
+    const before = agent.pos;
+    agent.pos = stepToward(world, agent.layer, agent.pos, targetPos, agent, agent);
+    return before.x !== agent.pos.x || before.y !== agent.pos.y;
+  }
+
+  if (!agent.followingId) return false;
+  const leader = world.agents.find((a) => a.id === agent.followingId);
+  if (!leader || leader.alive === false || leader.layer !== agent.layer) return false;
+  const distance = Math.max(Math.abs(leader.pos.x - agent.pos.x), Math.abs(leader.pos.y - agent.pos.y));
+  if (distance <= FOLLOW_KEEP_DISTANCE) return false;
+  const before = agent.pos;
+  agent.pos = stepToward(world, agent.layer, agent.pos, leader.pos, agent, agent, true);
+  return before.x !== agent.pos.x || before.y !== agent.pos.y;
+}
+
+/**
  * Direct ask: "under the attack option a sub menu show up to select your
  * bonded pokemon if its within the same zone as you, and you can select a
  * move and target a space with it - it then uses its own pathfinding to get

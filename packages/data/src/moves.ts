@@ -59,7 +59,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("POUND"),
     cooldownTicks: 3,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
   },
   tackle: {
     id: "tackle",
@@ -67,7 +67,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("TACKLE"),
     cooldownTicks: 3,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // v4 (two-lane standard) — the fantasy first, per MOVES_DESIGN.md's
     // "Skill-tree template v4" and its own guide's principle 1.
     //
@@ -677,7 +677,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 1 },
     ...moveCanon("SLASH"),
     cooldownTicks: 5,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // ================================================================
     // SLASH — v4 two-lane conversion (36 -> 45). "The stillness before
     // the swing."
@@ -917,7 +917,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // multiplied by `range.max - 1`. A Slash user with the Long
         // Guard cuts fruit down out of the canopy measurably faster.
         // Scratch, a point move, cannot buy this at all.
-        delta: { range: { min: 0, max: 2 }, power: -5 },
+        delta: { range: { min: 1, max: 2 }, power: -5 },
       },
 
       apex_predator: {
@@ -1482,7 +1482,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 2 },
     ...moveCanon("VINE_WHIP"),
     cooldownTicks: 3,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     // Template v4 (45 nodes: 12 per branch — an opener, two 4-node lanes
     // each with their own notable, a deep notable both lanes converge on, a
     // filler and a capstone — plus three 3-node crosslink bridges). Nine
@@ -2036,7 +2036,7 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 3,
     statusChance: 0.1,
     statusKind: "burn",
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // v4 (45 nodes, two lanes per branch, three real bridges). The fantasy,
     // written before any node was touched, and written AGAINST flamethrower
     // rather than in isolation:
@@ -2690,7 +2690,7 @@ export const MOVES: Record<string, MoveSpec> = {
     cooldownTicks: 6,
     statusChance: 0.1,
     statusKind: "burn",
-    range: { min: 0, max: 4 },
+    range: { min: 1, max: 4 },
     // --- Template v4 (45 nodes). THE FANTASY, written before any node:
     //
     // Flamethrower is ONE BREATH. The chest fills, and what comes out is not
@@ -3339,7 +3339,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("PECK"),
     cooldownTicks: 3,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // --- Template v4 (45 nodes). THE FANTASY, written before any node:
     //
     // Peck is one hard point — a beak, a horn, a leek — driven into a single
@@ -3886,7 +3886,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("SCRATCH"),
     cooldownTicks: 3,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // A real Sandshrew doesn't canonically have venom glands, so unlike
     // Ember's baked-in burn this poison is entirely tree-earned — `statusKind`
     // is set here so a chosen node can turn on `statusChance` (MoveTreeNode's
@@ -4450,7 +4450,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 3 },
     ...moveCanon("ROCK_THROW"),
     cooldownTicks: 4,
-    range: { min: 0, max: 3 },
+    range: { min: 1, max: 3 },
     // Standing on a real "boulder" tile (worldgen.ts's Highland-leaning
     // obstacle kind) lets this throw consume it for real, ~3x damage —
     // checked in applySingleDamageInstance (predation.ts) before the damage
@@ -4605,7 +4605,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // a single-target move: `range` alone decides whether the engine will
         // fire (`canAttackFromHere`), with no shape footprint to fall short
         // of it.
-        delta: { range: { min: 0, max: 4 } },
+        delta: { range: { min: 1, max: 4 } },
       },
       // --- Lane B: the catch ---
       loose_scree: {
@@ -5184,7 +5184,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 2 },
     ...moveCanon("WATER_GUN"),
     cooldownTicks: 3,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     // A landed, non-killing hit leaves a real puddle where it struck —
     // converts a dry floor/sand/mud tile at the defender's position into
     // "water" (resolveHitAgainstTarget, predation.ts). Deliberately
@@ -5793,7 +5793,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "cone", length: 4, width: 2 },
     ...moveCanon("HYDRO_PUMP"),
     cooldownTicks: 8,
-    range: { min: 0, max: 4 },
+    range: { min: 1, max: 4 },
     hitsArea: true,
     // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass). THE
     // FANTASY: an overwhelming, all-consuming current that's genuinely
@@ -6370,7 +6370,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "wave", length: 3, width: 1 },
     ...moveCanon("SURF"),
     cooldownTicks: 6,
-    range: { min: 0, max: 3 },
+    range: { min: 1, max: 3 },
     hitsArea: true,
     // The other two thirds of the ask. See `MoveSpec.watercraft`: knowing
     // Surf lets the user cross deep water whatever its type, and lets it
@@ -6800,7 +6800,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 5 },
     ...moveCanon("SOLAR_BEAM"),
     cooldownTicks: 9,
-    range: { min: 0, max: 5 },
+    range: { min: 1, max: 5 },
     // v3 redesign (MOVES_DESIGN.md's "start from the fantasy" pass). THE
     // FANTASY: concentrated sunlight drawn down into a devastating beam —
     // it needs a moment to gather (the long cooldown is the real "charge"
@@ -7307,7 +7307,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "burst", radius: 2 },
     ...moveCanon("EARTHQUAKE"),
     cooldownTicks: 8,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     hitsArea: true,
     // THE FANTASY (v3's "start from the fantasy" pass, unchanged by the v4
     // conversion — see MOVES_DESIGN.md's Earthquake worked example):
@@ -7879,7 +7879,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "burst", radius: 1 },
     ...moveCanon("ROCK_SLIDE"),
     cooldownTicks: 5,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     hitsArea: true,
     // --- The fantasy (v4 rewrite, MOVES_DESIGN.md's "start from the
     // fantasy") ---
@@ -8431,7 +8431,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "cone", length: 2, width: 2 },
     ...moveCanon("SLUDGE"),
     cooldownTicks: 4,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     hitsArea: true,
     statusChance: 0.3,
     statusKind: "poison",
@@ -9102,7 +9102,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("POISON_STING"),
     cooldownTicks: 2,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     statusChance: 0.3,
     statusKind: "poison",
     // v4 (two-lane standard), converted from the round-six draft in
@@ -9602,7 +9602,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("TWINEEDLE"),
     cooldownTicks: 2,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     hits: { min: 2, max: 2 },
     statusChance: 0.2,
     statusKind: "poison",
@@ -10100,7 +10100,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 3 },
     ...moveCanon("ICE_BEAM"),
     cooldownTicks: 6,
-    range: { min: 0, max: 3 },
+    range: { min: 1, max: 3 },
     statusChance: 0.1,
     statusKind: "freeze",
     // v4 (two-lane standard). 45 nodes: 3 branches x 12, plus 3 three-node
@@ -10706,7 +10706,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "line", length: 2 },
     ...moveCanon("PSYBEAM"),
     cooldownTicks: 4,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     // Mainline's own confusion chance, now that `confusion` is a real
     // StatusKind (status.ts): a landed hit has a 10% chance to leave the
     // target stumbling in a random direction on half its actions. Base rate
@@ -11324,7 +11324,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "cone", length: 2, width: 2 },
     ...moveCanon("WING_ATTACK"),
     cooldownTicks: 4,
-    range: { min: 0, max: 2 },
+    range: { min: 1, max: 2 },
     hitsArea: true,
     // --- Template v4 (45 nodes). THE FANTASY, written before any node:
     //
@@ -11978,7 +11978,7 @@ export const MOVES: Record<string, MoveSpec> = {
     shape: { kind: "point" },
     ...moveCanon("BODY_SLAM"),
     cooldownTicks: 6,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     statusChance: 0.3,
     statusKind: "paralysis",
     // v4 tree (MOVES_DESIGN.md's "Skill-tree template v4 — the two-lane
@@ -12607,7 +12607,7 @@ export const MOVES: Record<string, MoveSpec> = {
     // targetsAlly moves. cooldownTicks/range are set anyway for MoveSpec's
     // sake, not because either is ever read for this move's real use.
     cooldownTicks: 15,
-    range: { min: 0, max: 1 },
+    range: { min: 1, max: 1 },
     // A fleeing Diglett/Sandshrew burrows instead of taking a normal flee
     // step — applyPredationInstincts' main flee branch (predation.ts). 20
     // ticks of real safety (see Agent.burrowedTicksRemaining's own doc
@@ -13151,7 +13151,7 @@ export const MOVES: Record<string, MoveSpec> = {
         // `withinMoveRange` on the support path — which is exactly what makes
         // it this lane's notable: verified live, max 1 could not reach a
         // herd-mate three tiles off and max 3 could.
-        delta: { range: { min: 0, max: 3 }, gatherBurst: 2 },
+        delta: { range: { min: 1, max: 3 }, gatherBurst: 2 },
       },
       deeper_calm: {
         id: "deeper_calm",

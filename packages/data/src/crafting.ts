@@ -47,7 +47,7 @@ import { MOVES } from "./moves.js";
  * already use.
  */
 function terrainMove(id: string, name: string, terrainEffect: NonNullable<MoveSpec["terrainEffect"]>, cooldownTicks: number): MoveSpec {
-  return { id, name, shape: { kind: "point" }, type: "normal", category: "status", power: 0, accuracy: -1, pp: 1, cooldownTicks, range: { min: 0, max: 1 }, utilityMove: true, terrainEffect };
+  return { id, name, shape: { kind: "point" }, type: "normal", category: "status", power: 0, accuracy: -1, pp: 1, cooldownTicks, range: { min: 1, max: 1 }, utilityMove: true, terrainEffect };
 }
 
 /**

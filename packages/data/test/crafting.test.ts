@@ -125,7 +125,7 @@ describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
     const move = granted.find((m) => m.id === "ember")!;
     expect(move.power).toBe(MOVES.ember!.power);
     expect(move.cooldownTicks).toBe(MOVES.ember!.cooldownTicks);
-    expect(move.range).toEqual({ min: 0, max: 1 });
+    expect(move.range).toEqual({ min: 1, max: 1 });
     // The torch keeps being a light source too — the grant is additive.
     expect(ITEMS.torch!.light).toBe(true);
   });

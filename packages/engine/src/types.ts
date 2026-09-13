@@ -1406,6 +1406,18 @@ export interface Agent {
    */
   actionEnergy?: number;
   /**
+   * A bonded follower's MOVEMENT-ONLY catch-up accumulator — a second clock
+   * alongside `actionEnergy`, running at `partyPaceBonusOf` (simulation.ts),
+   * the shortfall between the leader's action rate and this agent's own.
+   * When it crosses `ACTION_THRESHOLD` the follower gets one extra STEP and
+   * nothing else: no attack, no gather, no meal. Direct ask: *"normalize the
+   * movement speed of the entire party... Using moves, gathering, eating etc.
+   * for them can still be slow."* Keeping it on its own accumulator is what
+   * makes that split real — folding the bonus into `actionEnergy` would have
+   * sped their attacks up too.
+   */
+  partyStepEnergy?: number;
+  /**
    * Combined elevation-delta + terrain multiplier from this agent's last
    * actual step (support.ts's `movementSpeedFactor`), applied to base Speed
    * on top of injury (`effectiveSpeed`) — see `actionSpeedOf` in

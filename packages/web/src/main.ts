@@ -2344,6 +2344,18 @@ function updateTargetPreview(hovered: Vec2): void {
     targetPreviewTiles = [];
     return;
   }
+  // A single-target move hits the tile you AIMED at. `resolveShape` is the
+  // engine's area footprint, and its `point` case returns the ORIGIN — which
+  // is right for `resolveAreaHit` (that only ever runs when `hitsArea` is set)
+  // and completely wrong here: every melee move lit up the player's own
+  // square no matter where the cursor was. Direct report: *"it seems like
+  // melee moves all have range 0? Like I cannot tackle as a human it would
+  // only target my own square?"* The swing itself always landed — this was
+  // the overlay lying about where it was going.
+  if (!move.hitsArea) {
+    targetPreviewTiles = [{ ...hovered }];
+    return;
+  }
   targetPreviewTiles = resolveShape(move.shape, actor.pos, facingToward(actor.pos, hovered));
 }
 
@@ -3830,6 +3842,11 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     /** Arm ally targeting exactly as picking a move row in the command menu does. */
     beginAllyTargeting(agentId: string, moveId: string): void {
       targeting = { agentId, moveId };
+    },
+    /** The tiles the targeting overlay would light up with the cursor on a named tile — the same call a real pointermove makes. */
+    previewAt(x: number, y: number): Vec2[] {
+      updateTargetPreview({ x, y });
+      return targetPreviewTiles.map((t) => ({ ...t }));
     },
     /**
      * Resolve an armed target at a named tile, through the same creature-snap

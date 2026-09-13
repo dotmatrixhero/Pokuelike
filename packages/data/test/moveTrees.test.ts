@@ -327,7 +327,7 @@ describe("Peck tree: reach and positional keystones", () => {
       "extended_wingspan",
     ]);
     expect(respec.shape).toEqual({ kind: "line", length: 2 });
-    expect(respec.range).toEqual({ min: 0, max: 2 });
+    expect(respec.range).toEqual({ min: 1, max: 2 });
   });
 
   it("Snatch and Swap keystone is the roster's first positionSwap + positionSwapPull", () => {
@@ -584,11 +584,11 @@ describe("Hydro Pump tree: v4 two-lane — overwhelming, genuinely hard to aim",
     // Into Aggression: Flooding Wake without Pump Conditioning or Bursting Main.
     const viaAggr = applyMoveTree(hydroPump, [...bridge, "flooding_wake", "widening_main"]);
     expect(viaAggr.terrainFill).toEqual({ terrain: "water" });
-    expect(viaAggr.range).toEqual({ min: 0, max: 5 });
+    expect(viaAggr.range).toEqual({ min: 1, max: 5 });
 
     // Into Boldness: Undertow Anchor without Bastion Footing or Open the Valve.
     const viaBold = applyMoveTree(hydroPump, [...bridge, "undertow_anchor", "channel_grip"]);
-    expect(viaBold.range).toEqual({ min: 0, max: 5 });
+    expect(viaBold.range).toEqual({ min: 1, max: 5 });
     expect(hydroPump.tree!.undertow_anchor.grantsPassive).toEqual({ kind: "immovable", value: 1 });
   });
 
@@ -600,7 +600,7 @@ describe("Hydro Pump tree: v4 two-lane — overwhelming, genuinely hard to aim",
     // Into Sociability: Wake Rally without Pod Footing or Wake Footing.
     const viaSoc = applyMoveTree(hydroPump, [...bridge, "wake_rally", "pod_reach"]);
     expect(viaSoc.rallyCall).toEqual({ ticks: 20 });
-    expect(viaSoc.range).toEqual({ min: 0, max: 5 });
+    expect(viaSoc.range).toEqual({ min: 1, max: 5 });
 
     // Into Aggression: Pressure Holds without Overwhelm Footing.
     const viaAggr = applyMoveTree(hydroPump, [...bridge, "pressure_holds"]);
@@ -1216,7 +1216,7 @@ describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
     // moment `hitsArea` made it real.
     const respec = applyMoveTree(ember, ["ring_of_fire", "banked_heat", "slow_burn", "wide_ring"]);
     expect(respec.shape).toEqual({ kind: "burst", radius: 1 });
-    expect(respec.range).toEqual({ min: 0, max: 1 });
+    expect(respec.range).toEqual({ min: 1, max: 1 });
 
     // The radius is a deliberate balance number, not an implementation
     // detail, so the footprint is asserted in TILES rather than left implicit
@@ -1294,7 +1294,7 @@ describe("Ember tree: v4 two-lane — the first fire, and it catches", () => {
 
   it("Inferno keeps only the half of itself that ever worked: reach, not a line it could not resolve", () => {
     const respec = applyMoveTree(ember, ["wider_burn", "in_through_the_coat", "fan_the_flames", "inferno"]);
-    expect(respec.range).toEqual({ min: 0, max: 2 });
+    expect(respec.range).toEqual({ min: 1, max: 2 });
     expect(respec.shape).toEqual({ kind: "point" });
     expect(ember.tree!.inferno.excludes).toEqual(["wildfire_burst"]);
   });
@@ -1361,14 +1361,14 @@ describe("additive delta fields: a build that pays twice gets twice", () => {
   it("Hydro Pump's three independent '+1 Range' nodes now add up to +3, not +1", () => {
     // Bought one at a time they were each `range: { max: 5 }` on a base of 4,
     // so three points bought one tile between them.
-    expect(hydroPump.range).toEqual({ min: 0, max: 4 });
-    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, ["widening_main"])).range).toEqual({ min: 0, max: 5 });
+    expect(hydroPump.range).toEqual({ min: 1, max: 4 });
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, ["widening_main"])).range).toEqual({ min: 1, max: 5 });
 
     const targets = ["widening_main", "channel_grip", "pod_reach"];
-    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, targets)).range).toEqual({ min: 0, max: 7 });
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, targets)).range).toEqual({ min: 1, max: 7 });
     // A different — still legal — purchase order resolves identically. That
     // is the property the overwrite form did not have.
-    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, [...targets].reverse())).range).toEqual({ min: 0, max: 7 });
+    expect(applyMoveTree(hydroPump, buildFor(hydroPump.tree!, [...targets].reverse())).range).toEqual({ min: 1, max: 7 });
   });
 
   it("Solar Beam's flanking and elevation bonuses both survive a build that takes both", () => {
@@ -2045,7 +2045,7 @@ describe("Twineedle tree: a poison delivery system with wings", () => {
 
   it("High Pass buys real cast range and strips the cover the target was standing in", () => {
     const respec = applyMoveTree(twineedle, [...resolveChosenSetFor(twineedle.tree, "high_pass")]);
-    expect(respec.range).toEqual({ min: 0, max: 3 });
+    expect(respec.range).toEqual({ min: 1, max: 3 });
     expect(respec.terrainBurn).toBe(true);
     expect(respec.power).toBe(twineedle.power - 5); // it pays for the reach
   });

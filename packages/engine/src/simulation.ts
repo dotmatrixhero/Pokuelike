@@ -1,6 +1,6 @@
 import type { Agent, HuntRules, Vec2, World } from "./types.js";
 import type { EventLog } from "./events.js";
-import { tickAgentAction, tickAgentNeeds } from "./needs.js";
+import { applyPartyCatchUpStep, tickAgentAction, tickAgentNeeds } from "./needs.js";
 import type { RegionDispersalContext } from "./dispersal.js";
 import { growCanopyFood, growFlora, growUndergroundFlora, maybeDropSeed } from "./flora.js";
 import { applyFireDamage, tickFires } from "./fire.js";
@@ -175,6 +175,62 @@ export function actionSpeedOf(world: World, agent: Agent, tick: number): number 
   // See `SPEED_ACTION_COMPRESSION`'s own doc comment for why this is a
   // power on the ratio to `ACTION_THRESHOLD`, not a flat floor.
   return ACTION_THRESHOLD * Math.pow(Math.max(0, speed) / ACTION_THRESHOLD, SPEED_ACTION_COMPRESSION);
+}
+
+/**
+ * How much of the leader's own action rate a bonded follower's MOVEMENT is
+ * lifted to. 1 means a follower keeps pace with the player step for step;
+ * below 1 leaves it fractionally behind.
+ *
+ * Direct ask: *"Can you normalize the movement speed of the entire party? As
+ * in bring slower Pokémon up to your party speed? Using moves, gathering,
+ * eating etc. For them can still be slow, and their movement should be kinda
+ * still reflective of overall speed but waiting for them is quite painful."*
+ *
+ * The two halves of that are why this is a FLOOR on a separate clock rather
+ * than a multiplier on `actionSpeedOf`:
+ *
+ *  - "bring slower Pokémon up to your party speed" — a slow partner gets the
+ *    shortfall topped up, so an Oddish walking beside you no longer strings
+ *    out behind you over a long corridor.
+ *  - "still reflective of overall speed" — the top-up is a floor, not a
+ *    clamp. A partner already faster than you keeps its whole advantage
+ *    (`partyPaceBonusOf` returns 0 for it), and every non-movement thing a
+ *    slow partner does still runs on its own unmodified clock.
+ */
+export const PARTY_PACE_FRACTION = 1;
+
+/**
+ * The movement-only speed a bonded follower's catch-up clock accumulates at:
+ * how far short of its leader's action rate it falls, or 0 when it is not a
+ * player's follower or is already as fast. See `Agent.partyStepEnergy`.
+ *
+ * Deliberately keyed off the LEADER'S `actionSpeedOf`, not a constant: the
+ * player's own rate already moves with terrain, exhaustion, cold and injury,
+ * and the party should track the pace actually being set rather than a
+ * nominal one. A player slowed to a crawl in deep snow does not drag an
+ * unearned sprint out of its partners.
+ */
+export function partyPaceBonusOf(world: World, agent: Agent, tick: number): number {
+  if (!agent.followingId || agent.controlledBy) return 0;
+  const leader = world.agents.find((a) => a.id === agent.followingId);
+  if (!leader || leader.controlledBy !== "player" || leader.alive === false || leader.layer !== agent.layer) return 0;
+  const pace = actionSpeedOf(world, leader, tick) * PARTY_PACE_FRACTION;
+  return Math.max(0, pace - actionSpeedOf(world, agent, tick));
+}
+
+/**
+ * Same accumulate-and-spend shape as `accumulateActionEnergy`, on the
+ * follower's separate movement clock. Split out (rather than reusing that
+ * function with a different field) so the two clocks cannot be confused at a
+ * call site — this one may only ever buy a step.
+ */
+export function accumulatePartyStepEnergy(agent: Agent, speed: number): boolean {
+  agent.partyStepEnergy = (agent.partyStepEnergy ?? 0) + speed;
+  if (agent.partyStepEnergy < ACTION_THRESHOLD) return false;
+  agent.partyStepEnergy -= ACTION_THRESHOLD;
+  if (agent.partyStepEnergy > ACTION_THRESHOLD) agent.partyStepEnergy = ACTION_THRESHOLD;
+  return true;
 }
 
 /** The eight neighbors (orthogonal first, then diagonal), fixed order — deterministic, no rng, matching this codebase's "same seed, same result" requirement. See `resolveTileOverlaps`. */
@@ -416,6 +472,22 @@ export function tickWorld(
     if (agent.controlledBy === "player") tickTorch(world, agent);
 
     const acted = accumulateActionEnergy(agent, actionSpeedOf(world, agent, world.tick));
+
+    // The party-pace clock runs EVERY tick, independently of whether the
+    // agent's own action came round — that is the whole point of it being a
+    // second accumulator. A slow partner that acts every 4th tick still
+    // closes the gap on the other three. See `partyPaceBonusOf`.
+    const paceBonus = partyPaceBonusOf(world, agent, world.tick);
+    if (paceBonus > 0 && accumulatePartyStepEnergy(agent, paceBonus)) {
+      const from = { x: agent.pos.x, y: agent.pos.y };
+      const fromElevation = tileAt(world, agent.layer, from.x, from.y)?.elevation ?? 0;
+      if (applyPartyCatchUpStep(world, agent)) {
+        const afterTile = tileAt(world, agent.layer, agent.pos.x, agent.pos.y);
+        agent.terrainSpeedFactor = movementSpeedFactor(fromElevation, afterTile?.elevation ?? 0, afterTile?.terrain ?? "floor");
+        maybeDropSeed(world, agent.layer, agent.pos, log, rng);
+      }
+    }
+
     if (!acted) continue;
 
     const before = { x: agent.pos.x, y: agent.pos.y };

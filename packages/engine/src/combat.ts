@@ -403,9 +403,12 @@ export function moveRange(move: MoveSpec): number {
 }
 
 /**
- * Full range check, including `min` (0 for every curated move today — see
- * moves.ts — but a future thrown-only move could set it above 0 to mean
- * "can't be used at melee"). Prefer this over a bare `distance <=
+ * Full range check, including `min` — 1 for every curated targetable move
+ * (see moves.ts), so your own tile is never a legal target. Direct call:
+ * *"No move except like self buffs should have range 0."* Self-buffs carry
+ * no `range` at all and never go through tile targeting, so the floor does
+ * not touch them. A future thrown-only move could set `min` higher still to
+ * mean "can't be used at melee". Prefer this over a bare `distance <=
  * moveRange(move)` comparison wherever the caller has a real distance to a
  * target, since it's the one that actually honors `min`.
  */

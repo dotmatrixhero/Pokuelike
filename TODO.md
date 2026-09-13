@@ -12666,3 +12666,52 @@ rapport and all that for a unit."*
       and threshold crossings. Level-ups, a follower bonding or leaving, and
       finding a landmark are arguably also notable and do not switch.
 - [ ] The desktop split is a fixed 42%. Not draggable.
+
+### Melee range + party pace (this round)
+
+- [x] **Melee "range 0" reproduced and fixed.** The move data was fine and the
+      swing always landed — `updateTargetPreview` previewed `resolveShape`'s
+      `point` case, which returns the attacker's own tile. Single-target moves
+      now preview the aimed tile; area moves unchanged (control: a burst still
+      previews all five cells).
+- [x] **`range.min` 0 → 1 on all 23 targetable curated moves**, plus the
+      terrain-move helper and the dex-backed fallback. Self-buffs
+      (`utilityMove && !terrainEffect`) carry no range at all and are
+      untouched. `moveRange.test.ts` asserts it, tree deltas and
+      item-granted moves included.
+- [x] **Party pace clock.** Second accumulator, movement only. Slow partner
+      (spd 6 vs 14) plateaus at a 4-tile gap instead of climbing past 9.
+      Zero-bonus partners measurably unchanged.
+
+### Still open from this round
+
+- [ ] `PARTY_PACE_FRACTION` is 1 — a full floor at the leader's rate. If the
+      party reads as *too* glued, this is the dial; it is deliberately a
+      balance number and has not been touched unilaterally.
+- [ ] The residual "stuck" rate on a very slow partner is ~23%. Part metric
+      artefact (see DESIGN.md), part `stepToward` genuinely blocked in tight
+      cave corridors. Not chased further this round.
+- [ ] `applyMoveTree` still falls back to `min: 0` when it *constructs* a
+      range for a move that had none (`delta.range?.min ?? result.range?.min
+      ?? 0`). No curated content hits that path today; the data test would
+      catch it if any did.
+- [ ] Clearing brush you are standing on now needs a step off first, since
+      `clear` went to `min: 1` along with everything else that picks a tile.
+      Minor; flagged in case it reads wrong in play.
+
+### Next round — asked for mid-turn, not yet started
+
+- [ ] **Offer from the radial, targeted at a Pokémon.** *"You should be able
+      to target a Pokémon to offer directly from the radial menu."*
+- [ ] **The radial populates with what you can offer.** *"It'd be nice if we
+      had the ability to choose the thing to offer also dynamically populating
+      the radial."*
+- [ ] **Commanding becomes a targetable radial, not a scrolling menu.** *"Can
+      we make that some kind of target able radial type ux? Its so hard to
+      scroll menus."* — this supersedes the current command-menu list for
+      partner moves.
+- [ ] **Command a partner to drink or eat.** *"You should be able to command a
+      Pokémon to drink or eat."* Note this interacts with `hasUrgentNeed`:
+      today a hungry partner refuses orders and shows `OrderStall`; an explicit
+      eat/drink order is the player answering that stall, so it must not be
+      gated by it.
