@@ -12503,3 +12503,91 @@ stew? i don't see it as 3 potato stews i can only eat one"*.
 - [ ] **Wild agents carry nothing**, so Loot will almost never appear even
       now. If corpses should be worth searching, someone has to put something
       in them.
+
+## Round: ally targeting — why orders didn't land, and the option-3 rebuild
+
+Direct reports, in order: *"I think the targeting is wack still."* → *"Like when
+you command a ally to target enemy. It just doesn't really land unless they're
+positioned properly."* → asked what it looked like: **"stands still, never
+swings"**, both melee and ranged, player a few tiles back → *"I think the
+positioning aspect is hard. It feels hard to get a unit to the right spot."*
+
+### 1. The silent refusal — the "stands still" answer
+
+`applyCommandedAction` bails on `hasUrgentNeed` (hunger < 0.3 || thirst < 0.3)
+and on a 10-tile leash. Both returned with **no feedback of any kind**, and the
+order stayed queued looking perfectly healthy. Reproduced:
+
+| ally state | ticks it acted | foe HP | order still queued? |
+| --- | --- | --- | --- |
+| well fed (control) | 20/20 | 40 → 23 | yes |
+| hunger 0.29 | **0/20** | 40 → 40 | yes, forever |
+| thirst 0.29 | **0/20** | 40 → 40 | yes, forever |
+| hunger 0.31 (control) | 20/20 | 40 → 23 | yes |
+| player 11 tiles away | 0/20 | 40 → 40 | cancelled |
+| player 9 tiles away (control) | 20/20 | 40 → 23 | yes |
+
+- [x] **The refusal itself stays** — an order should wait rather than march a
+      starving partner past water. What was wrong is that nothing said so.
+- [x] `OrderStall` (`"hungry" | "thirsty" | "unreachable"`) is recorded on the
+      order and shown in the party panel, outranking the ordinary behaviour
+      line. State rather than an event: it persists as long as the need does,
+      and an event would either spam every tick or need its own edge detection.
+- [x] `"unreachable"` is new and covers the third case — out of range AND
+      unable to step closer. Without it a blocked partner looked identical to
+      one that was simply walking.
+- [x] Live, one ally through the whole loop:
+      `The Machop is standing still.` → **`too hungry to fight`** → (fed)
+      `The Machop is fighting.` The stall clears on its own; no re-issuing.
+
+### 2. Manhattan vs Chebyshev — and the case that never self-corrected
+
+- [x] `applyCommandedAction` measured range with `manhattan` while
+      `player.ts`'s own targeted swing uses Chebyshev. Everything here moves
+      8-directionally, so a diagonally-adjacent partner is ONE step from its
+      target and manhattan called it two.
+- [x] The old code comment justified this as "self-correcting — it just walks
+      the partner one step closer next tick." **In open ground that is true and
+      cheap** (measured: 26 hits vs 25 over 30 ticks, orthogonal vs diagonal),
+      which is why my first diagonal test did NOT reproduce the report and I
+      said so rather than shipping the theory.
+- [x] **Boxed in, it never self-corrects at all.** A partner walled on every
+      side except the diagonal its target occupies lands **zero** hits under
+      manhattan and lands them immediately under Chebyshev. That is the
+      corridor case, and it is the one that matches "doesn't land unless
+      they're positioned properly."
+- [x] 3 tests; proved 2 of 3 fail under manhattan.
+
+### 3. Targeting, option 3 (the user's pick)
+
+*"Tap a creature to say what you want done, long-press to say exactly where."*
+
+- [x] **Tap = intent.** `PlayerAction`'s `command` gained `targetId`. A tap
+      resolves to a creature and the partner owns all the footwork.
+      `creatureNear` snaps within 1 tile, because on a phone an exact tile hit
+      is not realistic and the whole point was to stop making the player do the
+      positioning.
+- [x] A creature standing exactly on the tapped tile always wins outright — the
+      snap is a tiebreak for near misses, never a way to steal an exact tap.
+- [x] **Long-press = precision.** Aims at the pressed square with no snapping,
+      for terrain moves and deliberate "stand exactly there" orders. Committed
+      in the press handler itself, so the press IS the gesture.
+- [x] **No snapping for a terrain move**, ever: an axe swung at a tree is aimed
+      at the ground, and snapping to the Sandshrew beside it would swing at the
+      Sandshrew. Same rule `commitMove` already applied to the player's swing.
+- [x] An explicitly named target beats whoever is standing on the tile at
+      resolution time — the creature may have moved between the tap and the
+      order resolving, and falling back to the tile would order a swing at
+      empty ground.
+- [x] Live, through the real commit path: a tap one tile OFF the foe produces
+      `targetAgentId: machop-1` aimed at the foe's real tile; the same tile
+      long-pressed produces a bare tile order with no `targetAgentId`.
+- [x] Full suite: engine **1699**, data 479, web build clean.
+
+### Still open
+
+- [ ] The leash (10 tiles) cancels an order silently. The stall vocabulary
+      covers the three *waiting* cases; a cancelled order still just vanishes.
+- [ ] `hasUrgentNeed` at 0.3 may simply be too aggressive now that it is
+      visible — a partner spends a lot of a cave run under it. Left alone
+      rather than retuned unilaterally.

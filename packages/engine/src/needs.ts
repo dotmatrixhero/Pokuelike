@@ -1633,7 +1633,15 @@ export const COMMAND_DISENGAGE_DISTANCE = 10;
 export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   const cmd = agent.commandedAction;
   if (!cmd) return false;
-  if (hasUrgentNeed(agent.needs)) return false;
+  // The refusal below is deliberate — an order waits rather than marching a
+  // starving partner past water — but it used to be SILENT, which is the
+  // actual defect. The partner stood there, the order stayed queued looking
+  // healthy, and nothing anywhere said why. Recording the reason on the order
+  // lets the party panel show a stalled order as stalled. See `OrderStall`.
+  if (hasUrgentNeed(agent.needs)) {
+    cmd.stalled = agent.needs.thirst < agent.needs.hunger ? "thirsty" : "hungry";
+    return false;
+  }
 
   const commander = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
   if (commander) {
@@ -1663,15 +1671,34 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   }
   const targetPos = defender?.pos ?? cmd.target;
 
-  const distance = manhattan(agent.pos, targetPos);
+  // Chebyshev, matching `player.ts`'s own targeted swing. It used to be
+  // manhattan, on the reasoning that an out-of-range order is "self-
+  // correcting — it just walks the partner one step closer next tick." That
+  // is true in open ground and measurably cheap (26 hits vs 25 over 30 ticks,
+  // orthogonal vs diagonal), but it is the wrong metric: everything here
+  // moves 8-directionally, so a diagonally-adjacent partner is ONE step from
+  // its target and manhattan calls that two. The partner then spends a turn
+  // sidestepping to an orthogonal tile before it will swing — and where it
+  // cannot sidestep (a corridor, a tile already occupied) the "self-
+  // correction" never happens at all. Direct report: "when you command an
+  // ally to target enemy. It just doesn't really land unless they're
+  // positioned properly."
+  const distance = Math.max(Math.abs(agent.pos.x - targetPos.x), Math.abs(agent.pos.y - targetPos.y));
   if (!withinMoveRange(move, distance)) {
     if (agent.behavior !== "fight") {
       logBehaviorChange(log, world, agent, "fight");
       agent.behavior = "fight";
     }
+    const before = agent.pos;
     agent.pos = stepToward(world, agent.layer, agent.pos, targetPos, agent, agent);
+    // Closing the distance is the order working, so the stall clears. Failing
+    // to move while still out of range is the third stall case: something is
+    // in the way and standing here will never resolve the order. Without this
+    // the partner looks identical to one that is simply walking.
+    cmd.stalled = before.x === agent.pos.x && before.y === agent.pos.y ? "unreachable" : undefined;
     return true;
   }
+  cmd.stalled = undefined; // in range — whatever was blocking it no longer is
   if (agent.moveCooldowns?.[move.id]) return true; // in range, waiting out the move's own cooldown — the order stands
   // No tracked id (an order issued before `targetAgentId` existed, or a
   // caller that never set one) — original one-shot behavior: whoever

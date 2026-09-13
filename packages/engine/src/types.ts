@@ -632,6 +632,30 @@ export type BehaviorKind =
  * world that keeps moving. Everything in PLAYER_ACTIONS.md (examine, search,
  * craft, the time-spends) lands in later milestones as further variants.
  */
+/**
+ * Why a standing order is not being carried out this tick.
+ *
+ * Direct report: *"when you command an ally to target enemy. It just doesn't
+ * really land"* — and, asked what it looked like: *"stands still, never
+ * swings."* `applyCommandedAction` bails on an urgent need, silently, and the
+ * order stays queued looking perfectly healthy. Measured: an ally at hunger
+ * 0.29 acted on **0 of 20** ticks and the target took zero damage, while the
+ * same ally at 0.31 acted on 20 of 20.
+ *
+ * The refusal itself is deliberate and stays — an order should wait rather
+ * than march a starving partner past water. What was wrong is that nothing
+ * said so. Recorded on the order rather than fired as an event because it is
+ * a *state* that persists for as long as the need does; an event would either
+ * spam every tick or need its own edge-detection.
+ */
+export type OrderStall =
+  /** Below `hasUrgentNeed`'s hunger floor — it needs to eat before it will fight. */
+  | "hungry"
+  /** Below `hasUrgentNeed`'s thirst floor. */
+  | "thirsty"
+  /** No path to anywhere the move would reach — walled off, or the way is blocked. */
+  | "unreachable";
+
 export type PlayerAction =
   | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
   | { kind: "wait" }
@@ -743,7 +767,19 @@ export type PlayerAction =
    * `applyCommandedAction`. Fails if there is no such follower, or it
    * doesn't know that move.
    */
-  | { kind: "command"; agentId: string; moveId: string; target: Vec2 }
+  /**
+   * `targetId`, when given, names WHO the order is about and the partner owns
+   * all the footwork — walking to wherever its move actually reaches, and
+   * following the quarry if it moves. Without it the order is about the
+   * `target` TILE, which is what a terrain move (Fell, Rock Throw at a wall)
+   * or a deliberate "stand exactly there" order wants.
+   *
+   * Direct steer, after "it feels hard to get a unit to the right spot": tap a
+   * creature to say what you want done, long-press to say exactly where. The
+   * tile is still the fallback — `player.ts` derives a target from whoever is
+   * standing on it — so an order issued without `targetId` behaves as before.
+   */
+  | { kind: "command"; agentId: string; moveId: string; target: Vec2; targetId?: string }
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;
@@ -1075,7 +1111,7 @@ export interface Agent {
    * living agent — a terrain-effect order like felling a tree), behavior
    * is unchanged: one resolution and done.
    */
-  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string };
+  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string; stalled?: OrderStall };
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;

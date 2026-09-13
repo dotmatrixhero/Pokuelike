@@ -641,6 +641,9 @@
       #tile-tip b { color: var(--text); font-weight: 600; }
 
       /* ROADMAP.md M5 — the pack menu. */
+      /* A partner refusing its order has to LOOK different from one idling —
+         see main.ts's renderPartySection. */
+      .herd-status-status.stalled { color: #e0a341; }
       #pack-menu, #command-menu, #look-menu { position: absolute; inset: 0; z-index: 31; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
       #pack-menu[hidden], #command-menu[hidden], #look-menu[hidden] { display: none; }
       /* Direct ask: "a modal is appropriate for look - just to see in bigger

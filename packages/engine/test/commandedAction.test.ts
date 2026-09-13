@@ -191,8 +191,40 @@ describe("needs.ts: applyCommandedAction — carrying the order out over the par
     });
     world.agents.push(s);
     expect(applyCommandedAction(world, s, undefined, undefined, Math.random)).toBe(false);
-    expect(s.commandedAction).toEqual({ moveId: "test_claw", target: { x: 9, y: 5 } });
+    // The order is KEPT and the partner does not move — unchanged. What is new
+    // is that it now says WHY, so the UI can stop showing a refused order as a
+    // healthy one. Direct report, asked what a non-working order looked like:
+    // "stands still, never swings."
+    expect(s.commandedAction).toMatchObject({ moveId: "test_claw", target: { x: 9, y: 5 } });
+    expect(s.commandedAction?.stalled).toBe("thirsty");
     expect(s.pos).toEqual({ x: 5, y: 5 });
+  });
+
+  it("names hunger when hunger is the lower of the two", () => {
+    const world = openWorld();
+    const s = partner("s", 5, 5, {
+      moves: [CLAW],
+      commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 } },
+      needs: createNeeds({ hunger: 0.05, thirst: 0.2 }),
+    });
+    world.agents.push(s);
+    applyCommandedAction(world, s, undefined, undefined, Math.random);
+    expect(s.commandedAction?.stalled).toBe("hungry");
+  });
+
+  it("clears the stall once the need is met, without needing a new order", () => {
+    const world = openWorld();
+    const s = partner("s", 5, 5, {
+      moves: [CLAW],
+      commandedAction: { moveId: "test_claw", target: { x: 9, y: 5 } },
+      needs: createNeeds({ thirst: 0.05 }),
+    });
+    world.agents.push(s);
+    applyCommandedAction(world, s, undefined, undefined, Math.random);
+    expect(s.commandedAction?.stalled).toBe("thirsty");
+    s.needs.thirst = 1;
+    applyCommandedAction(world, s, undefined, undefined, Math.random);
+    expect(s.commandedAction?.stalled).toBeUndefined();
   });
 
   it("a move no longer known clears the order without acting", () => {

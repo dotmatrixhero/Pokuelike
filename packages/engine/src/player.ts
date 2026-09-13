@@ -320,8 +320,17 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // target `needs.ts`'s `applyCommandedAction` chases and keeps
       // fighting until it dies, rather than one swing at a tile that goes
       // stale the instant the target takes a step.
-      const targetAgent = world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
-      partner.commandedAction = { moveId: action.moveId, target: action.target, targetAgentId: targetAgent?.id };
+      // An explicitly named target wins over whoever happens to be standing on
+      // the tile: the player tapped a CREATURE, and between that tap and this
+      // resolution the creature may already have moved. Falling back to the
+      // tile would then order the partner to swing at empty ground.
+      const named = action.targetId
+        ? world.agents.find((a) => a.id === action.targetId && a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer)
+        : undefined;
+      const targetAgent =
+        named ??
+        world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
+      partner.commandedAction = { moveId: action.moveId, target: targetAgent?.pos ?? action.target, targetAgentId: targetAgent?.id };
       return true;
     }
     case "setStandingOrder": {

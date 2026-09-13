@@ -265,7 +265,12 @@ let lastFacing: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } = { dx: 0, dy: 1 };
  * allies moves": the same pick-a-move-then-tap-a-tile flow, just firing
  * `{kind: "attack", target, moveId}` instead of `{kind: "command", ...}`.
  */
-let targeting: { agentId?: string; moveId: string } | undefined;
+/**
+ * `exactTile` is set by a long-press: the next commit aims at the pressed
+ * SQUARE with no creature snapping. A plain tap aims at whoever is there —
+ * see `creatureNear`.
+ */
+let targeting: { agentId?: string; moveId: string; exactTile?: boolean } | undefined;
 /**
  * Direct ask: "Even the targeting for allies should like show the cone or
  * the aoe of a target." The real resolved tiles (`resolveShape`) a move
@@ -750,9 +755,45 @@ function stepStrike(): void {
 }
 
 /** Issuing an order is the player's own turn to spend, same as every other verb — `agentId` undefined means the player's own swing. */
-function commitMove(agentId: string | undefined, moveId: string, target: Vec2): void {
+/**
+ * The creature a targeting tap MEANT, given the tile it actually landed on.
+ *
+ * Direct steer: *"I think the positioning aspect is hard. It feels hard to get
+ * a unit to the right spot."* The answer picked was to separate intent from
+ * footwork — tap a creature and the partner owns the positioning — which only
+ * works if tapping a creature is easy. On a phone, at this tile size, an exact
+ * hit is not easy, so a tap that lands one tile off a living creature still
+ * counts as meaning that creature.
+ *
+ * Deliberately does NOT snap for a terrain move: an axe swung at a tree is
+ * aimed at the ground by definition, and snapping to the Sandshrew standing
+ * next to it would swing at the Sandshrew instead. Same reasoning
+ * `commitMove` already applies to the player's own swing.
+ *
+ * Returns undefined when the tap was not near anything alive — that is a real
+ * tile order, not a failed creature order.
+ */
+const TARGET_SNAP_TILES = 1;
+function creatureNear(tile: Vec2, actorId: string, move: { terrainEffect?: unknown } | undefined): Agent | undefined {
+  if (move?.terrainEffect) return undefined;
+  const layer = viewLayer();
+  let best: Agent | undefined;
+  let bestDistance = Infinity;
+  for (const a of world.agents) {
+    if (a.id === actorId || a.alive === false || a.isEgg || a.layer !== layer) continue;
+    const d = reachBetween(a.pos, tile);
+    // A creature standing exactly on the tapped tile always wins outright; the
+    // snap is a tiebreak for near misses, never a way to steal an exact tap.
+    if (d > TARGET_SNAP_TILES || d >= bestDistance) continue;
+    best = a;
+    bestDistance = d;
+  }
+  return best;
+}
+
+function commitMove(agentId: string | undefined, moveId: string, target: Vec2, targetId?: string): void {
   if (agentId !== undefined) {
-    playerAct({ kind: "command", agentId, moveId, target });
+    playerAct({ kind: "command", agentId, moveId, target, targetId });
     return;
   }
   const me = findPlayer(world);
@@ -1171,6 +1212,18 @@ canvas.addEventListener("pointerdown", (event) => {
   pressTimer = window.setTimeout(() => {
     pressTimer = undefined;
     suppressNextClick = true;
+    // While aiming, a long-press is not "open the radial" — it is the precise
+    // half of option 3: aim at this exact SQUARE, no creature snapping. Direct
+    // steer: "tap a creature to say what you want done, long-press to say
+    // exactly where." Committed right here rather than arming a flag and
+    // waiting for the release, so the press itself is the whole gesture.
+    if (targeting) {
+      const { agentId, moveId } = targeting;
+      targeting = undefined;
+      targetPreviewTiles = [];
+      commitMove(agentId, moveId, tile);
+      return;
+    }
     openTileMenu(tile);
     // Capture, or the drag half of press-drag-release simply does not work:
     // the radial's wedges sit above the canvas, so once the menu is open every
@@ -1991,7 +2044,20 @@ function renderPartySection(): void {
     nameSpan.textContent = `${name}${orderLabel}`;
     const statusSpan = document.createElement("span");
     statusSpan.className = "herd-status-status";
-    statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    // A STALLED order outranks the ordinary behaviour line. Direct report,
+    // asked what a non-working order looked like: "stands still, never
+    // swings." It stalls on an urgent need — deliberately, so an order does
+    // not march a starving partner past water — but it used to say nothing at
+    // all, so a partner refusing its order and a partner idling looked
+    // identical. Measured: at hunger 0.29 it acted on 0 of 20 ticks.
+    const stall = a.commandedAction?.stalled;
+    if (stall) {
+      statusSpan.classList.add("stalled");
+      statusSpan.textContent =
+        stall === "hungry" ? "too hungry to fight" : stall === "thirsty" ? "too thirsty to fight" : "can't reach it";
+    } else {
+      statusSpan.textContent = a.fainted ? "fainted" : describeBehavior(world, a, { name: (k) => SPECIES[k]?.name ?? k });
+    }
     nameRow.append(nameSpan, statusSpan);
     const bar = document.createElement("span");
     bar.className = "herd-status-bar";
@@ -3059,9 +3125,20 @@ canvas.addEventListener("click", (event) => {
   // same way a real target-a-tile UI would consume the next click outright.
   if (targeting) {
     const target = tileAtPointer(event);
-    const { agentId, moveId } = targeting;
+    const { agentId, moveId, exactTile } = targeting;
     targeting = undefined;
     targetPreviewTiles = [];
+    // Option 3, the user's pick: a TAP means "do this to that creature" and
+    // the actor owns the footwork; a LONG-PRESS means "exactly this square".
+    // `exactTile` is set by the long-press handler, so this branch is the
+    // ordinary tap.
+    const actor = agentId ? world.agents.find((a) => a.id === agentId) : findPlayer(world);
+    const move = actor?.moves?.find((m) => m.id === moveId);
+    const snapped = exactTile ? undefined : creatureNear(target, actor?.id ?? "", move);
+    if (snapped) {
+      commitMove(agentId, moveId, { ...snapped.pos }, snapped.id);
+      return;
+    }
     // `playerAct` (not a bare `applyPlayerAction`) — issuing the order is
     // the player's own turn to spend, same as every other verb; the HUD
     // message comes from `outcomeText`'s own "command"/"attack" case.
@@ -3649,6 +3726,27 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     /** Run one radial verb against a named tile — the same entry point a wedge release uses. */
     runTileVerb(verb: TileVerb, x: number, y: number): void {
       runTileVerb(verb, { x, y });
+    },
+    /** Arm ally targeting exactly as picking a move row in the command menu does. */
+    beginAllyTargeting(agentId: string, moveId: string): void {
+      targeting = { agentId, moveId };
+    },
+    /**
+     * Resolve an armed target at a named tile, through the same creature-snap
+     * the real tap goes through. `exact` is the long-press path. Screen-space
+     * tile math is camera-dependent and has produced two worthless checks in
+     * this project already, so the hook takes tile coordinates.
+     */
+    commitTargetAt(x: number, y: number, exact = false): void {
+      if (!targeting) return;
+      const { agentId, moveId } = targeting;
+      targeting = undefined;
+      targetPreviewTiles = [];
+      const actor = agentId ? world.agents.find((a) => a.id === agentId) : findPlayer(world);
+      const move = actor?.moves?.find((m) => m.id === moveId);
+      const snapped = exact ? undefined : creatureNear({ x, y }, actor?.id ?? "", move);
+      if (snapped) commitMove(agentId, moveId, { ...snapped.pos }, snapped.id);
+      else commitMove(agentId, moveId, { x, y });
     },
     /** The dominant biome at a tile — the renderer picks ground art and scatter decals by this, so an art check needs to be able to ask for it. */
     biomeAt(x: number, y: number): string | undefined {
