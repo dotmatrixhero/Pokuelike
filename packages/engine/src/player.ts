@@ -1,6 +1,6 @@
 import type { Agent, PlayerAction, PlayerActionOutcome, World } from "./types.js";
 import { canStepTo } from "./movement.js";
-import { consume } from "./needs.js";
+import { consume, preemptOrder } from "./needs.js";
 import { setTile, tileAt } from "./world.js";
 import { FIRE_BURN_TICKS, nearFire } from "./fire.js";
 import { CONSUME_STOCK_AMOUNT, foodNutritionFactor, recordGrazing, thirstReliefFactor } from "./flora.js";
@@ -330,7 +330,23 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       const targetAgent =
         named ??
         world.agents.find((a) => a.id !== partner.id && a.alive !== false && !a.isEgg && a.layer === partner.layer && a.pos.x === action.target.x && a.pos.y === action.target.y);
-      partner.commandedAction = { moveId: action.moveId, target: targetAgent?.pos ?? action.target, targetAgentId: targetAgent?.id };
+      partner.commandedAction = { kind: "move", moveId: action.moveId, target: targetAgent?.pos ?? action.target, targetAgentId: targetAgent?.id };
+      return true;
+    }
+    case "commandConsume": {
+      // Direct ask: "You should be able to command a Pokémon to drink or
+      // eat." Same "bonded = currently following" gate `command` uses.
+      const partner = world.agents.find((a) => a.id === action.agentId && a.followingId === agent.id && a.alive !== false);
+      if (!partner) return false;
+      const tile = tileAt(world, partner.layer, action.target.x, action.target.y);
+      if (!tile) return false;
+      // Refuse at issue time rather than sending the partner across the map
+      // to stand on nothing. The engine still re-checks on arrival (the tile
+      // can be eaten out from under the order in the meantime) — this is the
+      // cheap early no, so the player gets told now.
+      const usable = action.need === "drink" ? tile.terrain === "water" : tile.terrain === "food" && (tile.stock ?? 0) > 0;
+      if (!usable) return false;
+      preemptOrder(partner, { kind: action.need, target: { ...action.target } });
       return true;
     }
     case "setStandingOrder": {
@@ -391,6 +407,28 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       // signature collapses for GIFT_GRACE_TICKS — no need to retreat for
       // the offering to actually get taken.
       agent.giftGraceUntil = world.tick + GIFT_GRACE_TICKS;
+      // Direct ask: "Drop where you are at but if targeted offer they
+      // immediately move to eat it." The drop is unchanged — it still lands
+      // on a free tile beside the player — but a named creature is sent to
+      // come and take it instead of the player putting food down and hoping.
+      //
+      // Two paths, because an offering is most often made to something that
+      // is NOT yet yours. A bonded partner gets a real `commandedAction`
+      // (it takes orders); anything else gets the existing `mirrorAction`
+      // "go eat" cue, which the ordinary needs tree carries out without
+      // pretending a wild creature obeys you.
+      if (action.targetId) {
+        const target = world.agents.find(
+          (a) => a.id === action.targetId && a.id !== agent.id && a.alive !== false && !a.isEgg && a.layer === agent.layer
+        );
+        if (target) {
+          if (target.followingId === agent.id) preemptOrder(target, { kind: "eat", target: { ...spot } });
+          else {
+            target.mirrorAction = "eat";
+            target.mirrorActionTicks = 0;
+          }
+        }
+      }
       return true;
     }
     case "drop": {

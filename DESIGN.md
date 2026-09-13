@@ -16235,3 +16235,133 @@ legible.
 - **"Catch-up after you stop: 40 turns" on all five seeds was my loop cap.**
   It waited for distance ≤ 1 while `FOLLOW_KEEP_DISTANCE` is 2, so it could
   never terminate. A flat identical number across five seeds is the tell.
+
+## The radial grows a second ring
+
+Four asks in one round, all pointing at the same thing — *"Its so hard to
+scroll menus."*
+
+`TileMenu` now carries an opaque `id` per wedge instead of a `TileVerb`, so
+the same radial can speak three alphabets: tile verbs on the first ring, and
+pack items or party members on the second. `openRing` lays a flat circle
+starting at 12 o'clock with **Cancel in the hub** — the first ring's hub is
+Look, a harmless default, but once you are a ring deep there is no harmless
+default left, so the hub becomes the way out. Direct ask: *"Just make it easy
+to use and cancel it if needed."*
+
+### Offer, targeted at a creature
+
+*"You should be able to target a Pokémon to offer directly from the radial
+menu. It'd be nice if we had the ability to choose the thing to offer also
+dynamically populating the radial."* And on what targeting should mean:
+*"Drop where you are at but if targeted offer they immediately move to eat
+it."*
+
+So the drop is unchanged — `freeTileBeside(player)`, same as it always was —
+and what `targetId` adds is that the named creature comes to it. Two paths,
+because an offering is most often made to something that is *not* yours yet:
+
+| target | what it gets |
+|---|---|
+| bonded partner | a real `commandedAction` eat order at the dropped tile |
+| anything else | the existing `mirrorAction: "eat"` cue the needs tree carries out |
+
+A wild creature does not take orders, and pretending otherwise would have
+been the kind of hidden mechanic this project keeps ruling against.
+
+**Live, seed 4242.** Verbs on a creature three tiles away:
+`["examine","moveHere","offer","attack","command"]`. The offer ring populated
+straight from the pack: `[{oran, "Oran Berry"}, {potato, "Potato"}]`. Picking
+Oran: inventory `oranx2 → oranx1`, a `food` tile appeared at Chebyshev
+distance 1 from the player, and the wild target came back with
+`mirrorAction: "eat"`. Offering a Potato to the bonded Machop instead gave it
+`{kind: "eat", target: {x:30,y:5}}`; twelve turns later it was standing on
+that tile with hunger 0.50 → 0.97 and the order cleared.
+
+`offer` is deliberately **not** gated on adjacency, unlike `pet`: the food
+lands beside you either way, so making the player walk up to something wary
+first would defeat the point of offering to it.
+
+### Command is a mode now, not a list
+
+*"maybe command needs to be like a select party member that opens second ring
+of your party. Selecting also auto switches to them in inspector. Then once
+selected you can long press to command just it to do stuff. So we separate out
+the command menu per party member."*
+
+The Command wedge opens a ring of your party. Picking one does not issue an
+order — it enters **command mode** for that partner, selects them in the
+inspector, and from then on every long-press opens *that partner's* order ring
+instead of your own radial. The ring is contextual to the pressed tile:
+
+| pressed tile | wedges |
+|---|---|
+| a foe | `Tackle, Body Slam, Low Kick, Go, Release` |
+| water | `Tackle, Body Slam, Low Kick, Go, Drink, Release` |
+| a food patch | `Tackle, Body Slam, Low Kick, Go, Eat, Release` |
+
+That is the actual fix for the complaint: the old command menu was every
+partner's every move in one scrolling list; this is one short ring per
+partner, filtered to what the tile can take.
+
+**A mode needs a visible state and a cheap exit,** so it has three: a chip
+over the map reading `Commanding Machop ✕`, a Release wedge in every order
+ring, and Esc. The chip re-renders every frame from `renderPartySection`, so
+a partner that dies or stops following takes the mode down with it rather
+than leaving the next long-press writing orders for a ghost. `commandingPartnerId`
+also clears on a world swap — same class of bug as the fog that did not reset
+across cave levels.
+
+**Live:** picking the partner set `commandingPartner = "machop-0"`,
+`selected() = "machop-0"`, `activeTab = "inspector"`, chip visible reading
+`Commanding Machop ✕`. Tapping the chip cleared all of it and the next
+long-press opened the ordinary radial again.
+
+### Eat and drink orders jump the queue
+
+*"You should be able to command a Pokémon to drink or eat."* — and on whether
+it should wait behind the hungry/thirsty stall: *"queue but make it jump to
+top of queue."*
+
+`CommandedAction` gained `kind` (absent means `"move"`, so any order in a
+restored autosave keeps working) and `next`, the order this one displaced.
+`preemptOrder` puts the consume order in front and hands the old one back
+when it finishes — so "go eat" pre-empts a fight order and the fight resumes
+without the player re-issuing it. **Depth one on purpose:** a second
+pre-empting order replaces the first and keeps the same tail, so the queue
+cannot grow into a stack of stale orders nobody remembers issuing.
+
+`applyConsumeOrder` runs **before** the `hasUrgentNeed` gate, which is the
+whole point: that gate exists so a fight order does not march a starving
+partner past water, but "go eat" *is* the player answering that stall.
+Gating it would make the one order that fixes a hungry partner the one order
+a hungry partner refuses. The unit test keeps the control beside it — the same
+hungry partner still stalls a fight order with `stalled: "hungry"`.
+
+Water is drunk from an adjacent tile, food eaten from the tile underfoot,
+matching what the ordinary needs tree and the player's own drink/eat already
+do. A new `OrderStall`, `"nothingThere"`, covers a partner sent to eat
+something that was gone by the time it arrived.
+
+### Look now opens the inspector on what you looked at
+
+*"when examining a non party unit it should auto open the inspector tab to
+them as well."* Look does both jobs: the modal for the snapshot, the
+inspector for the running read that stays there after the modal is dismissed.
+Only for someone who is not you — your own tile has the You tab for that.
+**Live:** selection went `player` → `machop-1` (the wild one) and the tab
+went `you` → `inspector`.
+
+### Two worthless probes, caught by their own controls
+
+Both in the same verification run, both mine:
+
+- The check read `api.selectedAgentId` — a field that was never on the debug
+  hook at all, so it came back `undefined` and the inspector assertion looked
+  like a failure. Added a real `selected()` getter.
+- It looked for `.panel-tab-btn.active`; this codebase's active class is
+  `playing`. An empty list read as "no tab is active".
+
+Neither was a bug in the feature. The tell in both cases was a *control* value
+that was also empty — `before` and `tabBefore` came back `null` too, which no
+working page could produce.

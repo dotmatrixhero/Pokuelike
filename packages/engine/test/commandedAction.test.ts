@@ -106,7 +106,7 @@ describe("player.ts: command case — issuing the order", () => {
     const s = partner("s", 6, 5, { moves: [CLAW] });
     world.agents.push(me, s);
     expect(applyPlayerAction(world, me, { kind: "command", agentId: "s", moveId: "test_claw", target: { x: 9, y: 5 } })).toBe(true);
-    expect(s.commandedAction).toEqual({ moveId: "test_claw", target: { x: 9, y: 5 } });
+    expect(s.commandedAction).toEqual({ kind: "move", moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: undefined });
   });
 
   it("fails when the target agent is not following the player", () => {
@@ -134,7 +134,7 @@ describe("player.ts: command case — issuing the order", () => {
     const target = prey("rat", 9, 5);
     world.agents.push(me, s, target);
     expect(applyPlayerAction(world, me, { kind: "command", agentId: "s", moveId: "test_claw", target: { x: 9, y: 5 } })).toBe(true);
-    expect(s.commandedAction).toEqual({ moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" });
+    expect(s.commandedAction).toEqual({ kind: "move", moveId: "test_claw", target: { x: 9, y: 5 }, targetAgentId: "rat" });
   });
 
   it("an empty target tile has no targetAgentId at all — a plain one-shot terrain-style order", () => {

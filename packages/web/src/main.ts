@@ -1,13 +1,13 @@
-import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
+import { EventLog, biomeWeightsAt, tickWorld, tickMacroWorld, tickHerds, setFocusedZone, tileAt, findRegion, randomSeed, type Agent, type MacroWorld, type SimEvent, type Vec2, type World, advancePlayerTurn, findPlayer, examine, describeBehavior, nextTravelStep, visibleAgentIds, harvestableAt, harvestLeft, carriedWeight, countOf, carryCapacityOf, TORCH_FUEL_TICKS, FOOD_MATERIAL_IDS, nearFire, useStairs, isAtExit, crossZoneEdge, findWalkableNear, resolveShape, type Direction, type PlayerAction, type PlayerActionOutcome, type Layer } from "@pokuelike/engine";
 import { createCaveRun, CAVE_RUN_DEPTH, createDemoWorld, createDemoMacroWorld, createPlayerDemoWorld, HUNT_RULES, LEVELING_CONTEXT, IMMIGRATION_CONTEXT, SCENARIO_SEED, SPECIES, itemName } from "@pokuelike/data";
 import { agentAtCanvasPos, drawEventPopups, drawMoveFlashes, drawTargetPreview, drawWorld, highlightBounds, setVisibleRect, TILE_SIZE, type RenderStyle } from "./renderer.js";
 import { eventNamesAgent, formatEvent, findMoveUsed } from "./eventText.js";
 import { herdDisplayName } from "./notableTitles.js";
 import { EventLogPanel } from "./eventLogPanel.js";
 import { clearSavedRun, loadRun, saveRun, type RestoredRun } from "./saveGame.js";
-import { describeRapport, examineTile, selfVerbsFor, trustStage, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
+import { describeRapport, examineTile, offerableFoodItems, selfVerbsFor, trustStage, updatePlayerVision, verbsForTile, withinMoveRange, type TileReport, type TileVerb } from "@pokuelike/engine";
 import { ActionLogPanel } from "./actionLog.js";
-import { TileMenu, menuItemsFor } from "./tileMenu.js";
+import { TileMenu, menuItemsFor, type TileMenuItem } from "./tileMenu.js";
 import { ChroniclePanel } from "./chroniclePanel.js";
 import { EventPopups } from "./eventPopups.js";
 import { MoveEffects } from "./moveEffects.js";
@@ -82,6 +82,7 @@ const canvas = document.getElementById("scene") as HTMLCanvasElement;
 const canvasWrap = document.getElementById("canvas-wrap") as HTMLElement;
 const ctx = canvas.getContext("2d")!;
 const mapAreaEl = document.getElementById("map-area") as HTMLElement;
+const commandingChipEl = document.getElementById("commanding-chip") as HTMLButtonElement;
 const seedInput = document.getElementById("seed-input") as HTMLInputElement;
 const loadSeedBtn = document.getElementById("load-seed") as HTMLButtonElement;
 const randomSeedBtn = document.getElementById("random-seed") as HTMLButtonElement;
@@ -484,6 +485,11 @@ function currentSeed(): number {
 function resetUiForNewWorld(): void {
   lastLoggedEventCount = 0;
   selectedAgentId = undefined;
+  // A new world (a cave level, the overworld) has different agents, so a
+  // partner id from the old one names nothing. Same class of bug as the fog
+  // that did not reset across levels.
+  commandingPartnerId = undefined;
+  commandingChipEl.hidden = true;
   autoCamera.reset();
 
   canvas.width = world.width * TILE_SIZE;
@@ -1132,6 +1138,18 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
       // The sentence still goes to the log, so the record of what you looked
       // at survives closing the modal.
       say(describeTile(report));
+      // Direct ask: "when examining a non party unit it should auto open the
+      // inspector tab to them as well." So Look on a creature does both jobs
+      // at once — the modal for the snapshot, the inspector for the running
+      // read that stays there after you dismiss it. Only for someone who is
+      // not you: looking at your own tile has the You tab for that already.
+      const looked = world.agents.find(
+        (a) => a.alive !== false && !a.isEgg && a.layer === viewLayer() && a.pos.x === tile.x && a.pos.y === tile.y && a.id !== me.id
+      );
+      if (looked) {
+        selectAgent(looked);
+        if (activeTab !== "inspector") selectTab("inspector", false);
+      }
       renderLookModal(tile, report);
       return;
     }
@@ -1166,15 +1184,194 @@ function runTileVerb(verb: TileVerb, tile: Vec2): void {
     case "useStairs":
       tryUseStairs();
       return;
-    case "attack":
+    case "offer":
+      openOfferRing(tile);
+      return;
     case "command":
-      // Both need a move picked, and the command menu is where moves live —
-      // but the tile is already decided, so it commits on the pick instead of
+      openPartyRing(tile);
+      return;
+    case "attack":
+      // Needs a move picked, and the command menu is where moves live — but
+      // the tile is already decided, so it commits on the pick instead of
       // asking for a target again.
       pendingTargetTile = tile;
       openCommandMenu();
       return;
   }
+}
+
+/** A cooked dish reads differently from a raw berry on the ground, and the ring is the only place the difference is visible before you commit. */
+function offerIcon(key: string): string {
+  return world.items?.[key]?.cooked !== undefined ? "🍲" : "🍓";
+}
+
+/** The creature standing on a tile, if any, excluding the player. */
+function occupantAt(tile: Vec2, excludeId: string): Agent | undefined {
+  return world.agents.find(
+    (a) => a.alive !== false && !a.isEgg && a.layer === viewLayer() && a.pos.x === tile.x && a.pos.y === tile.y && a.id !== excludeId
+  );
+}
+
+/**
+ * Second ring: which of the things you are carrying do you want to put down.
+ *
+ * Direct ask: *"It'd be nice if we had the ability to choose the thing to
+ * offer also dynamically populating the radial."* The wedges ARE the pack,
+ * filtered to what the `offer` action would actually accept — so the ring can
+ * never show a berry the action then refuses.
+ */
+function openOfferRing(tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  const target = occupantAt(tile, me.id);
+  const keys = offerableFoodItems(world, me);
+  if (keys.length === 0) {
+    say("You have nothing to offer.");
+    return;
+  }
+  const name = target ? SPECIES[target.species]?.name ?? target.species : undefined;
+  const items = keys.map((key) => ({
+    id: key,
+    label: itemName(key),
+    icon: offerIcon(key),
+    hint: name ? `Put ${itemName(key)} down for ${name}` : `Put ${itemName(key)} down`,
+  }));
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (key) => {
+    playerAct({ kind: "offer", itemKey: key, targetId: target?.id });
+  });
+}
+
+/**
+ * Second ring: which partner are you giving orders to.
+ *
+ * Direct ask: *"maybe command needs to be like a select party member that
+ * opens second ring of your party. Selecting also auto switches to them in
+ * inspector. Then once selected you can long press to command just it to do
+ * stuff. So we separate out the command menu per party member."*
+ *
+ * Picking one does not issue an order — it puts you in command mode for that
+ * partner (`commandingPartnerId`), and every long-press after that opens
+ * THAT partner's own order ring (`openOrderRing`) instead of your own radial.
+ * Which is the fix for the actual complaint, *"Its so hard to scroll menus"*:
+ * the old command menu was every partner's every move in one scrolling list,
+ * and this is one short ring per partner.
+ */
+function openPartyRing(tile: Vec2): void {
+  const me = findPlayer(world);
+  if (!me) return;
+  const party = bondedPartnersInZone(me);
+  if (party.length === 0) {
+    say("Nobody is following you.");
+    return;
+  }
+  const items = party.map((p) => {
+    const name = SPECIES[p.species]?.name ?? p.species;
+    return { id: p.id, label: name, icon: "🐾", hint: `Give ${name} orders` };
+  });
+  if (commandingPartnerId) {
+    items.push({ id: RELEASE_ID, label: "Release", icon: "✋", hint: "Stop giving orders", destructive: true } as (typeof items)[number]);
+  }
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (id) => {
+    if (id === RELEASE_ID) {
+      setCommandingPartner(undefined);
+      return;
+    }
+    setCommandingPartner(id);
+  });
+}
+
+/**
+ * Command mode. `undefined` means off — the radial behaves exactly as it did
+ * before this existed, which is what makes the mode safe to be in: there is
+ * one visible chip saying whose orders you are writing, and one tap to leave.
+ */
+let commandingPartnerId: string | undefined;
+const RELEASE_ID = "__release";
+const CANCEL_ITEM: TileMenuItem = { id: "__cancel", label: "Cancel", icon: "✕", hint: "Release to cancel", destructive: true };
+
+function setCommandingPartner(id: string | undefined): void {
+  commandingPartnerId = id;
+  const partner = id ? world.agents.find((a) => a.id === id) : undefined;
+  if (partner) {
+    // "Selecting also auto switches to them in inspector."
+    selectAgent(partner);
+    if (activeTab !== "inspector") selectTab("inspector", false);
+    say(`Commanding ${SPECIES[partner.species]?.name ?? partner.species}. Long-press a tile to order.`);
+  } else if (id === undefined) {
+    say("No longer giving orders.");
+  }
+  renderCommandingChip();
+}
+
+/** The one visible "you are in command mode" indicator, and the one-tap way out. */
+function renderCommandingChip(): void {
+  const partner = commandingPartnerId ? world.agents.find((a) => a.id === commandingPartnerId && a.alive !== false) : undefined;
+  if (!partner || partner.followingId !== findPlayer(world)?.id) {
+    // The partner died, wandered off, or stopped following — leaving the mode
+    // silently armed would make the next long-press order a ghost.
+    if (commandingPartnerId && !partner) commandingPartnerId = undefined;
+    commandingChipEl.hidden = true;
+    return;
+  }
+  commandingChipEl.hidden = false;
+  commandingChipEl.textContent = `Commanding ${SPECIES[partner.species]?.name ?? partner.species} ✕`;
+}
+
+/**
+ * The per-partner order ring: what this one partner can be told to do about
+ * the tile you just pressed. Its own moves, walk there, and — direct ask,
+ * *"You should be able to command a Pokémon to drink or eat"* — eat or drink
+ * there when there is something to consume.
+ */
+function openOrderRing(partner: Agent, tile: Vec2): void {
+  const name = SPECIES[partner.species]?.name ?? partner.species;
+  const report = examineTile(world, viewLayer(), tile);
+  const items: TileMenuItem[] = [];
+  for (const move of partner.moves ?? []) {
+    if (move.utilityMove && !move.terrainEffect) continue; // self-buffs have no tile to aim at
+    const cooling = (partner.moveCooldowns?.[move.id] ?? 0) > 0;
+    items.push({
+      id: `move:${move.id}`,
+      label: move.name,
+      icon: cooling ? "⏳" : "⚔️",
+      hint: cooling ? `${move.name} is not ready` : `${name}: ${move.name} here`,
+    });
+  }
+  if (report?.walkable) items.push({ id: "go", label: "Go", icon: "👣", hint: `Send ${name} here` });
+  if (report?.terrain === "food" && (tileAt(world, viewLayer(), tile.x, tile.y)?.stock ?? 0) > 0) {
+    items.push({ id: "eat", label: "Eat", icon: "🍓", hint: `${name} eats here` });
+  }
+  if (report?.terrain === "water") items.push({ id: "drink", label: "Drink", icon: "💧", hint: `${name} drinks here` });
+  items.push({ id: RELEASE_ID, label: "Release", icon: "✋", hint: "Stop giving orders", destructive: true });
+
+  tileMenu.openRing(tileScreenPos(tile), items, CANCEL_ITEM, (id) => {
+    if (id === RELEASE_ID) {
+      setCommandingPartner(undefined);
+      return;
+    }
+    if (id === "eat" || id === "drink") {
+      playerAct({ kind: "commandConsume", agentId: partner.id, need: id, target: tile });
+      return;
+    }
+    if (id === "go") {
+      // No engine order for "just walk there" — the existing standing-order
+      // machinery is about behaviour modes, not destinations. Sending the
+      // partner with its own move aimed at the tile would make it swing at
+      // the ground, so this uses the follow leash instead: clear any order
+      // and it comes back to heel, which is the honest version of what the
+      // engine can actually do today. Noted in TODO.md.
+      partner.commandedAction = undefined;
+      say(`${name} falls back in beside you.`);
+      return;
+    }
+    const moveId = id.slice("move:".length);
+    if ((partner.moveCooldowns?.[moveId] ?? 0) > 0) {
+      say(`${name}'s ${partner.moves?.find((m) => m.id === moveId)?.name ?? "move"} is not ready yet.`);
+      return;
+    }
+    const foe = occupantAt(tile, partner.id);
+    commitMove(partner.id, moveId, tile, foe?.id);
+  });
 }
 
 /**
@@ -1195,6 +1392,16 @@ const SELF_VERBS: ReadonlySet<TileVerb> = new Set<TileVerb>(["gather", "drink", 
 function openTileMenu(tile: Vec2): void {
   const me = findPlayer(world);
   if (!me || playerDead || playerWon) return;
+  // Command mode: every long-press is an order to the selected partner, not
+  // an action of your own. "Then once selected you can long press to command
+  // just it to do stuff." The chip on screen says whose, and Release is both
+  // a wedge in this ring and a tap on the chip.
+  const commanding = commandingPartnerId ? world.agents.find((a) => a.id === commandingPartnerId && a.alive !== false && a.followingId === me.id) : undefined;
+  if (commandingPartnerId && !commanding) setCommandingPartner(undefined); // it died or wandered off
+  if (commanding) {
+    openOrderRing(commanding, tile);
+    return;
+  }
   const layer = viewLayer();
   // Top half: what you can do TO that tile.
   const targeted = verbsForTile(world, me, layer, tile).filter((v) => v !== "examine" && !SELF_VERBS.has(v));
@@ -1207,7 +1414,7 @@ function openTileMenu(tile: Vec2): void {
   const selfVerbs = selfVerbsFor(world, me, layer);
   if (targeted.length === 0 && selfVerbs.length === 0) {
     // Nothing but Look — still worth opening, since Look is the centre.
-    tileMenu.open(tileScreenPos(tile), [], [], menuItemsFor(["examine"])[0]!, (verb) => runTileVerb(verb, tile));
+    tileMenu.open(tileScreenPos(tile), [], [], menuItemsFor(["examine"])[0]!, (id) => runTileVerb(id as TileVerb, tile));
     return;
   }
   tileMenu.open(
@@ -1215,7 +1422,7 @@ function openTileMenu(tile: Vec2): void {
     menuItemsFor(targeted),
     menuItemsFor(selfVerbs),
     menuItemsFor(["examine"])[0]!,
-    (verb) => runTileVerb(verb, tile)
+    (id) => runTileVerb(id as TileVerb, tile)
   );
 }
 
@@ -1777,6 +1984,12 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
       return ok ? `You signal ${name}.` : `${name} won't take that order.`;
     }
+    case "commandConsume": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      if (ok) return action.need === "drink" ? `${name} goes to drink.` : `${name} goes to eat.`;
+      return action.need === "drink" ? `There is no water there for ${name}.` : `There is nothing there for ${name} to eat.`;
+    }
     case "setStandingOrder": {
       const partner = world.agents.find((a) => a.id === action.agentId);
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
@@ -2115,6 +2328,10 @@ function combatTouchesParty(events: readonly SimEvent[], me: Agent): boolean {
 function renderPartySection(): void {
   const me = findPlayer(world);
   const followers = me ? bondedPartnersInZone(me) : [];
+  // Runs every frame, which is exactly what the chip needs: a partner that
+  // dies or stops following mid-turn has to take the mode down with it, or
+  // the next long-press writes an order for someone who is not there.
+  renderCommandingChip();
   partyCountEl.textContent = followers.length ? `(${followers.length})` : "";
   partyBodyEl.replaceChildren();
   if (followers.length === 0) {
@@ -2317,6 +2534,12 @@ function closeCommandMenu(): void {
   pendingTargetTile = undefined;
 }
 commandMenuCloseBtn.addEventListener("click", closeCommandMenu);
+// Tapping the chip is the other way out of command mode — the same thing the
+// ring's Release wedge does, reachable without opening a ring at all.
+commandingChipEl.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setCommandingPartner(undefined);
+});
 
 function cancelTargeting(): void {
   if (!targeting) return;
@@ -2584,6 +2807,12 @@ window.addEventListener("keydown", (e) => {
   }
   if (targeting) {
     if (e.key === "Escape") cancelTargeting();
+    return;
+  }
+  // Esc leaves command mode before it does anything else — the mode changes
+  // what every other input means, so it has to be the first thing Esc undoes.
+  if (commandingPartnerId && e.key === "Escape") {
+    setCommandingPartner(undefined);
     return;
   }
   cancelTravel();
@@ -3842,6 +4071,32 @@ if ((import.meta as { env?: { DEV?: boolean } }).env?.DEV) {
     /** Arm ally targeting exactly as picking a move row in the command menu does. */
     beginAllyTargeting(agentId: string, moveId: string): void {
       targeting = { agentId, moveId };
+    },
+    /** Who the inspector is currently showing, or undefined for nobody. */
+    selected(): string | undefined {
+      return selectedAgentId;
+    },
+    /** The panel tab currently up. The active class is `playing`, not `active` — a check that guessed `active` read an empty list and looked like a failure. */
+    activeTab(): string {
+      return activeTab;
+    },
+    /** Whose orders a long-press is currently writing, or undefined outside command mode. */
+    commandingPartner(): string | undefined {
+      return commandingPartnerId;
+    },
+    /** The wedges currently on screen, in ring order — label and id, the two things a check cares about. */
+    wedges(): { id: string; label: string }[] {
+      return Array.from(document.querySelectorAll("#tile-menu .tile-menu-wedge")).map((el) => ({
+        id: (el as HTMLElement).dataset.verb ?? "",
+        label: (el.querySelector(".tile-menu-label") as HTMLElement | null)?.textContent ?? "",
+      }));
+    },
+    /** Commit a wedge by id — the same entry point a click on it uses. */
+    pickWedge(id: string): boolean {
+      const el = document.querySelector(`#tile-menu .tile-menu-wedge[data-verb="${id}"]`) as HTMLElement | null;
+      if (!el) return false;
+      el.click();
+      return true;
     },
     /** The tiles the targeting overlay would light up with the cursor on a named tile — the same call a real pointermove makes. */
     previewAt(x: number, y: number): Vec2[] {

@@ -654,7 +654,40 @@ export type OrderStall =
   /** Below `hasUrgentNeed`'s thirst floor. */
   | "thirsty"
   /** No path to anywhere the move would reach — walled off, or the way is blocked. */
-  | "unreachable";
+  | "unreachable"
+  /** An eat/drink order with nothing left to consume where it was sent. */
+  | "nothingThere";
+
+/**
+ * A standing order a bonded partner is carrying out. See
+ * `Agent.commandedAction` for the full story; this is the shape.
+ *
+ * `kind` is optional and **absent means `"move"`** — every order written
+ * before eat/drink existed, including any sitting in a restored autosave,
+ * is a move order and must keep working without a migration.
+ */
+export type CommandedAction = {
+  kind?: "move" | "eat" | "drink";
+  /** The move to resolve. Only meaningful for a `"move"` order. */
+  moveId?: string;
+  target: Vec2;
+  targetAgentId?: string;
+  stalled?: OrderStall;
+  /**
+   * The order this one displaced, resumed the moment this one finishes.
+   *
+   * Direct ask, on whether an eat/drink order should override the
+   * hungry/thirsty stall or wait behind it: *"queue but make it jump to top
+   * of queue."* So "go eat" pre-empts the fight order rather than replacing
+   * it, and the fight resumes once the partner has eaten — you do not have
+   * to re-issue it.
+   *
+   * **Depth one on purpose.** A second pre-empting order displaces the first
+   * pre-empting one and keeps the same tail, so the queue cannot grow into a
+   * stack of stale orders the player has forgotten issuing.
+   */
+  next?: CommandedAction;
+};
 
 export type PlayerAction =
   | { kind: "move"; dx: -1 | 0 | 1; dy: -1 | 0 | 1 }
@@ -689,8 +722,16 @@ export type PlayerAction =
    * you, for whoever comes. `itemKey`, when given, names which carried
    * food material to offer — same "distinct crop items" reasoning as
    * `eat`'s own `itemKey`; omitted keeps the old "first one found" pick.
+   *
+   * `targetId` names a creature the offering is being made TO. Direct ask:
+   * *"You should be able to target a Pokémon to offer directly from the
+   * radial menu"* — and, on what that should mean mechanically: *"Drop where
+   * you are at but if targeted offer they immediately move to eat it."* So
+   * the food still goes down beside the player exactly as before; what
+   * `targetId` adds is that the named creature is sent to come and take it,
+   * rather than the player putting food down and hoping.
    */
-  | { kind: "offer"; itemKey?: string }
+  | { kind: "offer"; itemKey?: string; targetId?: string }
   /**
    * Direct ask: "I want the ability to pet a Pokémon to try and gain rapport.
    * Need to be in 1unit range, Pokémon can react poorly, walk away, or even
@@ -780,6 +821,19 @@ export type PlayerAction =
    * standing on it — so an order issued without `targetId` behaves as before.
    */
   | { kind: "command"; agentId: string; moveId: string; target: Vec2; targetId?: string }
+  /**
+   * Direct ask: *"You should be able to command a Pokémon to drink or eat."*
+   * Sends a bonded partner to a specific tile to consume there — the tile the
+   * player picked, not the nearest one the needs tree would have found on its
+   * own, because the point is that the player saw the pond and the partner
+   * did not.
+   *
+   * Pre-empts whatever the partner was already doing rather than replacing
+   * it (`preemptOrder`, needs.ts): *"queue but make it jump to top of
+   * queue."* And unlike every other order it is NOT gated on `hasUrgentNeed`
+   * — that gate is the stall this order exists to answer.
+   */
+  | { kind: "commandConsume"; agentId: string; need: "eat" | "drink"; target: Vec2 }
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;
@@ -1111,7 +1165,7 @@ export interface Agent {
    * living agent — a terrain-effect order like felling a tree), behavior
    * is unchanged: one resolution and done.
    */
-  commandedAction?: { moveId: string; target: Vec2; targetAgentId?: string; stalled?: OrderStall };
+  commandedAction?: CommandedAction;
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;

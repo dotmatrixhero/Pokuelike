@@ -1,6 +1,7 @@
 import type { Agent, Layer, TerrainKind, Vec2, World } from "./types.js";
 import { tileAt } from "./world.js";
 import { harvestLeft, harvestableAt } from "./harvest.js";
+import { offerableFoodItems } from "./inventory.js";
 import { isLightSource } from "./vision.js";
 import type { MaterialId } from "./harvest.js";
 
@@ -118,7 +119,7 @@ export function examineTile(world: World, layer: Layer, pos: Vec2): TileReport |
  * `examine` is always present and always free — it costs no turn, which is
  * what makes looking before you commit a real option rather than a tax.
  */
-export type TileVerb = "examine" | "moveHere" | "gather" | "drink" | "eat" | "pet" | "attack" | "command" | "loot" | "butcher" | "useStairs";
+export type TileVerb = "examine" | "moveHere" | "gather" | "drink" | "eat" | "pet" | "offer" | "attack" | "command" | "loot" | "butcher" | "useStairs";
 
 /** Chebyshev distance — this game's adjacency, diagonals included. */
 function reach(a: Vec2, b: Vec2): number {
@@ -152,6 +153,12 @@ export function verbsForTile(world: World, agent: Agent, layer: Layer, pos: Vec2
   // a living creature you could reach out and touch. A verb that is always
   // present and usually fails is worse than no verb.
   if (adjacent && report.occupantId && report.occupantId !== agent.id) verbs.push("pet");
+  // Direct ask: "You should be able to target a Pokémon to offer directly
+  // from the radial menu." Unlike `pet` this is NOT gated on adjacency — the
+  // food goes down beside the PLAYER either way ("drop where you are at"),
+  // and the creature comes to it, so making you walk up to something wary
+  // first would defeat the point of offering.
+  if (report.occupantId && report.occupantId !== agent.id && offerableFoodItems(world, agent).length > 0) verbs.push("offer");
   const terrainWorkable = TERRAIN_WORKABLE.has(report.terrain);
   if ((report.occupantId && report.occupantId !== agent.id) || (adjacent && !here) || (here && terrainWorkable)) verbs.push("attack");
   if (world.agents.some((a) => a.followingId === agent.id && a.alive !== false && a.layer === agent.layer)) verbs.push("command");

@@ -1,4 +1,4 @@
-import type { Agent, BehaviorKind, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
+import type { Agent, BehaviorKind, CommandedAction, HuntRules, Layer, Needs, TerrainKind, Tile, Vec2, World } from "./types.js";
 import { otherLayers, setTile, tileAt } from "./world.js";
 import { canStepTo, stepToward } from "./movement.js";
 import { stepAlongPath } from "./pathfinding.js";
@@ -1682,9 +1682,104 @@ export function applyPartyCatchUpStep(world: World, agent: Agent): boolean {
 /** Direct follow-up report: "ally doesn't seem to engage much in combat... until i like walk away they should follow or something." How far the commanding player can wander before a standing fight order stands down back to ordinary following. */
 export const COMMAND_DISENGAGE_DISTANCE = 10;
 
+/**
+ * Ends the current order and resumes whatever it displaced. Every place that
+ * used to write `agent.commandedAction = undefined` goes through here, so a
+ * pre-empting eat/drink order hands the fight back the moment it is done —
+ * direct ask: *"queue but make it jump to top of queue."* With no `next` it
+ * is exactly the old behaviour, a plain clear.
+ */
+function finishOrder(agent: Agent): void {
+  agent.commandedAction = agent.commandedAction?.next;
+}
+
+/**
+ * Puts `order` at the front, keeping whatever was already running behind it.
+ * Used by `player.ts`'s command case for eat/drink orders. A second
+ * pre-empting order replaces the first rather than stacking — see
+ * `CommandedAction.next` for why the queue is one deep.
+ */
+export function preemptOrder(agent: Agent, order: CommandedAction): void {
+  const current = agent.commandedAction;
+  order.next = current?.next !== undefined && (current.kind === "eat" || current.kind === "drink") ? current.next : current;
+  agent.commandedAction = order;
+}
+
+/**
+ * The eat/drink half of a standing order: walk to the tile the player picked
+ * and consume there.
+ *
+ * Deliberately NOT gated on `hasUrgentNeed`, unlike every other order. That
+ * gate exists so a fight order does not march a starving partner past water —
+ * but "go eat" IS the player answering that stall, so gating it on the stall
+ * would make the one order that fixes a hungry partner the one order a hungry
+ * partner refuses.
+ */
+function applyConsumeOrder(
+  world: World,
+  agent: Agent,
+  cmd: CommandedAction,
+  log: EventLog | undefined,
+  ctx: LevelingContext | undefined,
+  rng: () => number
+): boolean {
+  const wantsWater = cmd.kind === "drink";
+  const distance = Math.max(Math.abs(agent.pos.x - cmd.target.x), Math.abs(agent.pos.y - cmd.target.y));
+
+  // Water is drunk from an ADJACENT tile (you stand on the bank), food is
+  // eaten from the tile you stand on. Same reach the ordinary needs tree and
+  // the player's own drink/eat already use.
+  const arrived = wantsWater ? distance <= 1 : distance === 0;
+  if (!arrived) {
+    if (agent.behavior !== "seekWater" && agent.behavior !== "seekFood") {
+      logBehaviorChange(log, world, agent, wantsWater ? "seekWater" : "seekFood");
+      agent.behavior = wantsWater ? "seekWater" : "seekFood";
+    }
+    const before = agent.pos;
+    // Real BFS pathing, not greedy stepToward — `applyMirroredAction` paid for
+    // this lesson live: a greedy walker oscillates around an obstacle cluster
+    // a stone's throw from the water it was sent to.
+    agent.pos = stepAlongPath(world, agent, cmd.target);
+    cmd.stalled = before.x === agent.pos.x && before.y === agent.pos.y ? "unreachable" : undefined;
+    return true;
+  }
+
+  cmd.stalled = undefined;
+  const tile = tileAt(world, agent.layer, cmd.target.x, cmd.target.y);
+  if (wantsWater) {
+    if (tile?.terrain !== "water") {
+      // Sent to drink somewhere with no water left — say so rather than
+      // standing there looking healthy. Same defect `OrderStall` was added for.
+      cmd.stalled = "nothingThere";
+      return false;
+    }
+    consume(agent.needs, "seekWater");
+    log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "thirst" });
+    finishOrder(agent);
+    return true;
+  }
+
+  if (tile?.terrain !== "food" || (tile.stock ?? 0) <= 0) {
+    cmd.stalled = "nothingThere";
+    return false;
+  }
+  consume(agent.needs, "seekFood", foodNutritionFactor(tile));
+  const thirstRelief = thirstReliefFactor(tile);
+  if (thirstRelief > 0) consume(agent.needs, "seekWater", thirstRelief);
+  healFromCookedFood(world, agent, tile.flavor);
+  tile.stock = Math.max(0, (tile.stock ?? 0) - CONSUME_STOCK_AMOUNT);
+  recordGrazing(tile);
+  grantExp(world, agent, EXP_ON_CONSUME, ctx, log, rng);
+  log?.record({ kind: "consumed", tick: world.tick, agentId: agent.id, species: agent.species, layer: agent.layer, pos: agent.pos, need: "hunger" });
+  finishOrder(agent);
+  return true;
+}
+
 export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   const cmd = agent.commandedAction;
   if (!cmd) return false;
+  // Before the urgent-need gate, on purpose — see `applyConsumeOrder`.
+  if (cmd.kind === "eat" || cmd.kind === "drink") return applyConsumeOrder(world, agent, cmd, log, ctx, rng);
   // The refusal below is deliberate — an order waits rather than marching a
   // starving partner past water — but it used to be SILENT, which is the
   // actual defect. The partner stood there, the order stayed queued looking
@@ -1699,14 +1794,14 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   if (commander) {
     const leash = Math.max(Math.abs(commander.pos.x - agent.pos.x), Math.abs(commander.pos.y - agent.pos.y));
     if (leash > COMMAND_DISENGAGE_DISTANCE) {
-      agent.commandedAction = undefined;
+      finishOrder(agent);
       return false; // falls through to applyFollowing this same tick — "walk away" ends the fight, doesn't strand the follower
     }
   }
 
   const move = agent.moves?.find((m) => m.id === cmd.moveId);
   if (!move) {
-    agent.commandedAction = undefined;
+    finishOrder(agent);
     return false;
   }
 
@@ -1717,7 +1812,7 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   if (cmd.targetAgentId) {
     defender = world.agents.find((a) => a.id === cmd.targetAgentId && a.alive !== false);
     if (!defender) {
-      agent.commandedAction = undefined; // the target died (or is otherwise gone) — order complete, not a bug
+      finishOrder(agent); // the target died (or is otherwise gone) — order complete, not a bug
       return false;
     }
   }
@@ -1766,10 +1861,10 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
     // hit — a tracked order only ends (checked at the top, next tick) once
     // the defender is actually dead or the player has walked away. An
     // untracked one-shot order still clears immediately, unchanged.
-    if (!cmd.targetAgentId) agent.commandedAction = undefined;
+    if (!cmd.targetAgentId) finishOrder(agent);
   } else {
     applyTerrainEffectAt(world, agent, agent.layer, cmd.target, move);
-    agent.commandedAction = undefined; // no living target at all (a terrain order, e.g. felling a tree) — unchanged, one-shot
+    finishOrder(agent); // no living target at all (a terrain order, e.g. felling a tree) — unchanged, one-shot
   }
   return true;
 }

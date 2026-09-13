@@ -385,6 +385,35 @@
       #auto-cam-badge .auto-cam-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff6b6b; box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.18); flex: 0 0 auto; }
       #auto-cam-status { font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+      /* Command mode's indicator. Bottom-centre over the map, clear of the
+         auto-cam badge top-left and the player HUD, and big enough to be a
+         real tap target since tapping it is the way out of the mode. */
+      #commanding-chip {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        bottom: 14px;
+        z-index: 21;
+        background: rgba(94, 62, 20, 0.94);
+        border: 1px solid #d8a441;
+        color: #ffe6b0;
+        border-radius: 20px;
+        padding: 8px 14px;
+        font-size: 12.5px;
+        font-weight: 600;
+        cursor: pointer;
+        max-width: min(340px, 80%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #commanding-chip[hidden] { display: none; }
+
+      /* A wedge (or hub) that undoes rather than does. Cancel and Release read
+         apart from the choices around them so neither is picked by accident. */
+      .tile-menu-wedge.destructive { border-color: #b4553f; color: #ffc9bc; }
+      .tile-menu-hub.destructive { color: #ffc9bc; }
+
       /* Play mode's on-map control cluster. Used to be a 230px panel of
          readouts; the readouts moved to the sidebar's You panel and what is
          left is buttons, so it shrink-wraps its contents instead. */
@@ -1441,6 +1470,14 @@
           <div id="canvas-wrap">
             <canvas id="scene"></canvas>
           </div>
+
+          <!--
+            Command mode's one visible indicator. It has to live over the MAP,
+            not in the sidebar: the thing it changes is what a long-press on
+            the map does, so it belongs where the long-press happens. Tapping
+            it releases — the same thing the ring's Release wedge does.
+          -->
+          <button id="commanding-chip" type="button" hidden></button>
 
           <div id="auto-cam-badge" hidden>
             <span class="auto-cam-dot"></span>

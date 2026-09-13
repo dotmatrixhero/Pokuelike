@@ -12699,19 +12699,33 @@ rapport and all that for a unit."*
       `clear` went to `min: 1` along with everything else that picks a tile.
       Minor; flagged in case it reads wrong in play.
 
-### Next round — asked for mid-turn, not yet started
+### The radial's second ring (this round)
 
-- [ ] **Offer from the radial, targeted at a Pokémon.** *"You should be able
-      to target a Pokémon to offer directly from the radial menu."*
-- [ ] **The radial populates with what you can offer.** *"It'd be nice if we
-      had the ability to choose the thing to offer also dynamically populating
-      the radial."*
-- [ ] **Commanding becomes a targetable radial, not a scrolling menu.** *"Can
-      we make that some kind of target able radial type ux? Its so hard to
-      scroll menus."* — this supersedes the current command-menu list for
-      partner moves.
-- [ ] **Command a partner to drink or eat.** *"You should be able to command a
-      Pokémon to drink or eat."* Note this interacts with `hasUrgentNeed`:
-      today a hungry partner refuses orders and shows `OrderStall`; an explicit
-      eat/drink order is the player answering that stall, so it must not be
-      gated by it.
+- [x] **Offer from the radial, targeted at a creature.** Food still drops
+      beside YOU; the target comes to it. Bonded partner gets a real eat
+      order, anything else gets the existing `mirrorAction` cue.
+- [x] **The offer ring populates from the pack** — `offerableFoodItems`,
+      filtered to exactly what the `offer` action would accept.
+- [x] **Command is a mode, not a scrolling list.** Command wedge → ring of
+      your party → that partner is selected in the inspector and every
+      long-press after opens ITS order ring, filtered to the pressed tile.
+- [x] **Eat/drink orders**, pre-empting whatever was running and handing it
+      back when done. Not gated on `hasUrgentNeed` — that gate is the stall
+      this order answers.
+- [x] **Look selects the unit in the inspector** and switches to that tab.
+
+### Still open from the radial round
+
+- [ ] **"Go" in the order ring is not really "go there".** There is no engine
+      order for "walk to this tile" — `commandedAction` is about a move, and
+      `standingOrder` is about behaviour modes. Today the wedge just clears
+      the order so the partner falls back to heel, and says so. A real
+      `commandMoveTo` is the honest fix.
+- [ ] The order ring lists moves on cooldown with an hourglass and refuses
+      them on tap, rather than hiding them. Kept visible so the ring does not
+      reshuffle under a thumb between turns — worth a look in play.
+- [ ] Command mode swallows your OWN actions while it is on: you Release to
+      act yourself. Three exits (chip, Release wedge, Esc) and a permanent
+      chip, but it is still a mode, and modes are worth re-checking in play.
+- [ ] `bondedPartnersInZone` with a large party would make a crowded ring.
+      Fine at 1–4; past ~6 wedges a radial stops being readable.

@@ -1,4 +1,5 @@
-import type { Agent } from "./types.js";
+import type { Agent, World } from "./types.js";
+import { FOOD_MATERIAL_IDS } from "./harvest.js";
 
 /**
  * Stacks — ROADMAP.md M5. One stack per item key, stable order (first
@@ -37,4 +38,25 @@ export function removeItem(agent: Agent, itemKey: string, count: number): boolea
 /** True when every `{itemKey, count}` in `needs` is carried. */
 export function hasAll(agent: Agent, needs: readonly { itemKey: string; count: number }[]): boolean {
   return needs.every((n) => countOf(agent, n.itemKey) >= n.count);
+}
+
+/**
+ * Every distinct food item this agent is carrying that could be set down as
+ * an offering — raw crops first (the order `FOOD_MATERIAL_IDS` declares),
+ * then cooked dishes in pack order.
+ *
+ * Exists because the radial now asks the player WHICH one. Direct ask: *"It'd
+ * be nice if we had the ability to choose the thing to offer also dynamically
+ * populating the radial."* `player.ts`'s `offer` case has always been able to
+ * take a specific `itemKey`; what was missing was anything that could answer
+ * "so what are my choices". Same predicate that case uses to accept a key, so
+ * the ring can never show something the action would then refuse.
+ */
+export function offerableFoodItems(world: World, agent: Agent): string[] {
+  const keys: string[] = [];
+  for (const id of FOOD_MATERIAL_IDS) if (countOf(agent, id) > 0) keys.push(id);
+  for (const stack of agent.inventory ?? []) {
+    if (world.items?.[stack.itemKey]?.cooked !== undefined && !keys.includes(stack.itemKey)) keys.push(stack.itemKey);
+  }
+  return keys;
 }
