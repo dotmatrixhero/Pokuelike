@@ -1634,6 +1634,16 @@ export function applyPartyCatchUpStep(world: World, agent: Agent): boolean {
 
   const cmd = agent.commandedAction;
   if (cmd) {
+    // A posted partner walks to its post at party pace too — being told to go
+    // somewhere and then trudging is the same complaint the pace clock exists
+    // to fix. Standing ON the post spends nothing.
+    if (cmd.kind === "goto") {
+      if (agent.pos.x === cmd.target.x && agent.pos.y === cmd.target.y) return false;
+      const before = agent.pos;
+      agent.pos = stepAlongPath(world, agent, cmd.target);
+      return before.x !== agent.pos.x || before.y !== agent.pos.y;
+    }
+    if (cmd.kind === "eat" || cmd.kind === "drink") return false; // the consume order has its own walk; keep one mover
     const move = agent.moves?.find((m) => m.id === cmd.moveId);
     if (!move) return false;
     const defender = cmd.targetAgentId ? world.agents.find((a) => a.id === cmd.targetAgentId && a.alive !== false) : undefined;
@@ -1775,6 +1785,42 @@ function applyConsumeOrder(
   return true;
 }
 
+/**
+ * "Go and stand there." Walks to the tile, then HOLDS it.
+ *
+ * Returning true while standing still is the point, not a quirk: it is what
+ * stops `applyFollowing` running, and without it the partner would arrive and
+ * immediately walk back to heel — a send you cannot tell from no send at all.
+ *
+ * The leash is deliberately not applied while it is still walking. Measuring
+ * it from the commander would cap how far you can post a partner at
+ * `COMMAND_DISENGAGE_DISTANCE`, which is exactly the send worth making. Once
+ * it is standing on the post the ordinary leash resumes, so walking away
+ * still brings it back rather than stranding it.
+ */
+function applyGotoOrder(world: World, agent: Agent, cmd: CommandedAction, log: EventLog | undefined): boolean {
+  const arrived = agent.pos.x === cmd.target.x && agent.pos.y === cmd.target.y;
+  if (arrived) {
+    cmd.stalled = undefined;
+    if (agent.behavior !== "idle") {
+      logBehaviorChange(log, world, agent, "idle");
+      agent.behavior = "idle";
+    }
+    return true; // holding the post — see this function's own doc comment
+  }
+  // `relocate` is the engine's own "walking to a place" behaviour, so the
+  // inspector's behaviour tells read right for a posted partner without a new
+  // BehaviorKind that every describeBehavior table would have to learn.
+  if (agent.behavior !== "relocate") {
+    logBehaviorChange(log, world, agent, "relocate");
+    agent.behavior = "relocate";
+  }
+  const before = agent.pos;
+  agent.pos = stepAlongPath(world, agent, cmd.target);
+  cmd.stalled = before.x === agent.pos.x && before.y === agent.pos.y ? "unreachable" : undefined;
+  return true;
+}
+
 export function applyCommandedAction(world: World, agent: Agent, log: EventLog | undefined, ctx: LevelingContext | undefined, rng: () => number): boolean {
   const cmd = agent.commandedAction;
   if (!cmd) return false;
@@ -1793,11 +1839,18 @@ export function applyCommandedAction(world: World, agent: Agent, log: EventLog |
   const commander = agent.followingId ? world.agents.find((a) => a.id === agent.followingId) : undefined;
   if (commander) {
     const leash = Math.max(Math.abs(commander.pos.x - agent.pos.x), Math.abs(commander.pos.y - agent.pos.y));
-    if (leash > COMMAND_DISENGAGE_DISTANCE) {
+    // A goto order still travelling is exempt: measuring the leash from the
+    // commander would cap how far you can post a partner at exactly the
+    // distance that makes posting worth doing. Once it has arrived the leash
+    // applies again — see `applyGotoOrder`.
+    const travelling = cmd.kind === "goto" && !(agent.pos.x === cmd.target.x && agent.pos.y === cmd.target.y);
+    if (leash > COMMAND_DISENGAGE_DISTANCE && !travelling) {
       finishOrder(agent);
       return false; // falls through to applyFollowing this same tick — "walk away" ends the fight, doesn't strand the follower
     }
   }
+
+  if (cmd.kind === "goto") return applyGotoOrder(world, agent, cmd, log);
 
   const move = agent.moves?.find((m) => m.id === cmd.moveId);
   if (!move) {

@@ -333,6 +333,17 @@ function apply(world: World, agent: Agent, action: PlayerAction, out: PlayerActi
       partner.commandedAction = { kind: "move", moveId: action.moveId, target: targetAgent?.pos ?? action.target, targetAgentId: targetAgent?.id };
       return true;
     }
+    case "commandMoveTo": {
+      const partner = world.agents.find((a) => a.id === action.agentId && a.followingId === agent.id && a.alive !== false);
+      if (!partner) return false;
+      const tile = tileAt(world, partner.layer, action.target.x, action.target.y);
+      // Refuse a post it could never stand on, at issue time. The partner can
+      // still find the way blocked later — that stalls as "unreachable" — but
+      // sending it to walk into a wall is a no we can say straight away.
+      if (!tile?.walkable) return false;
+      partner.commandedAction = { kind: "goto", target: { ...action.target } };
+      return true;
+    }
     case "commandConsume": {
       // Direct ask: "You should be able to command a Pokémon to drink or
       // eat." Same "bonded = currently following" gate `command` uses.

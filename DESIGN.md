@@ -16365,3 +16365,92 @@ Both in the same verification run, both mine:
 Neither was a bug in the feature. The tell in both cases was a *control* value
 that was also empty — `before` and `tabBefore` came back `null` too, which no
 working page could produce.
+
+## A real "command to", and ten more dishes
+
+### `commandMoveTo`: go there and hold
+
+Direct ask: *"Real command to."* The previous round's Go wedge was a
+stand-in — it cleared the current order and let the partner fall back to
+heel, which is not sending it anywhere.
+
+`CommandedAction.kind` gained `"goto"`. `applyGotoOrder` walks the partner to
+the tile and then **keeps returning true while it stands there**. That return
+is the feature, not a quirk: returning true is what stops `applyFollowing`
+running, and an order that cleared on arrival would let the partner walk
+straight back — indistinguishable from never having sent it.
+
+**The leash needed a carve-out.** `COMMAND_DISENGAGE_DISTANCE` is 10, so
+measuring it from the commander would cap how far you can post a partner at
+exactly the distance that makes posting worth doing. A goto order that is
+still *travelling* is exempt; once it is standing on the post the ordinary
+leash resumes, so walking away still brings it home rather than stranding it.
+Three unit tests pin that triple: posts beyond 10 succeed, a posted partner
+whose player wanders off comes back, and an unwalkable post is refused at
+issue time.
+
+The partner also walks to its post at party pace (`applyPartyCatchUpStep`
+handles `goto`) — being told to go somewhere and then trudging is the same
+complaint the pace clock exists to fix.
+
+**Live, seed 4242**, post 7 tiles east and 3 south, positions relative to a
+stationary player:
+
+```
+2,0  3,0  5,1  5,1  6,2  7,3  7,3  7,3  7,3  7,3  7,3  7,3  7,3  7,3
+                         ^ arrived, then held for all 10 remaining turns
+```
+
+**CONTROL:** clearing the order and waiting 20 more turns brought it back to
+distance 2 — heel. So the holding is the order doing its job, not a partner
+stuck on terrain. A `Heel` wedge appears in the order ring whenever the
+partner has an order, as the way off a post.
+
+### Ten more cooked dishes
+
+Direct ask: *"can we make more food recipes available at beginning."* All
+five existing dishes were already `knownAtStart`, so this was about count,
+not gating.
+
+**Measured first.** Across 5 seeds x 6 cave levels, counting harvestable
+tiles, nine gatherable foods had no dish at all — and the two most abundant
+crops in the game were both among them:
+
+| food | harvestable tiles | had a dish |
+|---|---|---|
+| herbs | 1528 | no |
+| shroom | 652 | no |
+| sitrus | 478 | no |
+| cheri | 462 | no |
+| wheat | 108 | no |
+| rice | 71 | no |
+| mushroom | 56 | no |
+| mango | 56 | no |
+| groundnut | 31 | no |
+
+Ten dishes now cover all of them, all `knownAtStart` for the standing reason
+(nothing in this game discovers a recipe, so `false` means permanently
+unreachable): Herb Broth, Mushroom Skewer, Roasted Nuts, Flatbread, Boiled
+Rice, Dried Mango, Spiced Berries, Mushroom Stew, Pumpkin Soup, Meat Stew.
+Heal and rapport scale with what the dish costs — a two-herb broth at
+0.10/1.8x is the one you can always make, a three-ingredient Meat Stew at
+0.30/2.8x is the best thing in the game. The five existing dishes are
+untouched. `cookedReach.test.ts` now asserts no gatherable food is left
+without a dish.
+
+### Two readings of mine that were wrong, and the controls that caught them
+
+Worth recording because both looked like findings:
+
+1. **"tomato and pumpkin never spawn, so Vegetable Stew is unreachable."**
+   They are seasonal (`seasonWindow`), and my sweep sampled worlds only at
+   generation — which is always tick 0, always spring. Asking `pickCrop`
+   across a year shows tomato in summer and pumpkin in late autumn. Not a
+   bug.
+2. **"pumpkin grows in no season at all."** That was the *fix* for #1,
+   sampled at four points across the year. `AUTUMN_SECOND_HALF` is a
+   0.13-wide window and a quarterly grid steps straight over it. At 40
+   sample points every crop grows in some season.
+
+Also worth noting: I claimed `eligibleBiomes` on crops was read by nothing.
+It is read, by `pickCrop` — I had filtered `crops.ts` out of my own grep.

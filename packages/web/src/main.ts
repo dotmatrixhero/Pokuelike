@@ -1337,7 +1337,10 @@ function openOrderRing(partner: Agent, tile: Vec2): void {
       hint: cooling ? `${move.name} is not ready` : `${name}: ${move.name} here`,
     });
   }
-  if (report?.walkable) items.push({ id: "go", label: "Go", icon: "👣", hint: `Send ${name} here` });
+  if (report?.walkable) items.push({ id: "go", label: "Go", icon: "👣", hint: `${name} goes here and holds` });
+  // Only offered when there is actually a post to leave — a Heel wedge on a
+  // partner already at heel is a button that does nothing.
+  if (partner.commandedAction) items.push({ id: "heel", label: "Heel", icon: "🦴", hint: `${name} comes back to you` });
   if (report?.terrain === "food" && (tileAt(world, viewLayer(), tile.x, tile.y)?.stock ?? 0) > 0) {
     items.push({ id: "eat", label: "Eat", icon: "🍓", hint: `${name} eats here` });
   }
@@ -1354,12 +1357,12 @@ function openOrderRing(partner: Agent, tile: Vec2): void {
       return;
     }
     if (id === "go") {
-      // No engine order for "just walk there" — the existing standing-order
-      // machinery is about behaviour modes, not destinations. Sending the
-      // partner with its own move aimed at the tile would make it swing at
-      // the ground, so this uses the follow leash instead: clear any order
-      // and it comes back to heel, which is the honest version of what the
-      // engine can actually do today. Noted in TODO.md.
+      playerAct({ kind: "commandMoveTo", agentId: partner.id, target: tile });
+      return;
+    }
+    if (id === "heel") {
+      // The way off a post. Clearing the order drops the partner back into
+      // ordinary following on its next tick.
       partner.commandedAction = undefined;
       say(`${name} falls back in beside you.`);
       return;
@@ -1989,6 +1992,11 @@ function outcomeText(player: Agent, outcome: PlayerActionOutcome): string {
       const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
       if (ok) return action.need === "drink" ? `${name} goes to drink.` : `${name} goes to eat.`;
       return action.need === "drink" ? `There is no water there for ${name}.` : `There is nothing there for ${name} to eat.`;
+    }
+    case "commandMoveTo": {
+      const partner = world.agents.find((a) => a.id === action.agentId);
+      const name = partner ? (SPECIES[partner.species]?.name ?? partner.species) : "it";
+      return ok ? `${name} heads over and holds there.` : `${name} cannot stand there.`;
     }
     case "setStandingOrder": {
       const partner = world.agents.find((a) => a.id === action.agentId);

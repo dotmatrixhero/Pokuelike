@@ -667,7 +667,7 @@ export type OrderStall =
  * is a move order and must keep working without a migration.
  */
 export type CommandedAction = {
-  kind?: "move" | "eat" | "drink";
+  kind?: "move" | "eat" | "drink" | "goto";
   /** The move to resolve. Only meaningful for a `"move"` order. */
   moveId?: string;
   target: Vec2;
@@ -834,6 +834,22 @@ export type PlayerAction =
    * — that gate is the stall this order exists to answer.
    */
   | { kind: "commandConsume"; agentId: string; need: "eat" | "drink"; target: Vec2 }
+  /**
+   * Direct ask: *"Real command to."* — a partner walks to a named tile and
+   * HOLDS it, rather than the stand-in that just dropped the current order
+   * and let it fall back to heel.
+   *
+   * Holding is the whole feature. An order that ended on arrival would send
+   * the partner somewhere and then let `applyFollowing` immediately walk it
+   * back, which is indistinguishable from not having sent it. So a `"goto"`
+   * order keeps returning true while the partner stands on its post, which
+   * is what stops the follow behaviour from running at all.
+   *
+   * It ends when you give another order, or walk far enough away that the
+   * leash (`COMMAND_DISENGAGE_DISTANCE`) brings it back — a partner posted
+   * across the map is not a partner you can lose.
+   */
+  | { kind: "commandMoveTo"; agentId: string; target: Vec2 }
   /**
    * Direct ask: "perhaps instead of campfire building, there's a command
    * button that allows you to set behaviors for each of your allies;

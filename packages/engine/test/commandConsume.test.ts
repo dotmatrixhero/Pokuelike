@@ -196,3 +196,68 @@ describe("a targeted offering sends the creature to come and take it", () => {
     expect(ally.mirrorAction).toBeUndefined();
   });
 });
+
+describe("commandMoveTo — a real 'go and stand there'", () => {
+  it("walks the partner to the tile and HOLDS it instead of drifting back to heel", () => {
+    const { world, me, ally } = scene();
+    expect(applyPlayerAction(world, me, { kind: "commandMoveTo", agentId: ally.id, target: { x: 14, y: 12 } })).toBe(true);
+    expect(ally.commandedAction?.kind).toBe("goto");
+
+    for (let i = 0; i < 40; i++) {
+      applyCommandedAction(world, ally, new EventLog(), undefined, rng);
+      world.tick++;
+    }
+    expect(ally.pos).toEqual({ x: 14, y: 12 });
+
+    // The half that makes it a real order: it is STILL posted, and
+    // `applyCommandedAction` keeps claiming the tick, which is what stops
+    // `applyFollowing` walking it back. An order that cleared on arrival
+    // would be indistinguishable from never having sent it.
+    expect(ally.commandedAction?.kind).toBe("goto");
+    for (let i = 0; i < 20; i++) {
+      expect(applyCommandedAction(world, ally, new EventLog(), undefined, rng)).toBe(true);
+      world.tick++;
+    }
+    expect(ally.pos).toEqual({ x: 14, y: 12 });
+  });
+
+  it("can be posted further away than the leash would otherwise allow", () => {
+    const { world, me, ally } = scene();
+    // Beyond COMMAND_DISENGAGE_DISTANCE from the player, deliberately.
+    expect(applyPlayerAction(world, me, { kind: "commandMoveTo", agentId: ally.id, target: { x: 18, y: 18 } })).toBe(true);
+    for (let i = 0; i < 60; i++) {
+      applyCommandedAction(world, ally, new EventLog(), undefined, rng);
+      world.tick++;
+      if (ally.pos.x === 18 && ally.pos.y === 18) break;
+    }
+    expect(ally.pos).toEqual({ x: 18, y: 18 });
+  });
+
+  it("but once posted, walking away still brings it home rather than stranding it", () => {
+    const { world, me, ally } = scene();
+    ally.pos = { x: 14, y: 5 };
+    ally.commandedAction = { kind: "goto", target: { x: 14, y: 5 } }; // already on its post
+    me.pos = { x: 1, y: 1 }; // the player wanders off, well past the leash
+    expect(applyCommandedAction(world, ally, new EventLog(), undefined, rng)).toBe(false);
+    expect(ally.commandedAction).toBeUndefined();
+  });
+
+  it("refuses a post it could never stand on", () => {
+    const { world, me, ally } = scene();
+    setTile(world, "surface", 12, 5, "wall");
+    expect(applyPlayerAction(world, me, { kind: "commandMoveTo", agentId: ally.id, target: { x: 12, y: 5 } })).toBe(false);
+    expect(ally.commandedAction).toBeUndefined();
+  });
+
+  it("stalls as unreachable when the way is blocked, rather than looking healthy", () => {
+    const { world, me, ally } = scene();
+    // Wall the partner into its own tile.
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+      setTile(world, "surface", ally.pos.x + dx, ally.pos.y + dy, "wall");
+    }
+    setTile(world, "surface", 14, 12, "floor");
+    applyPlayerAction(world, me, { kind: "commandMoveTo", agentId: ally.id, target: { x: 14, y: 12 } });
+    applyCommandedAction(world, ally, new EventLog(), undefined, rng);
+    expect(ally.commandedAction?.stalled).toBe("unreachable");
+  });
+});

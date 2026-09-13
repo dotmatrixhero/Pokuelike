@@ -12716,11 +12716,10 @@ rapport and all that for a unit."*
 
 ### Still open from the radial round
 
-- [ ] **"Go" in the order ring is not really "go there".** There is no engine
-      order for "walk to this tile" — `commandedAction` is about a move, and
-      `standingOrder` is about behaviour modes. Today the wedge just clears
-      the order so the partner falls back to heel, and says so. A real
-      `commandMoveTo` is the honest fix.
+- [x] **"Go" is a real order now.** `commandMoveTo` / `kind: "goto"` walks
+      the partner there and HOLDS it; a `Heel` wedge is the way off the post.
+      The leash is carved out while travelling so you can post further than
+      10 tiles, and resumes once it has arrived.
 - [ ] The order ring lists moves on cooldown with an hourglass and refuses
       them on tap, rather than hiding them. Kept visible so the ring does not
       reshuffle under a thumb between turns — worth a look in play.
@@ -12729,3 +12728,27 @@ rapport and all that for a unit."*
       chip, but it is still a mode, and modes are worth re-checking in play.
 - [ ] `bondedPartnersInZone` with a large party would make a crowded ring.
       Fine at 1–4; past ~6 wedges a radial stops being readable.
+
+### Real command-to and more dishes (this round)
+
+- [x] `commandMoveTo` — go there and hold. Live: arrived at +7,+3 and held
+      for all 10 remaining turns; control (order cleared) walked back to
+      heel at distance 2.
+- [x] Ten more cooked dishes, covering all nine gatherable foods that had
+      none — including herbs (1528 harvestable tiles) and shroom (652), the
+      two most abundant crops in the game.
+- [x] `cookedReach.test.ts` asserts no gatherable food is orphaned, every
+      dish is knownAtStart, and every crop a dish names grows in some season.
+
+### Still open
+
+- [ ] A posted partner holds its tile through anything short of the leash —
+      it will not break off to fight something that walks up to it, because
+      the goto order claims the tick. Whether a posted guard SHOULD fight is
+      a design call, not obviously a bug. Flagging rather than deciding.
+- [ ] The ten new dishes' heal/rapport numbers are fresh and unplaytested.
+      Herb Broth at 0.10/1.8x is deliberately the floor and Meat Stew at
+      0.30/2.8x the ceiling; the five older dishes were left alone.
+- [ ] Nothing still discovers any `knownAtStart: false` recipe
+      (axe, machete, knappedFlint, flintKnife, bedroll). Unchanged, and
+      still the oldest open hole in crafting.

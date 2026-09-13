@@ -129,6 +129,30 @@ export const ITEMS: Record<string, ItemDef> = {
   // protein, not a berry) is the reason to actually carry it back to a
   // fire instead of just eating it raw.
   roastedMeat: { key: "roastedMeat", name: "Roasted Meat", weight: 1, cooked: { healFraction: 0.25, rapportMultiplier: 2.5 } },
+  // Direct ask: "can we make more food recipes available at beginning."
+  //
+  // Measured first, across 5 seeds x 6 cave levels, counting harvestable
+  // tiles: nine gatherable foods had no dish at all — herbs (1528 tiles),
+  // shroom (652), sitrus (478), cheri (462), wheat (108), rice (71),
+  // mushroom (56), mango (56), groundnut (31). The two most abundant crops
+  // in the game were both among them. That is the same "exists in the data,
+  // never used" shape this project keeps finding, just on the input side.
+  //
+  // Heal/rapport scale with how much the dish costs to make, so the ladder
+  // stays legible: a two-herb broth is the cheap one you can always make, a
+  // three-ingredient meat stew is the best thing in the game. These are
+  // fresh numbers for new content, not a retune of the five dishes above —
+  // those are untouched.
+  herbBroth: { key: "herbBroth", name: "Herb Broth", weight: 1, cooked: { healFraction: 0.1, rapportMultiplier: 1.8 } },
+  mushroomSkewer: { key: "mushroomSkewer", name: "Mushroom Skewer", weight: 1, cooked: { healFraction: 0.12, rapportMultiplier: 2 } },
+  roastedNuts: { key: "roastedNuts", name: "Roasted Nuts", weight: 1, cooked: { healFraction: 0.12, rapportMultiplier: 2 } },
+  flatbread: { key: "flatbread", name: "Flatbread", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 1.9 } },
+  boiledRice: { key: "boiledRice", name: "Boiled Rice", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 1.9 } },
+  driedMango: { key: "driedMango", name: "Dried Mango", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2.3 } },
+  spicedBerries: { key: "spicedBerries", name: "Spiced Berries", weight: 1, cooked: { healFraction: 0.15, rapportMultiplier: 2.4 } },
+  mushroomStew: { key: "mushroomStew", name: "Mushroom Stew", weight: 1, cooked: { healFraction: 0.18, rapportMultiplier: 2.1 } },
+  pumpkinSoup: { key: "pumpkinSoup", name: "Pumpkin Soup", weight: 1, cooked: { healFraction: 0.22, rapportMultiplier: 2.4 } },
+  meatStew: { key: "meatStew", name: "Meat Stew", weight: 1, cooked: { healFraction: 0.3, rapportMultiplier: 2.8 } },
   // Non-combat flavor items — direct ask: "waterskin, bedroll, coin pouch."
   // Waterskin is the one with a real mechanic on top: "make waterskin when
   // held, allow gather from water sources and filling it up" —
@@ -228,6 +252,20 @@ export const RECIPES: Record<string, RecipeDef> = {
   // would make it exactly the "exists in the data, never fires" bug this
   // project keeps finding and fixing.
   roastedMeat: recipe("roastedMeat", "Roasted Meat", [["meat", 1]], 6, true, COOKED_SERVINGS, true),
+  // Ten more dishes, covering every gatherable food that had none. All
+  // `knownAtStart: true`, for the same reason the five above are: nothing in
+  // the game discovers a recipe, so `false` means permanently unreachable,
+  // not "found later". Turn costs rise with how good the dish is.
+  herbBroth: recipe("herbBroth", "Herb Broth", [["herbs", 2]], 3, true, COOKED_SERVINGS, true),
+  mushroomSkewer: recipe("mushroomSkewer", "Mushroom Skewer", [["shroom", 1], ["deadwood", 1]], 4, true, COOKED_SERVINGS, true),
+  roastedNuts: recipe("roastedNuts", "Roasted Nuts", [["groundnut", 2]], 4, true, COOKED_SERVINGS, true),
+  flatbread: recipe("flatbread", "Flatbread", [["wheat", 2]], 5, true, COOKED_SERVINGS, true),
+  boiledRice: recipe("boiledRice", "Boiled Rice", [["rice", 2]], 5, true, COOKED_SERVINGS, true),
+  driedMango: recipe("driedMango", "Dried Mango", [["mango", 2]], 5, true, COOKED_SERVINGS, true),
+  spicedBerries: recipe("spicedBerries", "Spiced Berries", [["cheri", 1], ["sitrus", 1]], 5, true, COOKED_SERVINGS, true),
+  mushroomStew: recipe("mushroomStew", "Mushroom Stew", [["mushroom", 2]], 5, true, COOKED_SERVINGS, true),
+  pumpkinSoup: recipe("pumpkinSoup", "Pumpkin Soup", [["pumpkin", 1], ["herbs", 1]], 6, true, COOKED_SERVINGS, true),
+  meatStew: recipe("meatStew", "Meat Stew", [["meat", 1], ["herbs", 1], ["potato", 1]], 8, true, COOKED_SERVINGS, true),
   // Waterskin: known at start, same tier as torch/club — water is core
   // survival, not a discovery-gated craft.
   waterskin: recipe("waterskin", "Waterskin", [["cordage", 1], ["fiber", 2]], 6, true),
