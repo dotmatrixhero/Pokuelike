@@ -413,4 +413,9 @@ export const LEVELING_CONTEXT: LevelingContext = {
   getProfile: profileFromDexEntry,
   resolveMove,
   baseSpeciesOf,
+  // The dex is far larger than the curated roster, and evolution targets come
+  // from the dex — so without this, `dratini` evolves into `dragonair`, which
+  // `SPECIES` has no entry for, and the next attempt to spawn that agent
+  // throws. See `LevelingContext.isPlayableSpecies`.
+  isPlayableSpecies: (speciesId) => speciesId in SPECIES,
 };

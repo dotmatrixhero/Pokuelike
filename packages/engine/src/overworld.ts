@@ -639,7 +639,19 @@ export function promoteZone(mw: MacroWorld, row: number, col: number, ctx: Immig
       // comment), prey spans more of its real population age structure.
       const individualSpread = speciesInfo.singleStage ? 16 : speciesInfo.isPredator ? 4 : 8;
       const level = Math.max(1, Math.round(aggregate.avgLevel + (mw.rng() - 0.5) * individualSpread));
-      const agent: Agent = ctx.spawnAgent(aggregate.species, `${aggregate.species}-${region.key}-invented-${mw.tick}-${i}`, pos, level, mw.rng);
+      // Defence in depth behind `LevelingContext.isPlayableSpecies`: a zone
+      // aggregate can name a species the roster cannot build (a pre-existing
+      // agent that evolved off-roster before that guard existed, or a stale
+      // saved world). Losing one invented agent from a population ESTIMATE is
+      // a rounding error; throwing here took the entire zone promotion down
+      // with an "Unknown species" error the player met as a crash on walking
+      // into that zone.
+      let agent: Agent;
+      try {
+        agent = ctx.spawnAgent(aggregate.species, `${aggregate.species}-${region.key}-invented-${mw.tick}-${i}`, pos, level, mw.rng);
+      } catch {
+        continue;
+      }
       agent.needs = {
         hunger: jitteredNeed(aggregate.avgHunger, mw.rng),
         thirst: jitteredNeed(aggregate.avgThirst, mw.rng),

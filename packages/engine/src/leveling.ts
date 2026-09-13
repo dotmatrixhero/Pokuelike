@@ -132,6 +132,21 @@ export interface LevelingContext {
    * parent's own species when absent.
    */
   baseSpeciesOf?(speciesId: string): string;
+  /**
+   * Is `speciesId` one the game can actually spawn — i.e. present in the
+   * data package's curated `SPECIES` roster?
+   *
+   * The dex is much larger than the roster, and evolution targets come from
+   * the DEX. So a roster species could evolve into one the roster has never
+   * heard of: `dratini` (in the roster) evolves to `dragonair` (not in it).
+   * Nothing caught that until the resulting agent had to be respawned, at
+   * which point `spawnAgent` threw "Unknown species: dragonair" and took the
+   * whole zone promotion down with it.
+   *
+   * Optional, defaulting to "yes" when absent, so bare-engine tests with no
+   * dex/roster data keep working — same treatment as `baseSpeciesOf` above.
+   */
+  isPlayableSpecies?(speciesId: string): boolean;
 }
 
 /**
@@ -651,6 +666,11 @@ export function resolveSpawnEvolution(speciesId: string, level: number, ctx: Lev
       }
     }
     if (!evolved) return species;
+    // Never resolve into a species the roster cannot spawn — see
+    // `LevelingContext.isPlayableSpecies`. Stopping here leaves the agent as
+    // the last playable form in its line, which is correct: the line simply
+    // does not go any further in this game.
+    if (ctx.isPlayableSpecies?.(evo.targetSpeciesId) === false) return species;
     species = evo.targetSpeciesId;
   }
 }
@@ -735,7 +755,10 @@ export function grantExp(
     // continues to the next level (species unchanged), and `evo` gets
     // re-evaluated fresh next iteration — a fresh independent roll every
     // level it stays eligible, with no extra state to track.
-    if (evo && rng() >= EVOLUTION_DECLINE_CHANCE) {
+    // Same roster guard as `resolveSpawnEvolution` — an agent must never end
+    // up as a species that cannot be respawned later.
+    const evoPlayable = evo ? ctx.isPlayableSpecies?.(evo.targetSpeciesId) !== false : false;
+    if (evo && evoPlayable && rng() >= EVOLUTION_DECLINE_CHANCE) {
       const fromSpecies = agent.species;
       agent.species = evo.targetSpeciesId;
       const newProfile = ctx.getProfile(agent.species);
