@@ -3880,6 +3880,26 @@ export const MOVES: Record<string, MoveSpec> = {
       },
     },
   },
+  /**
+   * MOVES_AND_TOOLS.md's tool table: "Axe takes the felling slice, plus
+   * Chop." The axe's `fell` terrain move shipped; this combat half never
+   * did, leaving the axe the one weapon-shaped tool that could not fight
+   * at all (knife -> Scratch, club -> Pound, machete -> clear + Slash).
+   * Direct ask: "Sure axe should give you cut though."
+   *
+   * Deliberately NOT Slash — that is the machete's companion, and the doc's
+   * split ("the slice rule at its clearest") gives each tool a distinct
+   * one. No skill tree: every tool grant today is an unmodified base move,
+   * same as Ember/Scratch/Pound on the torch/knife/club.
+   */
+  karateChop: {
+    id: "karateChop",
+    name: "Karate Chop",
+    shape: { kind: "point" },
+    ...moveCanon("KARATE_CHOP"),
+    cooldownTicks: 4,
+    range: { min: 0, max: 1 },
+  },
   scratch: {
     id: "scratch",
     name: "Scratch",

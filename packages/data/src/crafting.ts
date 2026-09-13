@@ -88,7 +88,11 @@ export const ITEMS: Record<string, ItemDef> = {
     weight: 4,
     slot: "held",
     threat: 0.4,
-    grantsMoves: [terrainMove("fell", "Fell", { from: ["tree"], to: "floor", yields: "deadwood" }, 10)],
+    // MOVES_AND_TOOLS.md: "Axe takes the felling slice, plus Chop." Only the
+    // felling half shipped, which left the axe the one weapon-shaped tool
+    // with no combat move at all. Karate Chop is the doc's own companion
+    // for it — not Slash, which belongs to the machete below.
+    grantsMoves: [terrainMove("fell", "Fell", { from: ["tree"], to: "floor", yields: "deadwood" }, 10), MOVES.karateChop!],
   },
   // Machete -> Cut's clearing slice, plus Slash (matches the doc's table
   // exactly: "Machete takes the clearing slice, plus Slash").

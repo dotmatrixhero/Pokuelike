@@ -130,13 +130,25 @@ describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
     expect(ITEMS.torch!.light).toBe(true);
   });
 
-  it("axe fells trees only; machete clears brush and grants a real, vanilla Slash — the slice rule, and no tool gets all of Cut", () => {
+  it("axe fells trees and grants a real, vanilla Karate Chop; machete clears brush and grants a real, vanilla Slash — the slice rule, and no tool gets all of Cut", () => {
     const axeFell = ITEMS.axe!.grantsMoves!.find((m) => m.terrainEffect)!;
     expect(axeFell.terrainEffect!.from).toEqual(["tree"]);
     expect(axeFell.terrainEffect!.to).toBe("floor");
     expect(axeFell.terrainEffect!.yields).toBe("deadwood");
-    // Axe grants no damage-dealing move — the felling slice only.
-    expect(ITEMS.axe!.grantsMoves!.every((m) => m.power === 0)).toBe(true);
+    // This assertion used to read "axe grants no damage-dealing move — the
+    // felling slice only", which contradicted MOVES_AND_TOOLS.md's own tool
+    // table ("Axe takes the felling slice, plus Chop" / "Axe | Cut · Chop |
+    // Cut · Karate Chop"). The axe was the only weapon-shaped tool you could
+    // not fight with at all, while knife/club/machete each got a real move.
+    // Resolved by direct ask — "Sure axe should give you cut though" — in
+    // the doc's favour.
+    const axeChop = ITEMS.axe!.grantsMoves!.find((m) => m.id === "karateChop")!;
+    expect(axeChop).toBeDefined();
+    expect(axeChop.power).toBe(MOVES.karateChop!.power);
+    expect(axeChop.cooldownTicks).toBe(MOVES.karateChop!.cooldownTicks);
+    // Deliberately NOT Slash: that is the machete's companion, and the split
+    // gives each tool a distinct one.
+    expect(ITEMS.axe!.grantsMoves!.some((m) => m.id === "slash")).toBe(false);
 
     const macheteClear = ITEMS.machete!.grantsMoves!.find((m) => m.terrainEffect)!;
     expect(macheteClear.terrainEffect!.to).toBe("floor");
@@ -145,6 +157,18 @@ describe("MOVES_AND_TOOLS.md: tool-granted moves", () => {
     const macheteSlash = ITEMS.machete!.grantsMoves!.find((m) => m.id === "slash")!;
     expect(macheteSlash.power).toBe(MOVES.slash!.power);
     expect(macheteSlash.cooldownTicks).toBe(MOVES.slash!.cooldownTicks);
+
+    // The rule the test is named for, asserted directly instead of by proxy:
+    // Cut does three things (damage, fell trees, clear foliage) and no single
+    // tool does all three. A tool-granted damage move does not break this —
+    // Karate Chop and Slash are separate moves, not Cut's damage slice.
+    for (const key of ["axe", "machete", "flintKnife"] as const) {
+      const granted = ITEMS[key]!.grantsMoves ?? [];
+      const damages = granted.some((m) => m.power > 0);
+      const fells = granted.some((m) => m.terrainEffect?.from?.includes("tree"));
+      const clears = granted.some((m) => m.terrainEffect?.from?.some((t) => t !== "tree"));
+      expect([damages, fells, clears].filter(Boolean).length).toBeLessThan(3);
+    }
   });
 
   it("axe and machete are eventually reachable from nothing but bare-hand materials (learned later, like the flint knife)", () => {
